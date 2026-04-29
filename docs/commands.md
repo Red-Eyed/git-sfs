@@ -2,7 +2,7 @@
 
 ## merk init
 
-Create initial project files:
+Create initial project files, including a commented `dataset.yaml` starter file:
 
 ```sh
 merk init

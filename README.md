@@ -104,7 +104,7 @@ The installer detects macOS/Linux and arm64/x86_64 automatically.
 
 ## Quick Start
 
-Create project metadata:
+Create project metadata. This creates a commented `dataset.yaml` starter file you can edit in place:
 
 ```sh
 merk init

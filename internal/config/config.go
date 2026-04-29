@@ -46,14 +46,29 @@ func WriteDefault(path string) error {
 	return nil
 }
 
-const defaultYAML = `version: 1
+const defaultYAML = `# merk dataset config. Commit this file to Git.
+# Do not put local cache paths, secrets, tokens, or machine-specific paths here.
+
+version: 1
 
 remotes:
+  # The default remote is used by merk push and merk pull when no remote is named.
   default:
+    # Supported today: rsync, ssh, filesystem.
+    # Use rsync for a normal host:path destination.
     type: rsync
     url: user@host:/mnt/datasets/project
 
+  # Examples you can copy by removing the leading # characters.
+  # backup:
+  #   type: ssh
+  #   url: user@host:/mnt/datasets/project
+  # local:
+  #   type: filesystem
+  #   url: /mnt/datasets/project
+
 settings:
+  # Only sha256 is supported in v1.
   algorithm: sha256
 `
 

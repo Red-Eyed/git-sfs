@@ -4,7 +4,7 @@
 
 ## dataset.yaml
 
-`dataset.yaml` is committed to Git:
+`dataset.yaml` is committed to Git. `merk init` writes this as a commented starter file so the important choices are visible without opening the docs:
 
 ```yaml
 version: 1

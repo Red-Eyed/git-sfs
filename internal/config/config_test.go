@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,6 +64,30 @@ func TestLoadDatasetErrors(t *testing.T) {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dataset.yaml")
+	if err := WriteDefault(path); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, want := range []string{
+		"# merk dataset config",
+		"type: rsync",
+		"url: user@host:/mnt/datasets/project",
+		"#   type: ssh",
+		"#   type: filesystem",
+		"algorithm: sha256",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("default config missing %q:\n%s", want, text)
+		}
 	}
 }
 
