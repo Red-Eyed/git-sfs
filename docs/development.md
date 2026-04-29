@@ -23,8 +23,8 @@ The `Justfile` defaults to:
 It also uses writable caches in this workspace:
 
 ```text
-/private/tmp/merk-go-cache
-/private/tmp/merk-go-modcache
+/private/tmp/git-sfs-go-cache
+/private/tmp/git-sfs-go-modcache
 ```
 
 Override when needed:
@@ -66,10 +66,10 @@ just release-snapshot
 Expected archives:
 
 ```text
-dist/merk-snapshot-darwin-amd64.tar.gz
-dist/merk-snapshot-darwin-arm64.tar.gz
-dist/merk-snapshot-linux-amd64.tar.gz
-dist/merk-snapshot-linux-arm64.tar.gz
+dist/git-sfs-snapshot-darwin-amd64.tar.gz
+dist/git-sfs-snapshot-darwin-arm64.tar.gz
+dist/git-sfs-snapshot-linux-amd64.tar.gz
+dist/git-sfs-snapshot-linux-arm64.tar.gz
 ```
 
 Clean generated files:

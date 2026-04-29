@@ -1,6 +1,6 @@
 go := env_var_or_default("GO", "/Users/vadstup/.local/go/bin/go")
-gocache := env_var_or_default("GOCACHE", "/private/tmp/merk-go-cache")
-gomodcache := env_var_or_default("GOMODCACHE", "/private/tmp/merk-go-modcache")
+gocache := env_var_or_default("GOCACHE", "/private/tmp/git-sfs-go-cache")
+gomodcache := env_var_or_default("GOMODCACHE", "/private/tmp/git-sfs-go-modcache")
 
 default:
     just --list
@@ -16,7 +16,7 @@ coverage:
     env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} tool cover -func=coverage.out
 
 build:
-    env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} build ./cmd/merk
+    env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} build ./cmd/git-sfs
 
 smoke:
     env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash scripts/smoke.sh
@@ -28,4 +28,4 @@ release-snapshot:
     env GO={{go}} GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} sh scripts/build-release.sh snapshot dist
 
 clean:
-    rm -rf dist merk coverage.out
+    rm -rf dist git-sfs coverage.out

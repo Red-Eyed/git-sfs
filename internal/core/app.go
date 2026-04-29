@@ -9,14 +9,14 @@ import (
 	"sort"
 	"strings"
 
-	"merk/internal/cache"
-	"merk/internal/config"
-	"merk/internal/hash"
-	"merk/internal/localstate"
-	"merk/internal/lock"
-	"merk/internal/materialize"
-	"merk/internal/merkpath"
-	"merk/internal/remote"
+	"git-sfs/internal/cache"
+	"git-sfs/internal/config"
+	"git-sfs/internal/hash"
+	"git-sfs/internal/localstate"
+	"git-sfs/internal/lock"
+	"git-sfs/internal/materialize"
+	"git-sfs/internal/remote"
+	"git-sfs/internal/sfspath"
 )
 
 type App struct {
@@ -53,7 +53,7 @@ var issueKinds = []string{
 	"invalid config",
 }
 
-// Init creates the tracked project config and the untracked .merk workspace.
+// Init creates the tracked project config and the untracked .git-sfs workspace.
 func (a App) Init(ctx context.Context, force bool) error {
 	repo, err := localstate.ResolveRepo()
 	if err != nil {
@@ -63,7 +63,7 @@ func (a App) Init(ctx context.Context, force bool) error {
 	if _, err := os.Stat(cfgPath); err == nil && !force {
 		return fmt.Errorf("%s already exists; use --force to overwrite", a.ConfigPath)
 	}
-	if err := localstate.InitMerk(repo); err != nil {
+	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
@@ -72,8 +72,8 @@ func (a App) Init(ctx context.Context, force bool) error {
 	if err := config.WriteDefault(cfgPath); err != nil {
 		return err
 	}
-	c := cache.Cache{Root: filepath.Join(repo, ".merk", ".cache")}
-	if a.CacheFlag != "" || os.Getenv("MERK_CACHE") != "" {
+	c := cache.Cache{Root: filepath.Join(repo, ".git-sfs", ".cache")}
+	if a.CacheFlag != "" || os.Getenv("GIT_SFS_CACHE") != "" {
 		var err error
 		c, err = localstate.ResolveCache(repo, a.CacheFlag)
 		if err != nil {
@@ -89,7 +89,7 @@ func (a App) Init(ctx context.Context, force bool) error {
 	if err := ensureGitignore(repo); err != nil {
 		return err
 	}
-	a.say("initialized merk repository")
+	a.say("initialized git-sfs repository")
 	return nil
 }
 
@@ -100,7 +100,7 @@ func (a App) Setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := localstate.InitMerk(repo); err != nil {
+	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
 	}
 	if err := c.Init(); err != nil {
@@ -111,12 +111,12 @@ func (a App) Setup(ctx context.Context) error {
 		return err
 	}
 	defer l.Release()
-	links, err := collectMerkSymlinks(repo, ".")
+	links, err := collectGitSFSSymlinks(repo, ".")
 	if err != nil {
 		return err
 	}
 	for _, l := range links {
-		h, _, err := merkpath.ParseGitSymlink(repo, l)
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
 			return err
 		}
@@ -130,14 +130,14 @@ func (a App) Setup(ctx context.Context) error {
 	return nil
 }
 
-// Add converts regular files into merk symlinks after copying their bytes into
+// Add converts regular files into git-sfs symlinks after copying their bytes into
 // the local content-addressed cache.
 func (a App) Add(ctx context.Context, paths []string) error {
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
 	}
-	if err := localstate.InitMerk(repo); err != nil {
+	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
 	}
 	if err := c.Init(); err != nil {
@@ -181,7 +181,7 @@ func (a App) Add(ctx context.Context, paths []string) error {
 		if err := materialize.Link(repo, c, h); err != nil {
 			return err
 		}
-		target, err := merkpath.GitLinkTarget(repo, file, h)
+		target, err := sfspath.GitLinkTarget(repo, file, h)
 		if err != nil {
 			return err
 		}
@@ -242,12 +242,12 @@ func (a App) Materialize(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	links, err := collectMerkSymlinks(repo, path)
+	links, err := collectGitSFSSymlinks(repo, path)
 	if err != nil {
 		return err
 	}
 	for _, l := range links {
-		h, _, err := merkpath.ParseGitSymlink(repo, l)
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
 			return err
 		}
@@ -263,12 +263,12 @@ func (a App) Dematerialize(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	links, err := collectMerkSymlinks(repo, path)
+	links, err := collectGitSFSSymlinks(repo, path)
 	if err != nil {
 		return err
 	}
 	for _, l := range links {
-		h, _, err := merkpath.ParseGitSymlink(repo, l)
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
 			return err
 		}
@@ -294,13 +294,13 @@ func (a App) Push(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	links, err := collectMerkSymlinks(repo, ".")
+	links, err := collectGitSFSSymlinks(repo, ".")
 	if err != nil {
 		return err
 	}
 	seen := map[hash.Hash]bool{}
 	for _, l := range links {
-		h, _, err := merkpath.ParseGitSymlink(repo, l)
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
 			return err
 		}
@@ -344,12 +344,12 @@ func (a App) Pull(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	links, err := collectMerkSymlinks(repo, path)
+	links, err := collectGitSFSSymlinks(repo, path)
 	if err != nil {
 		return err
 	}
 	for _, l := range links {
-		h, _, err := merkpath.ParseGitSymlink(repo, l)
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
 			return err
 		}
@@ -380,13 +380,13 @@ func (a App) GC(ctx context.Context, opts GCOptions) error {
 	if !opts.Files {
 		opts.Files = true
 	}
-	links, err := collectMerkSymlinks(repo, ".")
+	links, err := collectGitSFSSymlinks(repo, ".")
 	if err != nil {
 		return err
 	}
 	live := map[string]bool{}
 	for _, l := range links {
-		h, _, err := merkpath.ParseGitSymlink(repo, l)
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
 			return err
 		}
@@ -445,7 +445,7 @@ func scan(repo string, c cache.Cache) (statusReport, error) {
 			}
 			return nil
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, path)
+		h, _, err := sfspath.ParseGitSymlink(repo, path)
 		if err != nil {
 			report.Issues = append(report.Issues, issue{
 				Kind:   "broken git symlink",
@@ -528,7 +528,7 @@ func pluralKind(kind string) string {
 	}
 }
 
-func collectMerkSymlinks(repo, path string) ([]string, error) {
+func collectGitSFSSymlinks(repo, path string) ([]string, error) {
 	root := absFromRepo(repo, path)
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -545,7 +545,7 @@ func collectMerkSymlinks(repo, path string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if info.Mode()&os.ModeSymlink != 0 && merkpath.IsMerkSymlink(repo, path) {
+		if info.Mode()&os.ModeSymlink != 0 && sfspath.IsSFSSymlink(repo, path) {
 			out = append(out, path)
 		}
 		return nil
@@ -573,7 +573,7 @@ func ensureGitignore(repo string) error {
 		seen[strings.TrimSpace(line)] = true
 	}
 	var missing []string
-	for _, entry := range []string{".merk/cache", ".merk/.cache"} {
+	for _, entry := range []string{".git-sfs/cache", ".git-sfs/.cache"} {
 		if !seen[entry] {
 			missing = append(missing, entry)
 		}
@@ -620,10 +620,10 @@ func removeUnreferenced(root string, live map[string]bool, dry bool, w io.Writer
 func shouldSkip(repo, path string) bool {
 	base := filepath.Base(path)
 	return base == ".git" ||
-		path == filepath.Join(repo, ".merk") ||
-		path == filepath.Join(repo, ".merk/config.toml") ||
+		path == filepath.Join(repo, ".git-sfs") ||
+		path == filepath.Join(repo, ".git-sfs/config.toml") ||
 		path == filepath.Join(repo, ".gitignore") ||
-		strings.Contains(path, string(filepath.Separator)+".merk"+string(filepath.Separator))
+		strings.Contains(path, string(filepath.Separator)+".git-sfs"+string(filepath.Separator))
 }
 
 func absFromRepo(repo, p string) string {

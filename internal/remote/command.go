@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"merk/internal/hash"
+	"git-sfs/internal/hash"
 )
 
 type rsyncRemote struct{ url string }
@@ -39,7 +39,7 @@ func (r rsyncRemote) remotePath(h hash.Hash) string {
 }
 
 func (r rsyncRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
-	tmp, err := os.CreateTemp("", "merk-remote-check-*")
+	tmp, err := os.CreateTemp("", "git-sfs-remote-check-*")
 	if err != nil {
 		return false, err
 	}
@@ -133,7 +133,7 @@ func remoteLocalPath(url string) string {
 }
 
 func sshSh(ctx context.Context, url, script string, args ...string) error {
-	cmdArgs := []string{sshHost(url), "sh", "-c", script, "merk"}
+	cmdArgs := []string{sshHost(url), "sh", "-c", script, "git-sfs"}
 	cmdArgs = append(cmdArgs, args...)
 	return run(ctx, "ssh", cmdArgs...)
 }

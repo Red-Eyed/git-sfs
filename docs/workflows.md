@@ -5,32 +5,32 @@
 ```sh
 git init my-project
 cd my-project
-merk --cache /mnt/shared/merk-cache init
+git-sfs --cache /mnt/shared/git-sfs-cache init
 ```
 
-Edit `.merk/config.toml` and set the remote.
+Edit `.git-sfs/config.toml` and set the remote.
 
 ```sh
-git add .merk/config.toml .gitignore
-git commit -m "initialize merk"
+git add .git-sfs/config.toml .gitignore
+git commit -m "initialize git-sfs"
 ```
 
 ## Add A Single Large File
 
 ```sh
-merk add data/train-000.tar.zst
+git-sfs add data/train-000.tar.zst
 git add data/train-000.tar.zst
 git commit -m "track train shard"
-merk push
+git-sfs push
 ```
 
 ## Add A Directory
 
 ```sh
-merk add data/
+git-sfs add data/
 git add data/
 git commit -m "track dataset"
-merk push
+git-sfs push
 ```
 
 ## Clone And Pull Files
@@ -38,15 +38,15 @@ merk push
 ```sh
 git clone <repo>
 cd <repo>
-merk --cache /mnt/shared/merk-cache setup
-merk pull
-merk verify
+git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs pull
+git-sfs verify
 ```
 
 ## Pull One File
 
 ```sh
-merk pull data/train-000.tar.zst
+git-sfs pull data/train-000.tar.zst
 ```
 
 Only the cached file required by that Git symlink is downloaded.
@@ -54,7 +54,7 @@ Only the cached file required by that Git symlink is downloaded.
 ## Pull One Directory
 
 ```sh
-merk pull data/train/
+git-sfs pull data/train/
 ```
 
 Only files referenced by symlinks under that directory are downloaded.
@@ -62,14 +62,14 @@ Only files referenced by symlinks under that directory are downloaded.
 ## Use A Temporary Cache
 
 ```sh
-MERK_CACHE=/tmp/merk-cache merk setup
-MERK_CACHE=/tmp/merk-cache merk pull data/sample.bin
+GIT_SFS_CACHE=/tmp/git-sfs-cache git-sfs setup
+GIT_SFS_CACHE=/tmp/git-sfs-cache git-sfs pull data/sample.bin
 ```
 
 ## Use A Shared Machine Cache
 
 ```sh
-merk --cache /mnt/shared/merk-cache setup
+git-sfs --cache /mnt/shared/git-sfs-cache setup
 ```
 
 Multiple clones can use the same cache path if filesystem permissions allow it.
@@ -77,35 +77,35 @@ Multiple clones can use the same cache path if filesystem permissions allow it.
 ## Move To A New Cache
 
 ```sh
-rm -f .merk/cache
-merk --cache /new/cache/path setup
-merk pull
+rm -f .git-sfs/cache
+git-sfs --cache /new/cache/path setup
+git-sfs pull
 ```
 
 ## Repair Broken Cache Binding
 
 ```sh
-merk setup
-merk materialize
-merk verify
+git-sfs setup
+git-sfs materialize
+git-sfs verify
 ```
 
-If cached files exist, `.merk/cache` can be rebound without downloading.
+If cached files exist, `.git-sfs/cache` can be rebound without downloading.
 
-## Recover After Deleting .merk
+## Recover After Deleting .git-sfs
 
 ```sh
-rm -rf .merk/cache
-merk --cache /mnt/shared/merk-cache setup
-merk materialize
-merk verify
+rm -rf .git-sfs/cache
+git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs materialize
+git-sfs verify
 ```
 
 ## Recover After Cache Loss
 
 ```sh
-merk pull
-merk verify
+git-sfs pull
+git-sfs verify
 ```
 
 If the remote has the files, missing cached files are downloaded again.
@@ -113,25 +113,25 @@ If the remote has the files, missing cached files are downloaded again.
 ## Check In CI
 
 ```sh
-merk setup
-merk verify
+git-sfs setup
+git-sfs verify
 ```
 
-Use a CI cache path through `MERK_CACHE`:
+Use a CI cache path through `GIT_SFS_CACHE`:
 
 ```sh
-MERK_CACHE="$PWD/.merk-cache" merk setup
-MERK_CACHE="$PWD/.merk-cache" merk verify
+GIT_SFS_CACHE="$PWD/.git-sfs-cache" git-sfs setup
+GIT_SFS_CACHE="$PWD/.git-sfs-cache" git-sfs verify
 ```
 
 ## Publish A Dataset Update
 
 ```sh
-merk add data/
-merk status
+git-sfs add data/
+git-sfs status
 git add data/
 git commit -m "update dataset"
-merk push
+git-sfs push
 ```
 
 ## Review What Git Will Track
@@ -147,23 +147,23 @@ Git should show symlinks and config, not large file bytes.
 ## Clean Local Materialization
 
 ```sh
-merk dematerialize data/
+git-sfs dematerialize data/
 ```
 
-This leaves cached bytes in place. In the direct `.merk/cache` layout there are no per-file local links to remove.
+This leaves cached bytes in place. In the direct `.git-sfs/cache` layout there are no per-file local links to remove.
 
 ## Clean Unused Local Cache Files
 
 First inspect:
 
 ```sh
-merk gc --dry-run
+git-sfs gc --dry-run
 ```
 
 Then remove unreferenced cached files:
 
 ```sh
-merk gc --files
+git-sfs gc --files
 ```
 
 ## Work With A Filesystem Remote
@@ -179,8 +179,8 @@ url = "/mnt/datasets/project"
 Then:
 
 ```sh
-merk push
-merk pull
+git-sfs push
+git-sfs pull
 ```
 
 ## Work With An rsync Remote
@@ -194,8 +194,8 @@ url = "user@host:/mnt/datasets/project"
 Then:
 
 ```sh
-merk push
-merk pull
+git-sfs push
+git-sfs pull
 ```
 
 ## Work With An ssh Remote
@@ -209,8 +209,8 @@ url = "user@host:/mnt/datasets/project"
 Then:
 
 ```sh
-merk push
-merk pull
+git-sfs push
+git-sfs pull
 ```
 
 ## Planned rclone Remote
@@ -223,5 +223,5 @@ type = "rclone"
 url = "remote-name:datasets/project"
 ```
 
-`merk` should call the installed `rclone` CLI and keep the same plain file
+`git-sfs` should call the installed `rclone` CLI and keep the same plain file
 layout. It should not implement cloud-provider APIs directly.

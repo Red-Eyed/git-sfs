@@ -44,7 +44,7 @@ func TestCommandDispatch(t *testing.T) {
 		}
 		remoteDir := filepath.Join(t.TempDir(), "remote")
 		dataset := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = " + remoteDir + "\n\n[settings]\nalgorithm = sha256\n"
-		if err := os.WriteFile(filepath.Join(repo, ".merk/config.toml"), []byte(dataset), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(repo, ".git-sfs/config.toml"), []byte(dataset), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.MkdirAll(filepath.Join(repo, "data"), 0o755); err != nil {

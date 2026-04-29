@@ -1,8 +1,8 @@
 set -eu
 
-repo="${MERK_REPO:-Red-Eyed/merk}"
-version="${MERK_VERSION:-latest}"
-install_dir="${MERK_INSTALL_DIR:-$HOME/.local/bin}"
+repo="${GIT_SFS_REPO:-Red-Eyed/git-sfs}"
+version="${GIT_SFS_VERSION:-latest}"
+install_dir="${GIT_SFS_INSTALL_DIR:-$HOME/.local/bin}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
@@ -23,9 +23,9 @@ if [ "$version" = "latest" ]; then
   version="${latest_url##*/}"
 fi
 
-asset="merk-$version-$os-$arch.tar.gz"
+asset="git-sfs-$version-$os-$arch.tar.gz"
 url="https://github.com/$repo/releases/download/$version/$asset"
-tmp="${TMPDIR:-/tmp}/merk-install-$$"
+tmp="${TMPDIR:-/tmp}/git-sfs-install-$$"
 
 rm -rf "$tmp"
 mkdir -p "$tmp" "$install_dir"
@@ -33,6 +33,6 @@ trap 'rm -rf "$tmp"' EXIT
 
 curl -LsSf "$url" -o "$tmp/$asset"
 tar -xzf "$tmp/$asset" -C "$tmp"
-install "$tmp/merk" "$install_dir/merk"
+install "$tmp/git-sfs" "$install_dir/git-sfs"
 
-echo "merk installed to $install_dir/merk"
+echo "git-sfs installed to $install_dir/git-sfs"

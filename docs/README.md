@@ -1,6 +1,6 @@
 # Documentation
 
-`merk` is intentionally small: Git tracks symlinks, the filesystem stores bytes,
+`git-sfs` is intentionally small: Git tracks symlinks, the filesystem stores bytes,
 and familiar tools move files between machines.
 
 Start here:

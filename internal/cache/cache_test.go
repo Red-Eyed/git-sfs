@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"merk/internal/hash"
+	"git-sfs/internal/hash"
 )
 
 func TestStoreUsesContentAddressedPathAndDetectsCorruption(t *testing.T) {

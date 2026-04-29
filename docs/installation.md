@@ -3,25 +3,25 @@
 Install the latest release:
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
 By default this installs to:
 
 ```text
-$HOME/.local/bin/merk
+$HOME/.local/bin/git-sfs
 ```
 
 Override the install directory:
 
 ```sh
-MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
+GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
 Install a specific version:
 
 ```sh
-MERK_VERSION=v0.1.0 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
+GIT_SFS_VERSION=v0.1.0 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
 Supported release targets:
@@ -36,5 +36,5 @@ linux/arm64
 Build from source:
 
 ```sh
-go build ./cmd/merk
+go build ./cmd/git-sfs
 ```

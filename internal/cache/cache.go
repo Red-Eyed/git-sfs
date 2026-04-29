@@ -4,8 +4,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"merk/internal/fsutil"
-	"merk/internal/hash"
+	"git-sfs/internal/fsutil"
+	"git-sfs/internal/hash"
 )
 
 type Cache struct {

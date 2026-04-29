@@ -44,7 +44,7 @@ func TestResolveRepoFailsOutsideRepo(t *testing.T) {
 
 func TestResolveCachePriority(t *testing.T) {
 	repo := t.TempDir()
-	t.Setenv("MERK_CACHE", filepath.Join(repo, "env-cache"))
+	t.Setenv("GIT_SFS_CACHE", filepath.Join(repo, "env-cache"))
 	c, err := ResolveCache(repo, filepath.Join(repo, "flag-cache"))
 	if err != nil {
 		t.Fatal(err)
@@ -59,12 +59,12 @@ func TestResolveCachePriority(t *testing.T) {
 	if filepath.Base(c.Root) != "env-cache" {
 		t.Fatalf("env did not win: %q", c.Root)
 	}
-	t.Setenv("MERK_CACHE", "")
-	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
+	t.Setenv("GIT_SFS_CACHE", "")
+	if err := os.MkdirAll(filepath.Join(repo, ".git-sfs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	local := filepath.Join(repo, "local-cache")
-	if err := os.Symlink(local, filepath.Join(repo, ".merk", "cache")); err != nil {
+	if err := os.Symlink(local, filepath.Join(repo, ".git-sfs", "cache")); err != nil {
 		t.Fatal(err)
 	}
 	c, err = ResolveCache(repo, "")
@@ -77,19 +77,19 @@ func TestResolveCachePriority(t *testing.T) {
 }
 
 func TestResolveCacheMissing(t *testing.T) {
-	t.Setenv("MERK_CACHE", "")
+	t.Setenv("GIT_SFS_CACHE", "")
 	if _, err := ResolveCache(t.TempDir(), ""); err == nil {
 		t.Fatal("expected missing cache error")
 	}
 }
 
-func TestInitMerk(t *testing.T) {
+func TestInitGitSFS(t *testing.T) {
 	repo := t.TempDir()
-	if err := InitMerk(repo); err != nil {
+	if err := InitGitSFS(repo); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(filepath.Join(repo, ".merk")); err != nil || !info.IsDir() {
-		t.Fatalf(".merk dir missing: %v", err)
+	if info, err := os.Stat(filepath.Join(repo, ".git-sfs")); err != nil || !info.IsDir() {
+		t.Fatalf(".git-sfs dir missing: %v", err)
 	}
 }
 

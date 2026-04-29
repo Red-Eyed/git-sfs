@@ -2,7 +2,7 @@
 
 ## Direction
 
-`merk` should stay as simple as possible: a thin layer on top of Git, the
+`git-sfs` should stay as simple as possible: a thin layer on top of Git, the
 filesystem, and well-known remotes such as `rsync`, `ssh`, and `rclone`.
 
 The source of truth should be visible files and symlinks. Avoid manifests,
@@ -10,31 +10,31 @@ databases, daemons, custom protocols, and hidden metadata.
 
 ## Done
 
-- Go CLI scaffold with `cmd/merk`
+- Go CLI scaffold with `cmd/git-sfs`
 - Commands:
-  - `merk init`
-  - `merk setup`
-  - `merk add`
-  - `merk status`
-  - `merk verify`
-  - `merk push`
-  - `merk pull`
-  - `merk materialize`
-  - `merk dematerialize`
-  - `merk gc`
+  - `git-sfs init`
+  - `git-sfs setup`
+  - `git-sfs add`
+  - `git-sfs status`
+  - `git-sfs verify`
+  - `git-sfs push`
+  - `git-sfs pull`
+  - `git-sfs materialize`
+  - `git-sfs dematerialize`
+  - `git-sfs gc`
 - Cache layout:
   - content files keyed by SHA-256
   - `tmp`
   - `locks`
 - SHA-256 hashing and verification
 - Git symlink validation
-- `.merk/cache` cache-root symlink
+- `.git-sfs/cache` cache-root symlink
 - Cache path resolution:
   - `--cache`
-  - `MERK_CACHE`
-  - `.merk/cache`
-- `.merk/config.toml` parsing and validation
-- Rejection of cache paths in `.merk/config.toml`
+  - `GIT_SFS_CACHE`
+  - `.git-sfs/cache`
+- `.git-sfs/config.toml` parsing and validation
+- Rejection of cache paths in `.git-sfs/config.toml`
 - Filesystem remote backend
 - Initial rsync/ssh command backend
 - Partial pull by file or directory
@@ -73,24 +73,24 @@ databases, daemons, custom protocols, and hidden metadata.
 
 ## Remaining v1 Tasks
 
-- Improve `merk status`
+- Improve `git-sfs status`
   - Separate tracked symlinks, missing cached files, corrupt cached files,
     missing remote files, broken Git symlinks, broken Git symlinks, and
     unconverted files.
   - Make output stable enough for CI parsing.
   - Define exit codes.
-- Improve `merk verify`
+- Improve `git-sfs verify`
   - Verify all required invariants with precise messages.
   - Add optional remote existence verification.
   - Ensure corrupt remote files are rejected.
 - Keep partial pull behavior strong
-  - `merk pull <file>` must download only files needed for that path.
-  - `merk pull <directory>` must download only files needed below that directory.
+  - `git-sfs pull <file>` must download only files needed for that path.
+  - `git-sfs pull <directory>` must download only files needed below that directory.
   - Add coverage for mixed present/missing cache files.
 - Add real Git integration tests
   - Use `git init`.
   - Confirm symlinks are tracked as symlinks.
-  - Confirm `.merk/` remains ignored.
+  - Confirm `.git-sfs/` remains ignored.
 - Add real rsync/ssh integration tests
   - Gate behind environment variables.
   - Test upload, skip existing, pull, interruption retry, and permission errors.

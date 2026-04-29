@@ -1,6 +1,6 @@
 # Project Status
 
-`merk` is early.
+`git-sfs` is early.
 
 The baseline implementation exists and covers the core local workflow:
 
@@ -22,7 +22,7 @@ Implemented:
 - Git-tracked symlink model
 - Local cache
 - SHA-256 file verification
-- Local cache binding through `.merk/cache`
+- Local cache binding through `.git-sfs/cache`
 - Filesystem remote
 - Initial rsync/ssh command backend
 - CI

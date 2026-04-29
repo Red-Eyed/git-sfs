@@ -1,8 +1,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORK="${TMPDIR:-/tmp}/merk-smoke-$$"
-BIN="$WORK/merk"
+WORK="${TMPDIR:-/tmp}/git-sfs-smoke-$$"
+BIN="$WORK/git-sfs"
 CACHE_A="$WORK/cache-a"
 CACHE_B="$WORK/cache-b"
 REMOTE="$WORK/remote"
@@ -15,13 +15,13 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$WORK" "$REPO_A" "$REPO_B"
-go build -o "$BIN" "$ROOT/cmd/merk"
+go build -o "$BIN" "$ROOT/cmd/git-sfs"
 
 init_repo() {
   local repo="$1"
   local cache="$2"
-  mkdir -p "$repo/.git" "$repo/.merk"
-  cat > "$repo/.merk/config.toml" <<EOF
+  mkdir -p "$repo/.git" "$repo/.git-sfs"
+  cat > "$repo/.git-sfs/config.toml" <<EOF
 version = 1
 
 [remotes.default]
@@ -31,7 +31,7 @@ url = "$REMOTE"
 [settings]
 algorithm = "sha256"
 EOF
-  ln -s "$cache" "$repo/.merk/cache"
+  ln -s "$cache" "$repo/.git-sfs/cache"
 }
 
 init_repo "$REPO_A" "$CACHE_A"
@@ -40,10 +40,10 @@ printf "large payload" > "$REPO_A/data/blob.bin"
 
 (cd "$REPO_A" && "$BIN" setup && "$BIN" add data && "$BIN" verify && "$BIN" push)
 
-mkdir -p "$REPO_B/.git" "$REPO_B/.merk" "$REPO_B/data"
-cp "$REPO_A/.merk/config.toml" "$REPO_B/.merk/config.toml"
+mkdir -p "$REPO_B/.git" "$REPO_B/.git-sfs" "$REPO_B/data"
+cp "$REPO_A/.git-sfs/config.toml" "$REPO_B/.git-sfs/config.toml"
 cp -P "$REPO_A/data/blob.bin" "$REPO_B/data/blob.bin"
-ln -s "$CACHE_B" "$REPO_B/.merk/cache"
+ln -s "$CACHE_B" "$REPO_B/.git-sfs/cache"
 
 (cd "$REPO_B" && "$BIN" setup && "$BIN" pull data/blob.bin && "$BIN" verify)
 test "$(cat "$REPO_B/data/blob.bin")" = "large payload"

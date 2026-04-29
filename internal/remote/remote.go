@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"merk/internal/config"
-	"merk/internal/hash"
+	"git-sfs/internal/config"
+	"git-sfs/internal/hash"
 )
 
 // Remote hides backend details from push and pull workflow code.

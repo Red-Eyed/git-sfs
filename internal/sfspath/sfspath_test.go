@@ -1,11 +1,11 @@
-package merkpath
+package sfspath
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"merk/internal/hash"
+	"git-sfs/internal/hash"
 )
 
 func TestParseGitSymlink(t *testing.T) {
@@ -46,9 +46,9 @@ func TestRejectsInvalidGitSymlinks(t *testing.T) {
 	repo := t.TempDir()
 	cases := map[string]string{
 		"outside":       "../outside",
-		"bad structure": filepath.Join(".merk", "cache", "files", hash.Algorithm, "aa"),
-		"bad hash":      filepath.Join(".merk", "cache", "files", hash.Algorithm, "aa", "not-a-hash"),
-		"bad prefix":    filepath.Join(".merk", "cache", "files", hash.Algorithm, "bb", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		"bad structure": filepath.Join(".git-sfs", "cache", "files", hash.Algorithm, "aa"),
+		"bad hash":      filepath.Join(".git-sfs", "cache", "files", hash.Algorithm, "aa", "not-a-hash"),
+		"bad prefix":    filepath.Join(".git-sfs", "cache", "files", hash.Algorithm, "bb", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 	}
 	for name, target := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -63,7 +63,7 @@ func TestRejectsInvalidGitSymlinks(t *testing.T) {
 	}
 }
 
-func TestIsMerkSymlink(t *testing.T) {
+func TestIsSFSSymlink(t *testing.T) {
 	repo := t.TempDir()
 	file := filepath.Join(repo, "blob")
 	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -74,14 +74,14 @@ func TestIsMerkSymlink(t *testing.T) {
 	if err := os.Symlink(target, file); err != nil {
 		t.Fatal(err)
 	}
-	if !IsMerkSymlink(repo, file) {
-		t.Fatal("expected merk symlink")
+	if !IsSFSSymlink(repo, file) {
+		t.Fatal("expected git-sfs symlink")
 	}
 	regular := filepath.Join(repo, "regular")
 	if err := os.WriteFile(regular, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if IsMerkSymlink(repo, regular) {
-		t.Fatal("regular file should not be merk symlink")
+	if IsSFSSymlink(repo, regular) {
+		t.Fatal("regular file should not be git-sfs symlink")
 	}
 }

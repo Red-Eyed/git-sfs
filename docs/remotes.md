@@ -75,7 +75,7 @@ Rules for rclone support:
 - call the installed `rclone` CLI
 - keep the same `files/sha256/...` layout
 - do not add cloud-specific SDKs
-- do not add provider-specific config to `.merk/config.toml`
+- do not add provider-specific config to `.git-sfs/config.toml`
 - let users manage rclone credentials with rclone itself
 
 ## Remote Safety

@@ -40,7 +40,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Build
-        run: go build ./cmd/merk
+        run: go build ./cmd/git-sfs
 
       - name: Smoke test
         run: bash scripts/smoke.sh

@@ -1,70 +1,70 @@
 # Commands
 
-## merk init
+## git-sfs init
 
-Create initial project files, including a commented `.merk/config.toml` starter file:
+Create initial project files, including a commented `.git-sfs/config.toml` starter file:
 
 ```sh
-merk init
+git-sfs init
 ```
 
 Creates:
 
 ```text
-.merk/config.toml
-.merk/
-.gitignore entries for .merk/cache and .merk/.cache
+.git-sfs/config.toml
+.git-sfs/
+.gitignore entries for .git-sfs/cache and .git-sfs/.cache
 ```
 
-It does not overwrite an existing `.merk/config.toml` unless forced:
+It does not overwrite an existing `.git-sfs/config.toml` unless forced:
 
 ```sh
-merk init --force
+git-sfs init --force
 ```
 
-## merk setup
+## git-sfs setup
 
 Prepare local machine state:
 
 ```sh
-merk setup
+git-sfs setup
 ```
 
 Responsibilities:
 
 - resolve cache path
-- create `.merk/`
-- create or read `.merk/cache`
+- create `.git-sfs/`
+- create or read `.git-sfs/cache`
 - create cache directories
-- validate `.merk/config.toml`
-- verify `.merk/cache` reaches the cache
+- validate `.git-sfs/config.toml`
+- verify `.git-sfs/cache` reaches the cache
 
-## merk add
+## git-sfs add
 
 Add one file:
 
 ```sh
-merk add data/train-000.tar.zst
+git-sfs add data/train-000.tar.zst
 ```
 
 Add a directory recursively:
 
 ```sh
-merk add data/
+git-sfs add data/
 ```
 
-For each regular file, `merk`:
+For each regular file, `git-sfs`:
 
 - hashes bytes with SHA-256
 - stores bytes in the cache
 - replaces the file with a relative symlink
 
-## merk status
+## git-sfs status
 
 Report repository state:
 
 ```sh
-merk status
+git-sfs status
 ```
 
 Reports problems such as:
@@ -93,38 +93,38 @@ details:
 missing cache file: data/train-000.tar.zst: <hash>
 ```
 
-## merk verify
+## git-sfs verify
 
 Strict CI-oriented verification:
 
 ```sh
-merk verify
+git-sfs verify
 ```
 
 Returns non-zero on failure.
 
-On failure, `merk verify` prints the same category-count report as
-`merk status`.
+On failure, `git-sfs verify` prints the same category-count report as
+`git-sfs status`.
 
-## merk push
+## git-sfs push
 
 Upload referenced cached files to the remote:
 
 ```sh
-merk push
-merk push backup
+git-sfs push
+git-sfs push backup
 ```
 
-`merk push` skips files that already exist remotely and verify correctly.
+`git-sfs push` skips files that already exist remotely and verify correctly.
 
-## merk pull
+## git-sfs pull
 
 Download missing files required by symlinks:
 
 ```sh
-merk pull
-merk pull data/train-000.tar.zst
-merk pull data/
+git-sfs pull
+git-sfs pull data/train-000.tar.zst
+git-sfs pull data/
 ```
 
 Downloaded bytes are hash-verified before being accepted.
@@ -132,40 +132,40 @@ Downloaded bytes are hash-verified before being accepted.
 When a path is provided, only symlinks below that path are considered. This is
 the intended way to partially pull a dataset from the remote.
 
-## merk materialize
+## git-sfs materialize
 
-Verify local `.merk/cache` can reach selected cached files:
+Verify local `.git-sfs/cache` can reach selected cached files:
 
 ```sh
-merk materialize
-merk materialize data/
+git-sfs materialize
+git-sfs materialize data/
 ```
 
 This does not copy or modify cached bytes.
 
-## merk dematerialize
+## git-sfs dematerialize
 
-No-op compatibility command for the direct `.merk/cache` layout:
+No-op compatibility command for the direct `.git-sfs/cache` layout:
 
 ```sh
-merk dematerialize
-merk dematerialize data/
+git-sfs dematerialize
+git-sfs dematerialize data/
 ```
 
 This does not delete cached bytes.
 
-## merk gc
+## git-sfs gc
 
 Show unreferenced cached files:
 
 ```sh
-merk gc --dry-run
+git-sfs gc --dry-run
 ```
 
 Remove unreferenced cached files:
 
 ```sh
-merk gc --files
+git-sfs gc --files
 ```
 
-`merk gc` must never delete files referenced by the current Git symlink tree.
+`git-sfs gc` must never delete files referenced by the current Git symlink tree.

@@ -46,12 +46,12 @@ func WriteDefault(path string) error {
 	return nil
 }
 
-const defaultTOML = `# merk project config. Commit this file to Git.
+const defaultTOML = `# git-sfs project config. Commit this file to Git.
 # Do not put local cache paths, secrets, tokens, or machine-specific paths here.
 
 version = 1
 
-# The default remote is used by merk push and merk pull when no remote is named.
+# The default remote is used by git-sfs push and git-sfs pull when no remote is named.
 [remotes.default]
 # Supported today: rsync, ssh, filesystem.
 # Use rsync for a normal host:path destination.
@@ -102,9 +102,9 @@ func Load(path string) (Config, error) {
 				}
 				cfg.Remotes[remote] = RemoteConfig{}
 			case name == "cache" || strings.HasPrefix(name, "cache."):
-				return Config{}, fmt.Errorf(".merk/config.toml must not contain local cache configuration")
+				return Config{}, fmt.Errorf(".git-sfs/config.toml must not contain local cache configuration")
 			default:
-				return Config{}, fmt.Errorf("unknown .merk/config.toml section %q", name)
+				return Config{}, fmt.Errorf("unknown .git-sfs/config.toml section %q", name)
 			}
 			continue
 		}
@@ -116,15 +116,15 @@ func Load(path string) (Config, error) {
 		case "":
 			if key == "version" {
 				if val != "1" {
-					return Config{}, fmt.Errorf("unsupported .merk/config.toml version %q", val)
+					return Config{}, fmt.Errorf("unsupported .git-sfs/config.toml version %q", val)
 				}
 				cfg.Version = Version
 				continue
 			}
 			if key == "cache" {
-				return Config{}, fmt.Errorf(".merk/config.toml must not contain local cache configuration")
+				return Config{}, fmt.Errorf(".git-sfs/config.toml must not contain local cache configuration")
 			}
-			return Config{}, fmt.Errorf("unknown .merk/config.toml field %q", key)
+			return Config{}, fmt.Errorf("unknown .git-sfs/config.toml field %q", key)
 		case "settings":
 			if key != "algorithm" {
 				return Config{}, fmt.Errorf("unknown settings field %q", key)
@@ -150,7 +150,7 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.Version != Version {
-		return Config{}, fmt.Errorf(".merk/config.toml must declare version = 1")
+		return Config{}, fmt.Errorf(".git-sfs/config.toml must declare version = 1")
 	}
 	if cfg.Settings.Algorithm == "" {
 		cfg.Settings.Algorithm = "sha256"
@@ -167,7 +167,7 @@ func Load(path string) (Config, error) {
 }
 
 func LoadLocal(repo string) (Local, error) {
-	path := filepath.Join(repo, ".merk", "cache")
+	path := filepath.Join(repo, ".git-sfs", "cache")
 	target, err := os.Readlink(path)
 	if os.IsNotExist(err) {
 		return Local{}, nil

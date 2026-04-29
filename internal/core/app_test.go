@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"merk/internal/hash"
-	"merk/internal/merkpath"
+	"git-sfs/internal/hash"
+	"git-sfs/internal/sfspath"
 )
 
 func TestAddVerifyDematerializeMaterializeAndStatus(t *testing.T) {
@@ -43,7 +43,7 @@ func TestAddVerifyDematerializeMaterializeAndStatus(t *testing.T) {
 		if info.Mode()&os.ModeSymlink == 0 {
 			t.Fatalf("%s is not a symlink", rel)
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, path)
+		h, _, err := sfspath.ParseGitSymlink(repo, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +68,7 @@ func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 		if err := app(&bytes.Buffer{}).Push(context.Background(), ""); err != nil {
 			t.Fatal(err)
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,11 +102,11 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 		if err := a.Push(context.Background(), ""); err != nil {
 			t.Fatal(err)
 		}
-		h1, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
+		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		h2, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "two.bin"))
+		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "two.bin"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,7 +150,7 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 		if err := app(stdout).Add(context.Background(), []string{"data/blob"}); err != nil {
 			t.Fatal(err)
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestGCDoesNotDeleteReferencedFiles(t *testing.T) {
 		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}); err != nil {
 			t.Fatal(err)
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,10 +214,10 @@ func TestInitSetupAndGitignore(t *testing.T) {
 		if err := a.Setup(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if target, err := os.Readlink(filepath.Join(repo, ".merk", "cache")); err != nil || target == "" {
+		if target, err := os.Readlink(filepath.Join(repo, ".git-sfs", "cache")); err != nil || target == "" {
 			t.Fatalf("cache symlink missing: target=%q err=%v", target, err)
 		}
-		if info, err := os.Stat(filepath.Join(repo, ".merk", ".cache", "files")); err != nil || !info.IsDir() {
+		if info, err := os.Stat(filepath.Join(repo, ".git-sfs", ".cache", "files")); err != nil || !info.IsDir() {
 			t.Fatalf("default cache missing: %v", err)
 		}
 		if err := a.Init(context.Background(), false); err == nil {
@@ -230,8 +230,8 @@ func TestInitSetupAndGitignore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(gitignore), ".merk/cache") {
-			t.Fatalf(".gitignore missing .merk/: %q", gitignore)
+		if !strings.Contains(string(gitignore), ".git-sfs/cache") {
+			t.Fatalf(".gitignore missing .git-sfs/: %q", gitignore)
 		}
 	})
 }
@@ -240,7 +240,7 @@ func TestStatusReportsInvalidConfig(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	content := "version = 1\n\n[settings]\nalgorithm = sha256\n"
-	mustWrite(t, filepath.Join(repo, ".merk/config.toml"), []byte(content))
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
 	writeLocal(t, repo, cacheDir)
 	inDir(t, repo, func() {
 		stdout := &bytes.Buffer{}
@@ -264,7 +264,7 @@ func TestPullFailsForMissingRemoteFile(t *testing.T) {
 		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
 			t.Fatal(err)
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -294,7 +294,7 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	})
 }
 
-func TestMaterializeIgnoresNonMerkSymlinkSelection(t *testing.T) {
+func TestMaterializeIgnoresNonGitSFSSymlinkSelection(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -326,7 +326,7 @@ func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 		if err := a.Push(context.Background(), ""); err != nil {
 			t.Fatal(err)
 		}
-		h, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -360,7 +360,7 @@ func app(stdout *bytes.Buffer) App {
 	return App{
 		Stdout:     stdout,
 		Stderr:     &bytes.Buffer{},
-		ConfigPath: ".merk/config.toml",
+		ConfigPath: ".git-sfs/config.toml",
 	}
 }
 
@@ -376,15 +376,15 @@ func newRepo(t *testing.T) string {
 func writeDataset(t *testing.T, repo, remote string) {
 	t.Helper()
 	content := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = " + remote + "\n\n[settings]\nalgorithm = sha256\n"
-	mustWrite(t, filepath.Join(repo, ".merk/config.toml"), []byte(content))
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
 }
 
 func writeLocal(t *testing.T, repo, cacheDir string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, ".git-sfs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(cacheDir, filepath.Join(repo, ".merk", "cache")); err != nil {
+	if err := os.Symlink(cacheDir, filepath.Join(repo, ".git-sfs", "cache")); err != nil {
 		t.Fatal(err)
 	}
 }

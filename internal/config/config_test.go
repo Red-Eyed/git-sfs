@@ -78,7 +78,7 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 	}
 	text := string(content)
 	for _, want := range []string{
-		"# merk project config",
+		"# git-sfs project config",
 		"type = \"rsync\"",
 		"url = \"user@host:/mnt/datasets/project\"",
 		"# type = \"ssh\"",
@@ -103,11 +103,11 @@ func TestWriteDefault(t *testing.T) {
 
 func TestLoadLocal(t *testing.T) {
 	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, ".git-sfs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(repo, "cache")
-	if err := os.Symlink(want, filepath.Join(repo, ".merk", "cache")); err != nil {
+	if err := os.Symlink(want, filepath.Join(repo, ".git-sfs", "cache")); err != nil {
 		t.Fatal(err)
 	}
 	local, err := LoadLocal(repo)

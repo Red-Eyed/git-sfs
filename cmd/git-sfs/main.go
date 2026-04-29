@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"merk/internal/cli"
+	"git-sfs/internal/cli"
 )
 
 func main() {
 	if err := cli.Run(context.Background(), os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "merk:", err)
+		fmt.Fprintln(os.Stderr, "git-sfs:", err)
 		os.Exit(1)
 	}
 }

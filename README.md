@@ -1,10 +1,11 @@
-# merk
+# git-sfs
 
-[![CI](https://github.com/Red-Eyed/merk/actions/workflows/ci.yml/badge.svg)](https://github.com/Red-Eyed/merk/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/Red-Eyed/merk/branch/main/graph/badge.svg)](https://codecov.io/gh/Red-Eyed/merk)
+[![CI](https://github.com/Red-Eyed/git-sfs/actions/workflows/ci.yml/badge.svg)](https://github.com/Red-Eyed/git-sfs/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Red-Eyed/git-sfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Red-Eyed/git-sfs)
 
-`merk` is a small CLI for keeping large files out of Git while keeping your
-repository simple, cloneable, and understandable.
+`git-sfs` stands for **Git Symbolic File Storage**. It is a small CLI for
+keeping large files out of Git while keeping your repository simple, cloneable,
+and understandable.
 
 It is like Git LFS in spirit, but Git tracks normal symlinks instead of pointer
 files. The large file bytes live in a local content-addressed cache and can be
@@ -12,32 +13,32 @@ synced to a remote with familiar tools such as `rsync`, `ssh`, or `rclone`.
 
 ```text
 Git tracks symlinks.
-merk stores file bytes.
+git-sfs stores file bytes.
 rsync/ssh/rclone moves files.
 ```
 
 No LFS server. No database. No hidden manifest branch. No custom Git protocol.
-`merk` is meant to stay a thin layer over Git, the filesystem, and tools people
+`git-sfs` is meant to stay a thin layer over Git, the filesystem, and tools people
 already know.
 
-## Why merk?
+## Why git-sfs?
 
 Git is excellent at source code and metadata. It is not excellent at multi-GB
 datasets, model checkpoints, media dumps, build artifacts, or experiment blobs.
 
-`merk` gives you a boring, explicit way to keep those bytes outside Git while
+`git-sfs` gives you a boring, explicit way to keep those bytes outside Git while
 still letting the Git tree describe exactly which files belong in the project.
 
-Use `merk` when you want:
+Use `git-sfs` when you want:
 
 - A repo that stays small and fast
 - Large files addressed by SHA-256 content hash
 - A cache path that is local to each machine and never committed
 - A remote layout you can inspect with `ssh`, `rsync`, `rclone`, or `find`
 - CI checks that fail when referenced files are missing or corrupt
-- Another machine to clone the repo, run `merk setup`, run `merk pull`, and work
+- Another machine to clone the repo, run `git-sfs setup`, run `git-sfs pull`, and work
 
-`merk` is intentionally not a platform. It is a thin layer over Git symlinks,
+`git-sfs` is intentionally not a platform. It is a thin layer over Git symlinks,
 plain files, local directories, and well-known file transfer tools.
 
 ## How It Works
@@ -48,20 +49,20 @@ Suppose you add a large file:
 data/train-000.tar.zst
 ```
 
-`merk add data/train-000.tar.zst` hashes the file, stores the bytes in your
+`git-sfs add data/train-000.tar.zst` hashes the file, stores the bytes in your
 local cache, and replaces the file with a Git-tracked symlink:
 
 ```text
-data/train-000.tar.zst -> ../.merk/cache/files/sha256/ab/<hash>
+data/train-000.tar.zst -> ../.git-sfs/cache/files/sha256/ab/<hash>
 ```
 
-The local `.merk/cache` symlink is untracked and points to the real cache root:
+The local `.git-sfs/cache` symlink is untracked and points to the real cache root:
 
 ```text
-.merk/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
+.git-sfs/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
 ```
 
-Opening `data/train-000.tar.zst` follows `.merk/cache` and reads the cached
+Opening `data/train-000.tar.zst` follows `.git-sfs/cache` and reads the cached
 file bytes.
 
 Git stores the file list as ordinary directories and symlinks. The cache stores
@@ -70,7 +71,7 @@ the bytes. The remote stores the same SHA-256 file layout.
 ## Install
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
 Prebuilt release binaries are published for:
@@ -82,7 +83,7 @@ Linux arm64
 Linux x86_64
 ```
 
-By default this installs `merk` into:
+By default this installs `git-sfs` into:
 
 ```text
 $HOME/.local/bin
@@ -91,32 +92,32 @@ $HOME/.local/bin
 You can override the install location:
 
 ```sh
-MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
+GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
 Or build from source:
 
 ```sh
-go build ./cmd/merk
+go build ./cmd/git-sfs
 ```
 
 The installer detects macOS/Linux and arm64/x86_64 automatically.
 
 ## Quick Start
 
-Create project metadata. This creates a commented `.merk/config.toml` starter file you can edit in place:
+Create project metadata. This creates a commented `.git-sfs/config.toml` starter file you can edit in place:
 
 ```sh
-merk init
+git-sfs init
 ```
 
-`merk init` creates `.merk/.cache` and `.merk/cache` by default. To bind an external cache instead, pass a cache path:
+`git-sfs init` creates `.git-sfs/.cache` and `.git-sfs/cache` by default. To bind an external cache instead, pass a cache path:
 
 ```sh
-merk --cache /mnt/shared/merk-cache init
+git-sfs --cache /mnt/shared/git-sfs-cache init
 ```
 
-Edit `.merk/config.toml` and set your remote:
+Edit `.git-sfs/config.toml` and set your remote:
 
 ```toml
 version = 1
@@ -132,26 +133,26 @@ algorithm = "sha256"
 Initialize local state:
 
 ```sh
-merk setup
+git-sfs setup
 ```
 
 Add large files:
 
 ```sh
-merk add data/
+git-sfs add data/
 ```
 
 Commit the metadata:
 
 ```sh
-git add .merk/config.toml .gitignore data/
-git commit -m "track dataset files with merk"
+git add .git-sfs/config.toml .gitignore data/
+git commit -m "track dataset files with git-sfs"
 ```
 
 Upload files:
 
 ```sh
-merk push
+git-sfs push
 ```
 
 On another machine:
@@ -159,8 +160,8 @@ On another machine:
 ```sh
 git clone <repo>
 cd <repo>
-merk --cache /mnt/shared/merk-cache setup
-merk pull
+git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs pull
 ```
 
 The files under `data/` now open normally through symlinks.
@@ -168,31 +169,31 @@ The files under `data/` now open normally through symlinks.
 You can also pull only the files you need:
 
 ```sh
-merk pull data/train-000.tar.zst
-merk pull data/validation/
+git-sfs pull data/train-000.tar.zst
+git-sfs pull data/validation/
 ```
 
 ## Commands
 
 ```sh
-merk init
-merk setup
-merk add <path>
-merk status
-merk verify
-merk push [remote]
-merk pull [path]
-merk materialize [path]
-merk dematerialize [path]
-merk gc --dry-run
-merk gc --files
+git-sfs init
+git-sfs setup
+git-sfs add <path>
+git-sfs status
+git-sfs verify
+git-sfs push [remote]
+git-sfs pull [path]
+git-sfs materialize [path]
+git-sfs dematerialize [path]
+git-sfs gc --dry-run
+git-sfs gc --files
 ```
 
 Detailed command reference: [docs/commands.md](docs/commands.md)
 
 ## Configuration
 
-`.merk/config.toml` is committed to Git:
+`.git-sfs/config.toml` is committed to Git:
 
 ```toml
 version = 1
@@ -207,14 +208,14 @@ algorithm = "sha256"
 
 It must not contain cache paths, secrets, tokens, or machine-local state.
 
-`.merk/cache` is a Git-ignored symlink to the real local cache. By default, `merk init` creates `.merk/.cache` and points `.merk/cache` at it.
+`.git-sfs/cache` is a Git-ignored symlink to the real local cache. By default, `git-sfs init` creates `.git-sfs/.cache` and points `.git-sfs/cache` at it.
 
 Cache resolution order:
 
 ```text
 --cache
-MERK_CACHE
-.merk/cache
+GIT_SFS_CACHE
+.git-sfs/cache
 ```
 
 Detailed configuration reference: [docs/configuration.md](docs/configuration.md)
@@ -254,32 +255,32 @@ Remote details: [docs/remotes.md](docs/remotes.md)
 
 ## Safety
 
-`merk` is designed around retry-safe operations:
+`git-sfs` is designed around retry-safe operations:
 
 - Files are addressed by SHA-256
 - Downloads are hash-verified before being accepted
 - Corrupt cache files are detected
 - Local cache paths are never written to Git-tracked config
-- `.merk/` is untracked and gitignored
-- Missing and broken symlinks are reported by `merk status` and `merk verify`
+- `.git-sfs/` is untracked and gitignored
+- Missing and broken symlinks are reported by `git-sfs status` and `git-sfs verify`
 
 For CI, run:
 
 ```sh
-merk verify
+git-sfs verify
 ```
 
 It exits non-zero if referenced files are missing, corrupt, or incorrectly
 materialized.
 
-`merk status` and `merk verify` print stable category counts before detailed
+`git-sfs status` and `git-sfs verify` print stable category counts before detailed
 messages, so CI can match clear strings such as `missing cache files: 0`.
 
 Safety details: [docs/safety.md](docs/safety.md)
 
 ## Project Status
 
-`merk` is early. The core local workflow, filesystem remote path, tests, smoke
+`git-sfs` is early. The core local workflow, filesystem remote path, tests, smoke
 test, and release automation are in place. The design intentionally favors a
 small, auditable implementation over a large feature surface.
 

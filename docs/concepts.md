@@ -1,17 +1,17 @@
 # Concepts
 
-`merk` is a thin layer over Git and the filesystem.
+`git-sfs` is a thin layer over Git and the filesystem.
 
 Git tracks:
 
-- `.merk/config.toml`
+- `.git-sfs/config.toml`
 - relative symlinks for large files
 
 Git does not track:
 
 - large file bytes
 - local cache paths
-- `.merk/`
+- `.git-sfs/`
 - remote state
 - temporary state
 
@@ -23,7 +23,7 @@ When you add a large file:
 data/train-000.tar.zst
 ```
 
-`merk` hashes the bytes and stores them in the cache:
+`git-sfs` hashes the bytes and stores them in the cache:
 
 ```text
 <cache>/files/sha256/ab/<hash>
@@ -32,13 +32,13 @@ data/train-000.tar.zst
 The original file becomes a Git-tracked symlink:
 
 ```text
-data/train-000.tar.zst -> ../.merk/cache/files/sha256/ab/<hash>
+data/train-000.tar.zst -> ../.git-sfs/cache/files/sha256/ab/<hash>
 ```
 
-The repo-local path goes through the `.merk/cache` symlink to the cached file:
+The repo-local path goes through the `.git-sfs/cache` symlink to the cached file:
 
 ```text
-.merk/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
+.git-sfs/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
 ```
 
 Opening `data/train-000.tar.zst` reads the cached bytes through the symlink

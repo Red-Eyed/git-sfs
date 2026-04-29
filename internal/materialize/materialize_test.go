@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"merk/internal/cache"
-	"merk/internal/hash"
+	"git-sfs/internal/cache"
+	"git-sfs/internal/hash"
 )
 
 func TestLinkAndUnlink(t *testing.T) {
@@ -15,10 +15,10 @@ func TestLinkAndUnlink(t *testing.T) {
 	if err := c.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, ".git-sfs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(c.Root, filepath.Join(repo, ".merk", "cache")); err != nil {
+	if err := os.Symlink(c.Root, filepath.Join(repo, ".git-sfs", "cache")); err != nil {
 		t.Fatal(err)
 	}
 	src := filepath.Join(t.TempDir(), "src")

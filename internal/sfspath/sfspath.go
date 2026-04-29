@@ -1,4 +1,4 @@
-package merkpath
+package sfspath
 
 import (
 	"fmt"
@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"merk/internal/hash"
+	"git-sfs/internal/hash"
 )
 
-// CacheLinkFile is the repo-local path exposed through .merk/cache.
+// CacheLinkFile is the repo-local path exposed through .git-sfs/cache.
 func CacheLinkFile(repo string, h hash.Hash) string {
-	return filepath.Join(repo, ".merk", "cache", "files", hash.Algorithm, h.Prefix(), h.String())
+	return filepath.Join(repo, ".git-sfs", "cache", "files", hash.Algorithm, h.Prefix(), h.String())
 }
 
 // GitLinkTarget returns the relative symlink target that is safe to commit.
@@ -28,13 +28,13 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 	if filepath.IsAbs(target) {
 		return "", target, fmt.Errorf("git symlink %s has absolute target %s", file, target)
 	}
-	// Git symlinks point through .merk/cache so machine-local cache paths
+	// Git symlinks point through .git-sfs/cache so machine-local cache paths
 	// never appear in committed metadata.
 	resolved := filepath.Clean(filepath.Join(filepath.Dir(file), target))
-	wantRoot := filepath.Join(repo, ".merk", "cache", "files", hash.Algorithm)
+	wantRoot := filepath.Join(repo, ".git-sfs", "cache", "files", hash.Algorithm)
 	rel, err := filepath.Rel(wantRoot, resolved)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
-		return "", target, fmt.Errorf("git symlink %s does not point into .merk/cache", file)
+		return "", target, fmt.Errorf("git symlink %s does not point into .git-sfs/cache", file)
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) != 2 {
@@ -52,7 +52,7 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 	return h, target, nil
 }
 
-func IsMerkSymlink(repo, file string) bool {
+func IsSFSSymlink(repo, file string) bool {
 	info, err := os.Lstat(file)
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		return false

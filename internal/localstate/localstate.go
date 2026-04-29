@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"merk/internal/cache"
-	"merk/internal/config"
+	"git-sfs/internal/cache"
+	"git-sfs/internal/config"
 )
 
 // ResolveRepo walks upward from the current directory until it finds .git.
@@ -27,12 +27,12 @@ func ResolveRepo() (string, error) {
 	}
 }
 
-// ResolveCache keeps machine-local cache paths out of .merk/config.toml.
+// ResolveCache keeps machine-local cache paths out of .git-sfs/config.toml.
 func ResolveCache(repo, flagValue string) (cache.Cache, error) {
 	if flagValue != "" {
 		return cache.Cache{Root: abs(flagValue)}, nil
 	}
-	if env := os.Getenv("MERK_CACHE"); env != "" {
+	if env := os.Getenv("GIT_SFS_CACHE"); env != "" {
 		return cache.Cache{Root: abs(env)}, nil
 	}
 	local, err := config.LoadLocal(repo)
@@ -42,13 +42,13 @@ func ResolveCache(repo, flagValue string) (cache.Cache, error) {
 	if local.CachePath != "" {
 		return cache.Cache{Root: abs(local.CachePath)}, nil
 	}
-	return cache.Cache{}, fmt.Errorf("cache path is not configured; use --cache, MERK_CACHE, or .merk/cache")
+	return cache.Cache{}, fmt.Errorf("cache path is not configured; use --cache, GIT_SFS_CACHE, or .git-sfs/cache")
 }
 
-// InitMerk creates the local project state directory used by materialization.
-func InitMerk(repo string) error {
+// InitGitSFS creates the local project state directory used by materialization.
+func InitGitSFS(repo string) error {
 	for _, p := range []string{
-		filepath.Join(repo, ".merk"),
+		filepath.Join(repo, ".git-sfs"),
 	} {
 		if err := os.MkdirAll(p, 0o755); err != nil {
 			return err
@@ -61,10 +61,10 @@ func BindCache(repo string, c cache.Cache) error {
 	if c.Root == "" {
 		return nil
 	}
-	if err := InitMerk(repo); err != nil {
+	if err := InitGitSFS(repo); err != nil {
 		return err
 	}
-	link := filepath.Join(repo, ".merk", "cache")
+	link := filepath.Join(repo, ".git-sfs", "cache")
 	target := abs(c.Root)
 	existing, err := os.Readlink(link)
 	if err == nil {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"merk/internal/hash"
+	"git-sfs/internal/hash"
 )
 
 func TestNewCommandRemotesUseFilesystemForLocalPaths(t *testing.T) {
@@ -98,7 +98,7 @@ if [ "$1" != "sh" ] || [ "$2" != "-c" ]; then
 fi
 script="$3"
 shift 4
-sh -c "$script" merk "$@"
+sh -c "$script" git-sfs "$@"
 `)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 

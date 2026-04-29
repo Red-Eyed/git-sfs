@@ -2,11 +2,11 @@
 
 ## Project
 
-`merk` is a Go CLI for storing large file bytes outside Git while Git tracks symlinks.
+`git-sfs` is a Go CLI for storing large file bytes outside Git while Git tracks symlinks.
 
 Project direction:
 
-- Keep `merk` as small as possible.
+- Keep `git-sfs` as small as possible.
 - Treat it as a layer on top of Git, the filesystem, and well-known file movers.
 - Prefer plain files, symlinks, directories, and subprocess calls over custom state.
 - Supported remote tools should stay boring and familiar: `rsync`, `ssh`, and `rclone`.
@@ -15,9 +15,9 @@ Project direction:
 
 Core model:
 
-- Git tracks `.merk/config.toml` and relative symlinks.
-- Git symlinks point into `.merk/cache/files/sha256/<prefix>/<hash>`.
-- ``.merk/cache` is a symlink to the cache root.
+- Git tracks `.git-sfs/config.toml` and relative symlinks.
+- Git symlinks point into `.git-sfs/cache/files/sha256/<prefix>/<hash>`.
+- ``.git-sfs/cache` is a symlink to the cache root.
 - Cache files live at `<cache>/files/sha256/<prefix>/<hash>`.
 - Cache path is local state and must never be committed.
 
@@ -26,7 +26,7 @@ Core model:
 Use a sandbox-writable Go cache when running here:
 
 ```sh
-GOCACHE=/private/tmp/merk-go-cache
+GOCACHE=/private/tmp/git-sfs-go-cache
 ```
 
 Required checks after code changes:
@@ -60,7 +60,7 @@ Keep all of these healthy:
 
 Coverage is reported for visibility, but do not add tests only to increase the
 percentage. Prefer behavior tests that prove a user-facing invariant or a real
-failure mode. Filesystem tests should use `t.TempDir()` and should exercise merk
+failure mode. Filesystem tests should use `t.TempDir()` and should exercise git-sfs
 behavior, not Go standard-library behavior such as `os.MkdirAll` failing when a
 parent path is a file.
 

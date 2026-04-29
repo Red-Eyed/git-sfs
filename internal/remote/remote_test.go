@@ -3,7 +3,7 @@ package remote
 import (
 	"testing"
 
-	"merk/internal/config"
+	"git-sfs/internal/config"
 )
 
 func TestNewRemote(t *testing.T) {

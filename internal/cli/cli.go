@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"merk/internal/core"
+	"git-sfs/internal/core"
 )
 
 type options struct {
@@ -22,11 +22,11 @@ func Run(ctx context.Context, args []string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("merk", flag.ContinueOnError)
+	fs := flag.NewFlagSet("git-sfs", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var opts options
 	fs.StringVar(&opts.cache, "cache", "", "cache directory")
-	fs.StringVar(&opts.config, "config", ".merk/config.toml", "dataset config path")
+	fs.StringVar(&opts.config, "config", ".git-sfs/config.toml", "dataset config path")
 	fs.BoolVar(&opts.verbose, "verbose", false, "verbose output")
 	fs.BoolVar(&opts.quiet, "quiet", false, "quiet output")
 	if err := fs.Parse(args); err != nil {
@@ -114,6 +114,6 @@ func has(args []string, want string) bool {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: merk [--cache path] [--config path] <command> [args]")
+	fmt.Fprintln(w, "usage: git-sfs [--cache path] [--config path] <command> [args]")
 	fmt.Fprintln(w, "commands: init setup add status verify push pull materialize dematerialize gc")
 }

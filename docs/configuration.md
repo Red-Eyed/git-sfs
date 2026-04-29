@@ -1,10 +1,10 @@
 # Configuration
 
-`merk` has one tracked config file and one local cache symlink.
+`git-sfs` has one tracked config file and one local cache symlink.
 
-## .merk/config.toml
+## .git-sfs/config.toml
 
-`.merk/config.toml` is committed to Git. `merk init` writes a commented starter file so the important choices are visible without opening the docs:
+`.git-sfs/config.toml` is committed to Git. `git-sfs init` writes a commented starter file so the important choices are visible without opening the docs:
 
 ```toml
 version = 1
@@ -33,36 +33,36 @@ Forbidden here:
 - machine-local absolute paths
 - temporary state
 
-## .merk/cache
+## .git-sfs/cache
 
-`.merk/cache` is not committed. It is a symlink to the real local cache.
+`.git-sfs/cache` is not committed. It is a symlink to the real local cache.
 
-By default, `merk init` creates:
+By default, `git-sfs init` creates:
 
 ```text
-.merk/cache -> .merk/.cache
+.git-sfs/cache -> .git-sfs/.cache
 ```
 
 To use an external cache, bind it during init or setup:
 
 ```sh
-merk --cache /mnt/shared/merk-cache init
-merk --cache /mnt/shared/merk-cache setup
+git-sfs --cache /mnt/shared/git-sfs-cache init
+git-sfs --cache /mnt/shared/git-sfs-cache setup
 ```
 
 Cache path priority:
 
 ```text
 --cache
-MERK_CACHE
-.merk/cache
+GIT_SFS_CACHE
+.git-sfs/cache
 ```
 
 ## Ignored Local State
 
-Only local cache state under `.merk/` is ignored by Git:
+Only local cache state under `.git-sfs/` is ignored by Git:
 
 ```gitignore
-.merk/cache
-.merk/.cache
+.git-sfs/cache
+.git-sfs/.cache
 ```

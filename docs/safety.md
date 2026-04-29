@@ -1,6 +1,6 @@
 # Safety
 
-`merk` is built around content hashes and retry-safe file operations.
+`git-sfs` is built around content hashes and retry-safe file operations.
 
 ## Hash Verification
 
@@ -10,7 +10,7 @@ Every cached file path includes the SHA-256 hash of its bytes:
 files/sha256/ab/<full_hash>
 ```
 
-`merk` verifies bytes before accepting downloaded files or using cached files.
+`git-sfs` verifies bytes before accepting downloaded files or using cached files.
 
 ## Local Writes
 
@@ -27,7 +27,7 @@ final path.
 If an upload is interrupted, rerun:
 
 ```sh
-merk push
+git-sfs push
 ```
 
 Existing valid remote files are skipped.
@@ -37,36 +37,36 @@ Existing valid remote files are skipped.
 Check for broken or stale symlinks:
 
 ```sh
-merk status
-merk verify
+git-sfs status
+git-sfs verify
 ```
 
 Repair local materialization:
 
 ```sh
-merk materialize
+git-sfs materialize
 ```
 
 ## Cache Corruption
 
-If a cached file is corrupt, `merk verify` reports it.
+If a cached file is corrupt, `git-sfs verify` reports it.
 
 If the remote still has a valid copy, remove the corrupt cached file and pull:
 
 ```sh
-merk pull <path>
-merk verify
+git-sfs pull <path>
+git-sfs verify
 ```
 
 ## Git Safety
 
-Git-tracked symlink targets must be relative and point into `.merk/cache`.
+Git-tracked symlink targets must be relative and point into `.git-sfs/cache`.
 
 This prevents absolute machine-local cache paths from being committed.
 
-## What merk Does Not Protect
+## What git-sfs Does Not Protect
 
-`merk` v1 does not provide:
+`git-sfs` v1 does not provide:
 
 - encryption
 - access control

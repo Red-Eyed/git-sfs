@@ -13,7 +13,7 @@ func AtomicCopy(src, dst string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".merk-tmp-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".git-sfs-tmp-*")
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func RelSymlink(target, link string) error {
 	return os.Symlink(rel, link)
 }
 
-// AbsoluteSymlink is used only for local untracked state under .merk/cache.
+// AbsoluteSymlink is used only for local untracked state under .git-sfs/cache.
 func AbsoluteSymlink(target, link string) error {
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 		return err
