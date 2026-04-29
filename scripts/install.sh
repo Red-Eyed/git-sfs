@@ -1,6 +1,6 @@
 set -eu
 
-repo="${MERK_REPO:-vadstup/merk}"
+repo="${MERK_REPO:-Red-Eyed/merk}"
 version="${MERK_VERSION:-latest}"
 install_dir="${MERK_INSTALL_DIR:-$HOME/.local/bin}"
 

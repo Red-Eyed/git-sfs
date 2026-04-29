@@ -1,7 +1,7 @@
 # merk
 
-[![CI](https://github.com/vadstup/merk/actions/workflows/ci.yml/badge.svg)](https://github.com/vadstup/merk/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/vadstup/merk/branch/main/graph/badge.svg)](https://codecov.io/gh/vadstup/merk)
+[![CI](https://github.com/Red-Eyed/merk/actions/workflows/ci.yml/badge.svg)](https://github.com/Red-Eyed/merk/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Red-Eyed/merk/branch/main/graph/badge.svg)](https://codecov.io/gh/Red-Eyed/merk)
 
 `merk` is a small CLI for keeping large files out of Git while keeping your
 repository simple, cloneable, and understandable.
@@ -70,7 +70,7 @@ the bytes. The remote stores the same SHA-256 file layout.
 ## Install
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
 ```
 
 Prebuilt release binaries are published for:
@@ -91,7 +91,7 @@ $HOME/.local/bin
 You can override the install location:
 
 ```sh
-MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
 ```
 
 Or build from source:

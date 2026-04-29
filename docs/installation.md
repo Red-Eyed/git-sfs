@@ -3,7 +3,7 @@
 Install the latest release:
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
 ```
 
 By default this installs to:
@@ -15,13 +15,13 @@ $HOME/.local/bin/merk
 Override the install directory:
 
 ```sh
-MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
 ```
 
 Install a specific version:
 
 ```sh
-MERK_VERSION=v0.1.0 curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+MERK_VERSION=v0.1.0 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/merk/main/scripts/install.sh | sh
 ```
 
 Supported release targets:
