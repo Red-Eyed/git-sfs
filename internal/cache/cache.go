@@ -1,0 +1,55 @@
+package cache
+
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/vadstup/merk/internal/fsutil"
+	"github.com/vadstup/merk/internal/hash"
+)
+
+type Cache struct {
+	Root string
+}
+
+// ObjectPath returns the deterministic content-addressed location for h.
+func (c Cache) ObjectPath(h hash.Hash) string {
+	return filepath.Join(c.Root, "objects", hash.Algorithm, h.Prefix(), h.String())
+}
+
+func (c Cache) TmpDir() string   { return filepath.Join(c.Root, "tmp") }
+func (c Cache) LocksDir() string { return filepath.Join(c.Root, "locks") }
+
+func (c Cache) Init() error {
+	for _, p := range []string{
+		filepath.Join(c.Root, "objects", hash.Algorithm),
+		c.TmpDir(),
+		c.LocksDir(),
+	} {
+		if err := fsutil.EnsureDir(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c Cache) HasValid(h hash.Hash) bool {
+	return hash.VerifyFile(c.ObjectPath(h), h) == nil
+}
+
+// Store copies src into the cache only after naming it by its expected hash.
+// The final object is accepted only if its bytes still match h.
+func (c Cache) Store(src string, h hash.Hash) error {
+	dst := c.ObjectPath(h)
+	if c.HasValid(h) {
+		return nil
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := fsutil.AtomicCopy(src, dst, st.Mode().Perm()); err != nil {
+		return err
+	}
+	return hash.VerifyFile(dst, h)
+}

@@ -1,0 +1,100 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "commands:") {
+		t.Fatalf("help output missing commands: %q", stdout.String())
+	}
+}
+
+func TestRunHelp(t *testing.T) {
+	if err := Run(context.Background(), []string{"help"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnknownCommandFails(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"wat"}, &stdout, &stderr); err == nil {
+		t.Fatal("expected unknown command to fail")
+	}
+}
+
+func TestCommandDispatch(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inDir(t, repo, func() {
+		var stdout, stderr bytes.Buffer
+		cacheDir := filepath.Join(t.TempDir(), "cache")
+		if err := run(context.Background(), []string{"init"}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		remoteDir := filepath.Join(t.TempDir(), "remote")
+		dataset := "version: 1\n\nremotes:\n  default:\n    type: filesystem\n    url: " + remoteDir + "\n\nsettings:\n  algorithm: sha256\n"
+		if err := os.WriteFile(filepath.Join(repo, "dataset.yaml"), []byte(dataset), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, ".ds", "local.yaml"), []byte("cache:\n  path: "+cacheDir+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(repo, "data"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "data", "blob"), []byte("payload"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"setup"},
+			{"add", "data/blob"},
+			{"status"},
+			{"verify"},
+			{"push"},
+			{"pull", "data/blob"},
+			{"dematerialize", "data/blob"},
+			{"materialize", "data/blob"},
+			{"gc", "--dry-run"},
+		} {
+			if err := run(context.Background(), args, &stdout, &stderr); err != nil {
+				t.Fatalf("%v: %v stderr=%s stdout=%s", args, err, stderr.String(), stdout.String())
+			}
+		}
+	})
+}
+
+func TestAddRequiresPath(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"add"}, &stdout, &stderr); err == nil {
+		t.Fatal("expected add without paths to fail")
+	}
+}
+
+func inDir(t *testing.T, dir string, fn func()) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	fn()
+}

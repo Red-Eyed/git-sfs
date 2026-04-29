@@ -1,0 +1,90 @@
+package remote
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/vadstup/merk/internal/hash"
+)
+
+func TestFilesystemRemotePushPullVerifiesHashes(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := hash.File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewFilesystem(filepath.Join(dir, "remote"))
+	has, err := r.HasObject(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("remote should start empty")
+	}
+	if err := r.PushObject(ctx, h, src); err != nil {
+		t.Fatal(err)
+	}
+	has, err = r.HasObject(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("remote should have pushed object")
+	}
+	dst := filepath.Join(dir, "dst")
+	if err := r.PullObject(ctx, h, dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := hash.VerifyFile(dst, h); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "remote", "objects", hash.Algorithm, h.Prefix(), h.String()), []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.PullObject(ctx, h, filepath.Join(dir, "bad-dst")); err == nil {
+		t.Fatal("expected corrupt remote object to be rejected")
+	}
+}
+
+func TestFilesystemRemoteContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := NewFilesystem(t.TempDir())
+	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if _, err := r.HasObject(ctx, h); err == nil {
+		t.Fatal("expected canceled has")
+	}
+	if err := r.PushObject(ctx, h, filepath.Join(t.TempDir(), "src")); err == nil {
+		t.Fatal("expected canceled push")
+	}
+	if err := r.PullObject(ctx, h, filepath.Join(t.TempDir(), "dst")); err == nil {
+		t.Fatal("expected canceled pull")
+	}
+}
+
+func TestFilesystemRemotePushSkipsExistingValidObject(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := hash.File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewFilesystem(filepath.Join(dir, "remote"))
+	if err := r.PushObject(ctx, h, src); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.PushObject(ctx, h, filepath.Join(dir, "missing")); err != nil {
+		t.Fatal(err)
+	}
+}

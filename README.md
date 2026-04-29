@@ -1,0 +1,279 @@
+# merk
+
+[![CI](https://github.com/vadstup/merk/actions/workflows/ci.yml/badge.svg)](https://github.com/vadstup/merk/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/vadstup/merk/branch/main/graph/badge.svg)](https://codecov.io/gh/vadstup/merk)
+
+`merk` is a small CLI for keeping large files out of Git while keeping your
+repository simple, cloneable, and understandable.
+
+It is like Git LFS in spirit, but Git tracks normal symlinks instead of pointer
+files. The large file bytes live in a local content-addressed cache and can be
+synced to a remote over plain `rsync` or `ssh`.
+
+```text
+Git tracks symlinks.
+merk stores file bytes.
+rsync/ssh moves objects.
+```
+
+No LFS server. No database. No hidden manifest branch. No custom Git protocol.
+
+## Why merk?
+
+Git is excellent at source code and metadata. It is not excellent at multi-GB
+datasets, model checkpoints, media dumps, build artifacts, or experiment blobs.
+
+`merk` gives you a boring, explicit way to keep those bytes outside Git while
+still letting the Git tree describe exactly which files belong in the project.
+
+Use `merk` when you want:
+
+- A repo that stays small and fast
+- Large files addressed by SHA-256 content hash
+- A cache path that is local to each machine and never committed
+- A remote layout you can inspect with `ssh`, `rsync`, or `find`
+- CI checks that fail when referenced objects are missing or corrupt
+- Another machine to clone the repo, run `merk setup`, run `merk pull`, and work
+
+`merk` is intentionally not a platform. It is a thin layer over Git symlinks,
+a local cache, and simple remote object storage.
+
+## How It Works
+
+Suppose you add a large file:
+
+```text
+data/train-000.tar.zst
+```
+
+`merk add data/train-000.tar.zst` hashes the file, stores the bytes in your
+local cache, and replaces the file with a Git-tracked symlink:
+
+```text
+data/train-000.tar.zst -> ../.ds/worktree/sha256/ab/<hash>
+```
+
+The local `.ds/worktree` path is untracked and points to the real cached object:
+
+```text
+.ds/worktree/sha256/ab/<hash> -> <cache>/objects/sha256/ab/<hash>
+```
+
+Opening `data/train-000.tar.zst` follows the symlink chain and reads the cached
+file bytes.
+
+Git stores the file list as ordinary directories and symlinks. The cache stores
+the bytes. The remote stores the same SHA-256 object layout.
+
+## Install
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+```
+
+Prebuilt release binaries are published for:
+
+```text
+macOS arm64
+macOS x86_64
+Linux arm64
+Linux x86_64
+```
+
+By default this installs `merk` into:
+
+```text
+$HOME/.local/bin
+```
+
+You can override the install location:
+
+```sh
+MERK_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/vadstup/merk/main/scripts/install.sh | sh
+```
+
+Or build from source:
+
+```sh
+go build ./cmd/merk
+```
+
+The installer detects macOS/Linux and arm64/x86_64 automatically.
+
+## Quick Start
+
+Create project metadata:
+
+```sh
+merk init
+```
+
+Configure your local cache path. This file is intentionally untracked:
+
+```sh
+mkdir -p .ds
+cat > .ds/local.yaml <<EOF
+cache:
+  path: /mnt/shared/merk-cache
+EOF
+```
+
+Edit `dataset.yaml` and set your remote:
+
+```yaml
+version: 1
+
+remotes:
+  default:
+    type: rsync
+    url: user@host:/mnt/datasets/project
+
+settings:
+  algorithm: sha256
+```
+
+Initialize local state:
+
+```sh
+merk setup
+```
+
+Add large files:
+
+```sh
+merk add data/
+```
+
+Commit the metadata:
+
+```sh
+git add dataset.yaml .gitignore data/
+git commit -m "track dataset files with merk"
+```
+
+Upload objects:
+
+```sh
+merk push
+```
+
+On another machine:
+
+```sh
+git clone <repo>
+cd <repo>
+mkdir -p .ds
+cat > .ds/local.yaml <<EOF
+cache:
+  path: /mnt/shared/merk-cache
+EOF
+merk setup
+merk pull
+```
+
+The files under `data/` now open normally through symlinks.
+
+## Commands
+
+```sh
+merk init
+merk setup
+merk add <path>
+merk status
+merk verify
+merk push [remote]
+merk pull [path]
+merk materialize [path]
+merk dematerialize [path]
+merk gc --dry-run
+merk gc --worktree-only
+merk gc --objects
+```
+
+## Configuration
+
+`dataset.yaml` is committed to Git:
+
+```yaml
+version: 1
+
+remotes:
+  default:
+    type: rsync
+    url: user@host:/mnt/datasets/project
+
+settings:
+  algorithm: sha256
+```
+
+It must not contain cache paths, secrets, tokens, or machine-local state.
+
+`.ds/local.yaml` is not committed:
+
+```yaml
+cache:
+  path: /mnt/shared/merk-cache
+```
+
+Cache resolution order:
+
+```text
+--cache
+MERK_CACHE
+.ds/local.yaml
+```
+
+## Remote Storage
+
+Remote storage uses the same content-addressed object layout as the local cache:
+
+```text
+objects/sha256/ab/<full_hash>
+```
+
+The first supported remote styles are:
+
+```text
+rsync
+ssh
+filesystem
+```
+
+This keeps the remote easy to inspect, back up, mirror, or repair with ordinary
+Unix tools.
+
+## Safety
+
+`merk` is designed around retry-safe operations:
+
+- Objects are addressed by SHA-256
+- Downloads are hash-verified before being accepted
+- Corrupt cache objects are detected
+- Local cache paths are never written to Git-tracked config
+- `.ds/` is untracked and gitignored
+- Missing and broken symlinks are reported by `merk status` and `merk verify`
+
+For CI, run:
+
+```sh
+merk verify
+```
+
+It exits non-zero if referenced objects are missing, corrupt, or incorrectly
+materialized.
+
+## Project Status
+
+`merk` is early. The core local workflow, filesystem remote path, tests, smoke
+test, and release automation are in place. The design intentionally favors a
+small, auditable implementation over a large feature surface.
+
+The goal is not to replace every large-file tool. The goal is to make the common
+case boring:
+
+```text
+clone repo
+configure cache
+pull objects
+use files
+```
