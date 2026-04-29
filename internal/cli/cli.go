@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/vadstup/merk/internal/core"
+	"merk/internal/core"
 )
 
 type options struct {

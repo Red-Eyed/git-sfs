@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vadstup/merk/internal/hash"
+	"merk/internal/hash"
 )
 
 func TestNewCommandRemotesUseFilesystemForLocalPaths(t *testing.T) {

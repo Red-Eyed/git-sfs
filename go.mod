@@ -1,3 +1,3 @@
-module github.com/vadstup/merk
+module merk
 
 go 1.22

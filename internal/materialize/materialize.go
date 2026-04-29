@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vadstup/merk/internal/cache"
-	"github.com/vadstup/merk/internal/fsutil"
-	"github.com/vadstup/merk/internal/hash"
-	"github.com/vadstup/merk/internal/merkpath"
+	"merk/internal/cache"
+	"merk/internal/fsutil"
+	"merk/internal/hash"
+	"merk/internal/merkpath"
 )
 
 // Link creates or repairs the untracked .ds/worktree symlink for h.

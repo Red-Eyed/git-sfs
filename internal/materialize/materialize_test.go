@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vadstup/merk/internal/cache"
-	"github.com/vadstup/merk/internal/hash"
-	"github.com/vadstup/merk/internal/merkpath"
+	"merk/internal/cache"
+	"merk/internal/hash"
+	"merk/internal/merkpath"
 )
 
 func TestLinkAndUnlink(t *testing.T) {

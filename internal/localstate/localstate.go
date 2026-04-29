@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vadstup/merk/internal/cache"
-	"github.com/vadstup/merk/internal/config"
+	"merk/internal/cache"
+	"merk/internal/config"
 )
 
 // ResolveRepo walks upward from the current directory until it finds .git.

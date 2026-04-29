@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vadstup/merk/internal/hash"
+	"merk/internal/hash"
 )
 
 type rsyncRemote struct{ url string }

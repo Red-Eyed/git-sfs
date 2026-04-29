@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vadstup/merk/internal/cli"
+	"merk/internal/cli"
 )
 
 func main() {

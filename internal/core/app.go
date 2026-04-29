@@ -9,14 +9,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vadstup/merk/internal/cache"
-	"github.com/vadstup/merk/internal/config"
-	"github.com/vadstup/merk/internal/hash"
-	"github.com/vadstup/merk/internal/localstate"
-	"github.com/vadstup/merk/internal/lock"
-	"github.com/vadstup/merk/internal/materialize"
-	"github.com/vadstup/merk/internal/merkpath"
-	"github.com/vadstup/merk/internal/remote"
+	"merk/internal/cache"
+	"merk/internal/config"
+	"merk/internal/hash"
+	"merk/internal/localstate"
+	"merk/internal/lock"
+	"merk/internal/materialize"
+	"merk/internal/merkpath"
+	"merk/internal/remote"
 )
 
 type App struct {

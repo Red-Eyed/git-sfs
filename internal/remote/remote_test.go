@@ -3,7 +3,7 @@ package remote
 import (
 	"testing"
 
-	"github.com/vadstup/merk/internal/config"
+	"merk/internal/config"
 )
 
 func TestNewRemote(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vadstup/merk/internal/hash"
+	"merk/internal/hash"
 )
 
 func TestParseGitSymlink(t *testing.T) {

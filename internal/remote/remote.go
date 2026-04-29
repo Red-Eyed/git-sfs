@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vadstup/merk/internal/config"
-	"github.com/vadstup/merk/internal/hash"
+	"merk/internal/config"
+	"merk/internal/hash"
 )
 
 // Remote hides backend details from push and pull workflow code.

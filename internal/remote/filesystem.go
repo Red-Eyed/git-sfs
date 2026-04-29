@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vadstup/merk/internal/fsutil"
-	"github.com/vadstup/merk/internal/hash"
+	"merk/internal/fsutil"
+	"merk/internal/hash"
 )
 
 type filesystemRemote struct {

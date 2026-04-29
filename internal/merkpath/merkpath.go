@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vadstup/merk/internal/hash"
+	"merk/internal/hash"
 )
 
 // WorktreeFile is the untracked local hop that Git-tracked symlinks point at.

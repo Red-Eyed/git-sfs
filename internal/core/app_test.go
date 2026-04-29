@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vadstup/merk/internal/hash"
-	"github.com/vadstup/merk/internal/merkpath"
+	"merk/internal/hash"
+	"merk/internal/merkpath"
 )
 
 func TestAddVerifyDematerializeMaterializeAndStatus(t *testing.T) {
