@@ -60,11 +60,11 @@ func TestResolveCachePriority(t *testing.T) {
 		t.Fatalf("env did not win: %q", c.Root)
 	}
 	t.Setenv("MERK_CACHE", "")
-	if err := os.MkdirAll(filepath.Join(repo, ".ds"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	local := filepath.Join(repo, ".ds", "local.yaml")
-	if err := os.WriteFile(local, []byte("cache:\n  path: "+filepath.Join(repo, "local-cache")+"\n"), 0o644); err != nil {
+	local := filepath.Join(repo, "local-cache")
+	if err := os.Symlink(local, filepath.Join(repo, ".merk", "cache")); err != nil {
 		t.Fatal(err)
 	}
 	c, err = ResolveCache(repo, "")
@@ -83,13 +83,13 @@ func TestResolveCacheMissing(t *testing.T) {
 	}
 }
 
-func TestInitDS(t *testing.T) {
+func TestInitMerk(t *testing.T) {
 	repo := t.TempDir()
-	if err := InitDS(repo); err != nil {
+	if err := InitMerk(repo); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(filepath.Join(repo, ".ds", "worktree", "sha256")); err != nil || !info.IsDir() {
-		t.Fatalf("worktree dir missing: %v", err)
+	if info, err := os.Stat(filepath.Join(repo, ".merk")); err != nil || !info.IsDir() {
+		t.Fatalf(".merk dir missing: %v", err)
 	}
 }
 

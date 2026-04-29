@@ -9,14 +9,14 @@ import (
 	"merk/internal/hash"
 )
 
-// WorktreeFile is the untracked local hop that Git-tracked symlinks point at.
-func WorktreeFile(repo string, h hash.Hash) string {
-	return filepath.Join(repo, ".ds", "worktree", hash.Algorithm, h.Prefix(), h.String())
+// CacheLinkFile is the repo-local path exposed through .merk/cache.
+func CacheLinkFile(repo string, h hash.Hash) string {
+	return filepath.Join(repo, ".merk", "cache", "files", hash.Algorithm, h.Prefix(), h.String())
 }
 
 // GitLinkTarget returns the relative symlink target that is safe to commit.
 func GitLinkTarget(repo, file string, h hash.Hash) (string, error) {
-	return filepath.Rel(filepath.Dir(file), WorktreeFile(repo, h))
+	return filepath.Rel(filepath.Dir(file), CacheLinkFile(repo, h))
 }
 
 // ParseGitSymlink validates the committed symlink format and extracts its hash.
@@ -28,13 +28,13 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 	if filepath.IsAbs(target) {
 		return "", target, fmt.Errorf("git symlink %s has absolute target %s", file, target)
 	}
-	// Git symlinks must resolve into .ds/worktree so machine-local cache paths
+	// Git symlinks point through .merk/cache so machine-local cache paths
 	// never appear in committed metadata.
 	resolved := filepath.Clean(filepath.Join(filepath.Dir(file), target))
-	wantRoot := filepath.Join(repo, ".ds", "worktree", hash.Algorithm)
+	wantRoot := filepath.Join(repo, ".merk", "cache", "files", hash.Algorithm)
 	rel, err := filepath.Rel(wantRoot, resolved)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
-		return "", target, fmt.Errorf("git symlink %s does not point into .ds/worktree", file)
+		return "", target, fmt.Errorf("git symlink %s does not point into .merk/cache", file)
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) != 2 {

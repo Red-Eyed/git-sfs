@@ -26,7 +26,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	var opts options
 	fs.StringVar(&opts.cache, "cache", "", "cache directory")
-	fs.StringVar(&opts.config, "config", "dataset.yaml", "dataset config path")
+	fs.StringVar(&opts.config, "config", ".merk/config.toml", "dataset config path")
 	fs.BoolVar(&opts.verbose, "verbose", false, "verbose output")
 	fs.BoolVar(&opts.quiet, "quiet", false, "quiet output")
 	if err := fs.Parse(args); err != nil {
@@ -89,14 +89,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "gc":
 		gfs := flag.NewFlagSet("gc", flag.ContinueOnError)
 		gfs.SetOutput(stderr)
-		var dryRun, worktreeOnly, files bool
+		var dryRun, files bool
 		gfs.BoolVar(&dryRun, "dry-run", false, "show what would be deleted")
-		gfs.BoolVar(&worktreeOnly, "worktree-only", false, "remove unused worktree links")
 		gfs.BoolVar(&files, "files", false, "remove unreferenced cache files")
 		if err := gfs.Parse(cmdArgs); err != nil {
 			return err
 		}
-		return app.GC(ctx, core.GCOptions{DryRun: dryRun, WorktreeOnly: worktreeOnly, Files: files})
+		return app.GC(ctx, core.GCOptions{DryRun: dryRun, Files: files})
 	case "help", "-h", "--help":
 		usage(stdout)
 		return nil

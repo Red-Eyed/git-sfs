@@ -57,7 +57,7 @@ func RelSymlink(target, link string) error {
 	return os.Symlink(rel, link)
 }
 
-// AbsoluteSymlink is used only for local untracked state under .ds/worktree.
+// AbsoluteSymlink is used only for local untracked state under .merk/cache.
 func AbsoluteSymlink(target, link string) error {
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 		return err

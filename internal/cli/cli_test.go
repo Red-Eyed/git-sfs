@@ -39,16 +39,12 @@ func TestCommandDispatch(t *testing.T) {
 	}
 	inDir(t, repo, func() {
 		var stdout, stderr bytes.Buffer
-		cacheDir := filepath.Join(t.TempDir(), "cache")
 		if err := run(context.Background(), []string{"init"}, &stdout, &stderr); err != nil {
 			t.Fatal(err)
 		}
 		remoteDir := filepath.Join(t.TempDir(), "remote")
-		dataset := "version: 1\n\nremotes:\n  default:\n    type: filesystem\n    url: " + remoteDir + "\n\nsettings:\n  algorithm: sha256\n"
-		if err := os.WriteFile(filepath.Join(repo, "dataset.yaml"), []byte(dataset), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, ".ds", "local.yaml"), []byte("cache:\n  path: "+cacheDir+"\n"), 0o644); err != nil {
+		dataset := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = " + remoteDir + "\n\n[settings]\nalgorithm = sha256\n"
+		if err := os.WriteFile(filepath.Join(repo, ".merk/config.toml"), []byte(dataset), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.MkdirAll(filepath.Join(repo, "data"), 0o755); err != nil {

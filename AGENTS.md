@@ -15,9 +15,9 @@ Project direction:
 
 Core model:
 
-- Git tracks `dataset.yaml` and relative symlinks.
-- Git symlinks point into `.ds/worktree/sha256/<prefix>/<hash>`.
-- `.ds/worktree` symlinks point to cache files.
+- Git tracks `.merk/config.toml` and relative symlinks.
+- Git symlinks point into `.merk/cache/files/sha256/<prefix>/<hash>`.
+- ``.merk/cache` is a symlink to the cache root.
 - Cache files live at `<cache>/files/sha256/<prefix>/<hash>`.
 - Cache path is local state and must never be committed.
 

@@ -8,8 +8,8 @@ import (
 )
 
 func TestDatasetRejectsCachePath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dataset.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\ncache:\n  path: /tmp/cache\nsettings:\n  algorithm: sha256\n"), 0o644); err != nil {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("version = 1\n\n[cache]\npath = /tmp/cache\n\n[settings]\nalgorithm = sha256\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {
@@ -18,8 +18,8 @@ func TestDatasetRejectsCachePath(t *testing.T) {
 }
 
 func TestLoadDataset(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dataset.yaml")
-	content := "version: 1\n\nremotes:\n  default:\n    type: filesystem\n    url: /tmp/remote\n  backup:\n    type: rsync\n    url: host:/remote\n\nsettings:\n  algorithm: sha256\n"
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = /tmp/remote\n\n[remotes.backup]\ntype = rsync\nurl = host:/remote\n\n[settings]\nalgorithm = sha256\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -47,16 +47,16 @@ func TestDefault(t *testing.T) {
 
 func TestLoadDatasetErrors(t *testing.T) {
 	cases := map[string]string{
-		"missing version":        "settings:\n  algorithm: sha256\n",
-		"bad version":            "version: 2\nsettings:\n  algorithm: sha256\n",
-		"bad algorithm":          "version: 1\nsettings:\n  algorithm: md5\n",
-		"unknown root":           "version: 1\nwat: true\n",
-		"unknown settings field": "version: 1\nsettings:\n  other: x\n",
-		"remote missing url":     "version: 1\nremotes:\n  default:\n    type: filesystem\nsettings:\n  algorithm: sha256\n",
+		"missing version":        "[settings]\nalgorithm = sha256\n",
+		"bad version":            "version = 2\n[settings]\nalgorithm = sha256\n",
+		"bad algorithm":          "version = 1\n[settings]\nalgorithm = md5\n",
+		"unknown root":           "version = 1\nwat = true\n",
+		"unknown settings field": "version = 1\n[settings]\nother = x\n",
+		"remote missing url":     "version = 1\n[remotes.default]\ntype = filesystem\n[settings]\nalgorithm = sha256\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "dataset.yaml")
+			path := filepath.Join(t.TempDir(), "config.toml")
 			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +68,7 @@ func TestLoadDatasetErrors(t *testing.T) {
 }
 
 func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dataset.yaml")
+	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := WriteDefault(path); err != nil {
 		t.Fatal(err)
 	}
@@ -78,12 +78,12 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 	}
 	text := string(content)
 	for _, want := range []string{
-		"# merk dataset config",
-		"type: rsync",
-		"url: user@host:/mnt/datasets/project",
-		"#   type: ssh",
-		"#   type: filesystem",
-		"algorithm: sha256",
+		"# merk project config",
+		"type = \"rsync\"",
+		"url = \"user@host:/mnt/datasets/project\"",
+		"# type = \"ssh\"",
+		"# type = \"filesystem\"",
+		"algorithm = \"sha256\"",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default config missing %q:\n%s", want, text)
@@ -92,7 +92,7 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 }
 
 func TestWriteDefault(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dataset.yaml")
+	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := WriteDefault(path); err != nil {
 		t.Fatal(err)
 	}
@@ -103,11 +103,11 @@ func TestWriteDefault(t *testing.T) {
 
 func TestLoadLocal(t *testing.T) {
 	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repo, ".ds"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(repo, "cache")
-	if err := os.WriteFile(filepath.Join(repo, ".ds", "local.yaml"), []byte("cache:\n  path: "+want+"\n"), 0o644); err != nil {
+	if err := os.Symlink(want, filepath.Join(repo, ".merk", "cache")); err != nil {
 		t.Fatal(err)
 	}
 	local, err := LoadLocal(repo)

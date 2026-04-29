@@ -18,11 +18,10 @@ rclone lsf remote-name:datasets/project/files
 
 Use a local or mounted directory:
 
-```yaml
-remotes:
-  default:
-    type: filesystem
-    url: /mnt/datasets/project
+```toml
+[remotes.default]
+type = "filesystem"
+url = "/mnt/datasets/project"
 ```
 
 Good for:
@@ -36,11 +35,10 @@ Good for:
 
 Use an rsync-style destination:
 
-```yaml
-remotes:
-  default:
-    type: rsync
-    url: user@host:/mnt/datasets/project
+```toml
+[remotes.default]
+type = "rsync"
+url = "user@host:/mnt/datasets/project"
 ```
 
 Good for:
@@ -53,11 +51,10 @@ Good for:
 
 Use SSH command behavior with the same remote path style:
 
-```yaml
-remotes:
-  default:
-    type: ssh
-    url: user@host:/mnt/datasets/project
+```toml
+[remotes.default]
+type = "ssh"
+url = "user@host:/mnt/datasets/project"
 ```
 
 The current implementation delegates file transfer behavior through the command
@@ -67,11 +64,10 @@ backend and should remain inspectable as plain files on the remote host.
 
 Planned backend:
 
-```yaml
-remotes:
-  default:
-    type: rclone
-    url: remote-name:datasets/project
+```toml
+[remotes.default]
+type = "rclone"
+url = "remote-name:datasets/project"
 ```
 
 Rules for rclone support:
@@ -79,7 +75,7 @@ Rules for rclone support:
 - call the installed `rclone` CLI
 - keep the same `files/sha256/...` layout
 - do not add cloud-specific SDKs
-- do not add provider-specific config to `dataset.yaml`
+- do not add provider-specific config to `.merk/config.toml`
 - let users manage rclone credentials with rclone itself
 
 ## Remote Safety

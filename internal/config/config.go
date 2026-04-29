@@ -40,36 +40,36 @@ func Default() Config {
 }
 
 func WriteDefault(path string) error {
-	if err := os.WriteFile(path, []byte(defaultYAML), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(defaultTOML), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
 }
 
-const defaultYAML = `# merk dataset config. Commit this file to Git.
+const defaultTOML = `# merk project config. Commit this file to Git.
 # Do not put local cache paths, secrets, tokens, or machine-specific paths here.
 
-version: 1
+version = 1
 
-remotes:
-  # The default remote is used by merk push and merk pull when no remote is named.
-  default:
-    # Supported today: rsync, ssh, filesystem.
-    # Use rsync for a normal host:path destination.
-    type: rsync
-    url: user@host:/mnt/datasets/project
+# The default remote is used by merk push and merk pull when no remote is named.
+[remotes.default]
+# Supported today: rsync, ssh, filesystem.
+# Use rsync for a normal host:path destination.
+type = "rsync"
+url = "user@host:/mnt/datasets/project"
 
-  # Examples you can copy by removing the leading # characters.
-  # backup:
-  #   type: ssh
-  #   url: user@host:/mnt/datasets/project
-  # local:
-  #   type: filesystem
-  #   url: /mnt/datasets/project
+# Examples you can copy by removing the leading # characters.
+# [remotes.backup]
+# type = "ssh"
+# url = "user@host:/mnt/datasets/project"
+#
+# [remotes.local]
+# type = "filesystem"
+# url = "/mnt/datasets/project"
 
-settings:
-  # Only sha256 is supported in v1.
-  algorithm: sha256
+[settings]
+# Only sha256 is supported in v1.
+algorithm = "sha256"
 `
 
 func Load(path string) (Config, error) {
@@ -87,36 +87,25 @@ func Load(path string) (Config, error) {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		indent := len(raw) - len(strings.TrimLeft(raw, " "))
 		line := strings.TrimSpace(raw)
-		if indent == 0 {
-			key, val, ok := field(line)
-			if !ok {
-				return Config{}, fmt.Errorf("invalid config line %q", line)
-			}
-			switch key {
-			case "version":
-				if val != "1" {
-					return Config{}, fmt.Errorf("unsupported dataset.yaml version %q", val)
-				}
-				cfg.Version = Version
-			case "remotes", "settings":
-				section = key
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
+			switch {
+			case name == "settings":
+				section = "settings"
 				remote = ""
-			case "cache":
-				return Config{}, fmt.Errorf("dataset.yaml must not contain local cache configuration")
+			case strings.HasPrefix(name, "remotes."):
+				section = "remotes"
+				remote = strings.TrimPrefix(name, "remotes.")
+				if remote == "" {
+					return Config{}, fmt.Errorf("invalid remote section %q", name)
+				}
+				cfg.Remotes[remote] = RemoteConfig{}
+			case name == "cache" || strings.HasPrefix(name, "cache."):
+				return Config{}, fmt.Errorf(".merk/config.toml must not contain local cache configuration")
 			default:
-				return Config{}, fmt.Errorf("unknown dataset.yaml field %q", key)
+				return Config{}, fmt.Errorf("unknown .merk/config.toml section %q", name)
 			}
-			continue
-		}
-		if section == "remotes" && indent == 2 {
-			name := strings.TrimSuffix(line, ":")
-			if name == "" || name == line {
-				return Config{}, fmt.Errorf("invalid remote declaration %q", line)
-			}
-			remote = name
-			cfg.Remotes[remote] = RemoteConfig{}
 			continue
 		}
 		key, val, ok := field(line)
@@ -124,6 +113,18 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid config line %q", line)
 		}
 		switch section {
+		case "":
+			if key == "version" {
+				if val != "1" {
+					return Config{}, fmt.Errorf("unsupported .merk/config.toml version %q", val)
+				}
+				cfg.Version = Version
+				continue
+			}
+			if key == "cache" {
+				return Config{}, fmt.Errorf(".merk/config.toml must not contain local cache configuration")
+			}
+			return Config{}, fmt.Errorf("unknown .merk/config.toml field %q", key)
 		case "settings":
 			if key != "algorithm" {
 				return Config{}, fmt.Errorf("unknown settings field %q", key)
@@ -143,15 +144,13 @@ func Load(path string) (Config, error) {
 				return Config{}, fmt.Errorf("unknown remote field %q", key)
 			}
 			cfg.Remotes[remote] = rc
-		default:
-			return Config{}, fmt.Errorf("field %q outside a known section", key)
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return Config{}, err
 	}
 	if cfg.Version != Version {
-		return Config{}, fmt.Errorf("dataset.yaml must declare version: 1")
+		return Config{}, fmt.Errorf(".merk/config.toml must declare version = 1")
 	}
 	if cfg.Settings.Algorithm == "" {
 		cfg.Settings.Algorithm = "sha256"
@@ -168,50 +167,22 @@ func Load(path string) (Config, error) {
 }
 
 func LoadLocal(repo string) (Local, error) {
-	path := filepath.Join(repo, ".ds", "local.yaml")
-	f, err := os.Open(path)
+	path := filepath.Join(repo, ".merk", "cache")
+	target, err := os.Readlink(path)
 	if os.IsNotExist(err) {
 		return Local{}, nil
 	}
 	if err != nil {
-		return Local{}, err
+		return Local{}, fmt.Errorf("read cache link %s: %w", path, err)
 	}
-	defer f.Close()
-
-	var local Local
-	var section string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		raw := stripComment(sc.Text())
-		if strings.TrimSpace(raw) == "" {
-			continue
-		}
-		indent := len(raw) - len(strings.TrimLeft(raw, " "))
-		line := strings.TrimSpace(raw)
-		if indent == 0 {
-			key, _, ok := field(line)
-			if !ok {
-				return Local{}, fmt.Errorf("invalid local config line %q", line)
-			}
-			if key != "cache" {
-				return Local{}, fmt.Errorf("unknown .ds/local.yaml field %q", key)
-			}
-			section = key
-			continue
-		}
-		key, val, ok := field(line)
-		if !ok {
-			return Local{}, fmt.Errorf("invalid local config line %q", line)
-		}
-		if section == "cache" && key == "path" {
-			local.CachePath = val
-		}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
 	}
-	return local, sc.Err()
+	return Local{CachePath: target}, nil
 }
 
 func field(line string) (string, string, bool) {
-	parts := strings.SplitN(line, ":", 2)
+	parts := strings.SplitN(line, "=", 2)
 	if len(parts) != 2 {
 		return "", "", false
 	}

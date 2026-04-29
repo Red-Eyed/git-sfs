@@ -7,13 +7,18 @@ import (
 
 	"merk/internal/cache"
 	"merk/internal/hash"
-	"merk/internal/merkpath"
 )
 
 func TestLinkAndUnlink(t *testing.T) {
 	repo := t.TempDir()
 	c := cache.Cache{Root: filepath.Join(t.TempDir(), "cache")}
 	if err := c.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(c.Root, filepath.Join(repo, ".merk", "cache")); err != nil {
 		t.Fatal(err)
 	}
 	src := filepath.Join(t.TempDir(), "src")
@@ -29,13 +34,6 @@ func TestLinkAndUnlink(t *testing.T) {
 	}
 	if err := Link(repo, c, h); err != nil {
 		t.Fatal(err)
-	}
-	target, err := os.Readlink(merkpath.WorktreeFile(repo, h))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if target != c.FilePath(h) {
-		t.Fatalf("got %q want %q", target, c.FilePath(h))
 	}
 	if err := Link(repo, c, h); err != nil {
 		t.Fatal(err)

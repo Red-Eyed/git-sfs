@@ -5,19 +5,13 @@
 ```sh
 git init my-project
 cd my-project
-merk init
-mkdir -p .ds
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /mnt/shared/merk-cache
-EOF
-merk setup
+merk --cache /mnt/shared/merk-cache init
 ```
 
-Edit `dataset.yaml` and set the remote.
+Edit `.merk/config.toml` and set the remote.
 
 ```sh
-git add dataset.yaml .gitignore
+git add .merk/config.toml .gitignore
 git commit -m "initialize merk"
 ```
 
@@ -44,12 +38,7 @@ merk push
 ```sh
 git clone <repo>
 cd <repo>
-mkdir -p .ds
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /mnt/shared/merk-cache
-EOF
-merk setup
+merk --cache /mnt/shared/merk-cache setup
 merk pull
 merk verify
 ```
@@ -80,12 +69,7 @@ MERK_CACHE=/tmp/merk-cache merk pull data/sample.bin
 ## Use A Shared Machine Cache
 
 ```sh
-mkdir -p .ds
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /mnt/shared/merk-cache
-EOF
-merk setup
+merk --cache /mnt/shared/merk-cache setup
 ```
 
 Multiple clones can use the same cache path if filesystem permissions allow it.
@@ -93,16 +77,12 @@ Multiple clones can use the same cache path if filesystem permissions allow it.
 ## Move To A New Cache
 
 ```sh
-merk dematerialize
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /new/cache/path
-EOF
-merk setup
+rm -f .merk/cache
+merk --cache /new/cache/path setup
 merk pull
 ```
 
-## Repair Broken Worktree Symlinks
+## Repair Broken Cache Binding
 
 ```sh
 merk setup
@@ -110,18 +90,13 @@ merk materialize
 merk verify
 ```
 
-If cached files exist, materialization can be repaired without downloading.
+If cached files exist, `.merk/cache` can be rebound without downloading.
 
-## Recover After Deleting .ds
+## Recover After Deleting .merk
 
 ```sh
-rm -rf .ds
-mkdir -p .ds
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /mnt/shared/merk-cache
-EOF
-merk setup
+rm -rf .merk/cache
+merk --cache /mnt/shared/merk-cache setup
 merk materialize
 merk verify
 ```
@@ -175,7 +150,7 @@ Git should show symlinks and config, not large file bytes.
 merk dematerialize data/
 ```
 
-This leaves cached bytes in place and removes only local `.ds/worktree` links.
+This leaves cached bytes in place. In the direct `.merk/cache` layout there are no per-file local links to remove.
 
 ## Clean Unused Local Cache Files
 
@@ -195,11 +170,10 @@ merk gc --files
 
 Useful for local testing or shared disks:
 
-```yaml
-remotes:
-  default:
-    type: filesystem
-    url: /mnt/datasets/project
+```toml
+[remotes.default]
+type = "filesystem"
+url = "/mnt/datasets/project"
 ```
 
 Then:
@@ -211,11 +185,10 @@ merk pull
 
 ## Work With An rsync Remote
 
-```yaml
-remotes:
-  default:
-    type: rsync
-    url: user@host:/mnt/datasets/project
+```toml
+[remotes.default]
+type = "rsync"
+url = "user@host:/mnt/datasets/project"
 ```
 
 Then:
@@ -227,11 +200,10 @@ merk pull
 
 ## Work With An ssh Remote
 
-```yaml
-remotes:
-  default:
-    type: ssh
-    url: user@host:/mnt/datasets/project
+```toml
+[remotes.default]
+type = "ssh"
+url = "user@host:/mnt/datasets/project"
 ```
 
 Then:
@@ -245,11 +217,10 @@ merk pull
 
 The intended shape is:
 
-```yaml
-remotes:
-  default:
-    type: rclone
-    url: remote-name:datasets/project
+```toml
+[remotes.default]
+type = "rclone"
+url = "remote-name:datasets/project"
 ```
 
 `merk` should call the installed `rclone` CLI and keep the same plain file

@@ -32,18 +32,6 @@ func TestAddVerifyDematerializeMaterializeAndStatus(t *testing.T) {
 		if err := app.Status(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if err := app.Dematerialize(context.Background(), "data"); err != nil {
-			t.Fatal(err)
-		}
-		if err := app.Verify(context.Background()); err == nil {
-			t.Fatal("verify should fail after dematerialize removes worktree links")
-		}
-		if err := app.Materialize(context.Background(), "data"); err != nil {
-			t.Fatal(err)
-		}
-		if err := app.Verify(context.Background()); err != nil {
-			t.Fatal(err)
-		}
 	})
 
 	for _, rel := range []string{"data/one.bin", "data/nested/two.bin"} {
@@ -217,18 +205,20 @@ func TestGCDoesNotDeleteReferencedFiles(t *testing.T) {
 
 func TestInitSetupAndGitignore(t *testing.T) {
 	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
 	inDir(t, repo, func() {
 		stdout := &bytes.Buffer{}
 		a := app(stdout)
 		if err := a.Init(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(repo, ".ds", "local.yaml"), []byte("cache:\n  path: "+cacheDir+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
 		if err := a.Setup(context.Background()); err != nil {
 			t.Fatal(err)
+		}
+		if target, err := os.Readlink(filepath.Join(repo, ".merk", "cache")); err != nil || target == "" {
+			t.Fatalf("cache symlink missing: target=%q err=%v", target, err)
+		}
+		if info, err := os.Stat(filepath.Join(repo, ".merk", ".cache", "files")); err != nil || !info.IsDir() {
+			t.Fatalf("default cache missing: %v", err)
 		}
 		if err := a.Init(context.Background(), false); err == nil {
 			t.Fatal("init should not overwrite config")
@@ -240,35 +230,8 @@ func TestInitSetupAndGitignore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(gitignore), ".ds/") {
-			t.Fatalf(".gitignore missing .ds/: %q", gitignore)
-		}
-	})
-}
-
-func TestSetupRepairsExistingMaterialization(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		h, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(merkpath.WorktreeFile(repo, h)); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Setup(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Readlink(merkpath.WorktreeFile(repo, h)); err != nil {
-			t.Fatal(err)
+		if !strings.Contains(string(gitignore), ".merk/cache") {
+			t.Fatalf(".gitignore missing .merk/: %q", gitignore)
 		}
 	})
 }
@@ -276,8 +239,8 @@ func TestSetupRepairsExistingMaterialization(t *testing.T) {
 func TestStatusReportsInvalidConfig(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	content := "version: 1\n\nsettings:\n  algorithm: sha256\n"
-	mustWrite(t, filepath.Join(repo, "dataset.yaml"), []byte(content))
+	content := "version = 1\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".merk/config.toml"), []byte(content))
 	writeLocal(t, repo, cacheDir)
 	inDir(t, repo, func() {
 		stdout := &bytes.Buffer{}
@@ -286,43 +249,6 @@ func TestStatusReportsInvalidConfig(t *testing.T) {
 		}
 		if !strings.Contains(stdout.String(), "missing default remote") {
 			t.Fatalf("missing status output: %q", stdout.String())
-		}
-	})
-}
-
-func TestGCDryRunAndWorktreeOnly(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("live"))
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		dead := filepath.Join(repo, ".ds", "worktree", hash.Algorithm, "ff", strings.Repeat("f", 64))
-		if err := os.MkdirAll(filepath.Dir(dead), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(filepath.Join(cacheDir, "missing"), dead); err != nil {
-			t.Fatal(err)
-		}
-		out := &bytes.Buffer{}
-		if err := app(out).GC(context.Background(), GCOptions{DryRun: true, WorktreeOnly: true}); err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out.String(), "would remove") {
-			t.Fatalf("dry run output missing: %q", out.String())
-		}
-		if _, err := os.Lstat(dead); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.GC(context.Background(), GCOptions{WorktreeOnly: true}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Lstat(dead); !os.IsNotExist(err) {
-			t.Fatalf("dead worktree link still exists: %v", err)
 		}
 	})
 }
@@ -434,7 +360,7 @@ func app(stdout *bytes.Buffer) App {
 	return App{
 		Stdout:     stdout,
 		Stderr:     &bytes.Buffer{},
-		ConfigPath: "dataset.yaml",
+		ConfigPath: ".merk/config.toml",
 	}
 }
 
@@ -449,14 +375,18 @@ func newRepo(t *testing.T) string {
 
 func writeDataset(t *testing.T, repo, remote string) {
 	t.Helper()
-	content := "version: 1\n\nremotes:\n  default:\n    type: filesystem\n    url: " + remote + "\n\nsettings:\n  algorithm: sha256\n"
-	mustWrite(t, filepath.Join(repo, "dataset.yaml"), []byte(content))
+	content := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = " + remote + "\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".merk/config.toml"), []byte(content))
 }
 
 func writeLocal(t *testing.T, repo, cacheDir string) {
 	t.Helper()
-	content := "cache:\n  path: " + cacheDir + "\n"
-	mustWrite(t, filepath.Join(repo, ".ds", "local.yaml"), []byte(content))
+	if err := os.MkdirAll(filepath.Join(repo, ".merk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cacheDir, filepath.Join(repo, ".merk", "cache")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func mustWrite(t *testing.T, path string, content []byte) {

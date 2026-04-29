@@ -52,16 +52,16 @@ data/train-000.tar.zst
 local cache, and replaces the file with a Git-tracked symlink:
 
 ```text
-data/train-000.tar.zst -> ../.ds/worktree/sha256/ab/<hash>
+data/train-000.tar.zst -> ../.merk/cache/files/sha256/ab/<hash>
 ```
 
-The local `.ds/worktree` path is untracked and points to the real cached file:
+The local `.merk/cache` symlink is untracked and points to the real cache root:
 
 ```text
-.ds/worktree/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
+.merk/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
 ```
 
-Opening `data/train-000.tar.zst` follows the symlink chain and reads the cached
+Opening `data/train-000.tar.zst` follows `.merk/cache` and reads the cached
 file bytes.
 
 Git stores the file list as ordinary directories and symlinks. The cache stores
@@ -104,34 +104,29 @@ The installer detects macOS/Linux and arm64/x86_64 automatically.
 
 ## Quick Start
 
-Create project metadata. This creates a commented `dataset.yaml` starter file you can edit in place:
+Create project metadata. This creates a commented `.merk/config.toml` starter file you can edit in place:
 
 ```sh
 merk init
 ```
 
-Configure your local cache path. This file is intentionally untracked:
+`merk init` creates `.merk/.cache` and `.merk/cache` by default. To bind an external cache instead, pass a cache path:
 
 ```sh
-mkdir -p .ds
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /mnt/shared/merk-cache
-EOF
+merk --cache /mnt/shared/merk-cache init
 ```
 
-Edit `dataset.yaml` and set your remote:
+Edit `.merk/config.toml` and set your remote:
 
-```yaml
-version: 1
+```toml
+version = 1
 
-remotes:
-  default:
-    type: rsync
-    url: user@host:/mnt/datasets/project
+[remotes.default]
+type = "rsync"
+url = "user@host:/mnt/datasets/project"
 
-settings:
-  algorithm: sha256
+[settings]
+algorithm = "sha256"
 ```
 
 Initialize local state:
@@ -149,7 +144,7 @@ merk add data/
 Commit the metadata:
 
 ```sh
-git add dataset.yaml .gitignore data/
+git add .merk/config.toml .gitignore data/
 git commit -m "track dataset files with merk"
 ```
 
@@ -164,12 +159,7 @@ On another machine:
 ```sh
 git clone <repo>
 cd <repo>
-mkdir -p .ds
-cat > .ds/local.yaml <<EOF
-cache:
-  path: /mnt/shared/merk-cache
-EOF
-merk setup
+merk --cache /mnt/shared/merk-cache setup
 merk pull
 ```
 
@@ -195,7 +185,6 @@ merk pull [path]
 merk materialize [path]
 merk dematerialize [path]
 merk gc --dry-run
-merk gc --worktree-only
 merk gc --files
 ```
 
@@ -203,35 +192,29 @@ Detailed command reference: [docs/commands.md](docs/commands.md)
 
 ## Configuration
 
-`dataset.yaml` is committed to Git:
+`.merk/config.toml` is committed to Git:
 
-```yaml
-version: 1
+```toml
+version = 1
 
-remotes:
-  default:
-    type: rsync
-    url: user@host:/mnt/datasets/project
+[remotes.default]
+type = "rsync"
+url = "user@host:/mnt/datasets/project"
 
-settings:
-  algorithm: sha256
+[settings]
+algorithm = "sha256"
 ```
 
 It must not contain cache paths, secrets, tokens, or machine-local state.
 
-`.ds/local.yaml` is not committed:
-
-```yaml
-cache:
-  path: /mnt/shared/merk-cache
-```
+`.merk/cache` is a Git-ignored symlink to the real local cache. By default, `merk init` creates `.merk/.cache` and points `.merk/cache` at it.
 
 Cache resolution order:
 
 ```text
 --cache
 MERK_CACHE
-.ds/local.yaml
+.merk/cache
 ```
 
 Detailed configuration reference: [docs/configuration.md](docs/configuration.md)
@@ -277,7 +260,7 @@ Remote details: [docs/remotes.md](docs/remotes.md)
 - Downloads are hash-verified before being accepted
 - Corrupt cache files are detected
 - Local cache paths are never written to Git-tracked config
-- `.ds/` is untracked and gitignored
+- `.merk/` is untracked and gitignored
 - Missing and broken symlinks are reported by `merk status` and `merk verify`
 
 For CI, run:

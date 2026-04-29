@@ -46,9 +46,9 @@ func TestRejectsInvalidGitSymlinks(t *testing.T) {
 	repo := t.TempDir()
 	cases := map[string]string{
 		"outside":       "../outside",
-		"bad structure": filepath.Join(".ds", "worktree", hash.Algorithm, "aa"),
-		"bad hash":      filepath.Join(".ds", "worktree", hash.Algorithm, "aa", "not-a-hash"),
-		"bad prefix":    filepath.Join(".ds", "worktree", hash.Algorithm, "bb", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		"bad structure": filepath.Join(".merk", "cache", "files", hash.Algorithm, "aa"),
+		"bad hash":      filepath.Join(".merk", "cache", "files", hash.Algorithm, "aa", "not-a-hash"),
+		"bad prefix":    filepath.Join(".merk", "cache", "files", hash.Algorithm, "bb", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 	}
 	for name, target := range cases {
 		t.Run(name, func(t *testing.T) {

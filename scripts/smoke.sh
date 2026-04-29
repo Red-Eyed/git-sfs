@@ -20,22 +20,18 @@ go build -o "$BIN" "$ROOT/cmd/merk"
 init_repo() {
   local repo="$1"
   local cache="$2"
-  mkdir -p "$repo/.git" "$repo/.ds"
-  cat > "$repo/dataset.yaml" <<EOF
-version: 1
+  mkdir -p "$repo/.git" "$repo/.merk"
+  cat > "$repo/.merk/config.toml" <<EOF
+version = 1
 
-remotes:
-  default:
-    type: filesystem
-    url: $REMOTE
+[remotes.default]
+type = "filesystem"
+url = "$REMOTE"
 
-settings:
-  algorithm: sha256
+[settings]
+algorithm = "sha256"
 EOF
-  cat > "$repo/.ds/local.yaml" <<EOF
-cache:
-  path: $cache
-EOF
+  ln -s "$cache" "$repo/.merk/cache"
 }
 
 init_repo "$REPO_A" "$CACHE_A"
@@ -44,13 +40,10 @@ printf "large payload" > "$REPO_A/data/blob.bin"
 
 (cd "$REPO_A" && "$BIN" setup && "$BIN" add data && "$BIN" verify && "$BIN" push)
 
-cp "$REPO_A/dataset.yaml" "$REPO_B/dataset.yaml"
-mkdir -p "$REPO_B/.git" "$REPO_B/.ds" "$REPO_B/data"
+mkdir -p "$REPO_B/.git" "$REPO_B/.merk" "$REPO_B/data"
+cp "$REPO_A/.merk/config.toml" "$REPO_B/.merk/config.toml"
 cp -P "$REPO_A/data/blob.bin" "$REPO_B/data/blob.bin"
-cat > "$REPO_B/.ds/local.yaml" <<EOF
-cache:
-  path: $CACHE_B
-EOF
+ln -s "$CACHE_B" "$REPO_B/.merk/cache"
 
 (cd "$REPO_B" && "$BIN" setup && "$BIN" pull data/blob.bin && "$BIN" verify)
 test "$(cat "$REPO_B/data/blob.bin")" = "large payload"

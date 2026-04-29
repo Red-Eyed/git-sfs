@@ -60,7 +60,7 @@ merk verify
 
 ## Git Safety
 
-Git-tracked symlink targets must be relative and point into `.ds/worktree`.
+Git-tracked symlink targets must be relative and point into `.merk/cache`.
 
 This prevents absolute machine-local cache paths from being committed.
 

@@ -4,14 +4,14 @@
 
 Git tracks:
 
-- `dataset.yaml`
+- `.merk/config.toml`
 - relative symlinks for large files
 
 Git does not track:
 
 - large file bytes
 - local cache paths
-- `.ds/`
+- `.merk/`
 - remote state
 - temporary state
 
@@ -32,13 +32,13 @@ data/train-000.tar.zst
 The original file becomes a Git-tracked symlink:
 
 ```text
-data/train-000.tar.zst -> ../.ds/worktree/sha256/ab/<hash>
+data/train-000.tar.zst -> ../.merk/cache/files/sha256/ab/<hash>
 ```
 
-The local `.ds/worktree` symlink points to the cached file:
+The repo-local path goes through the `.merk/cache` symlink to the cached file:
 
 ```text
-.ds/worktree/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
+.merk/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
 ```
 
 Opening `data/train-000.tar.zst` reads the cached bytes through the symlink

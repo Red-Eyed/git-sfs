@@ -29,9 +29,8 @@ type App struct {
 }
 
 type GCOptions struct {
-	DryRun       bool
-	WorktreeOnly bool
-	Files        bool
+	DryRun bool
+	Files  bool
 }
 
 type issue struct {
@@ -51,12 +50,10 @@ var issueKinds = []string{
 	"broken git symlink",
 	"missing cache file",
 	"corrupt cache file",
-	"missing worktree symlink",
-	"stale worktree symlink",
 	"invalid config",
 }
 
-// Init creates the tracked project config and the untracked .ds workspace.
+// Init creates the tracked project config and the untracked .merk workspace.
 func (a App) Init(ctx context.Context, force bool) error {
 	repo, err := localstate.ResolveRepo()
 	if err != nil {
@@ -66,10 +63,27 @@ func (a App) Init(ctx context.Context, force bool) error {
 	if _, err := os.Stat(cfgPath); err == nil && !force {
 		return fmt.Errorf("%s already exists; use --force to overwrite", a.ConfigPath)
 	}
+	if err := localstate.InitMerk(repo); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		return err
+	}
 	if err := config.WriteDefault(cfgPath); err != nil {
 		return err
 	}
-	if err := localstate.InitDS(repo); err != nil {
+	c := cache.Cache{Root: filepath.Join(repo, ".merk", ".cache")}
+	if a.CacheFlag != "" || os.Getenv("MERK_CACHE") != "" {
+		var err error
+		c, err = localstate.ResolveCache(repo, a.CacheFlag)
+		if err != nil {
+			return err
+		}
+	}
+	if err := c.Init(); err != nil {
+		return err
+	}
+	if err := localstate.BindCache(repo, c); err != nil {
 		return err
 	}
 	if err := ensureGitignore(repo); err != nil {
@@ -86,7 +100,7 @@ func (a App) Setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := localstate.InitDS(repo); err != nil {
+	if err := localstate.InitMerk(repo); err != nil {
 		return err
 	}
 	if err := c.Init(); err != nil {
@@ -123,7 +137,7 @@ func (a App) Add(ctx context.Context, paths []string) error {
 	if err != nil {
 		return err
 	}
-	if err := localstate.InitDS(repo); err != nil {
+	if err := localstate.InitMerk(repo); err != nil {
 		return err
 	}
 	if err := c.Init(); err != nil {
@@ -312,8 +326,7 @@ func (a App) Push(ctx context.Context, name string) error {
 	return nil
 }
 
-// Pull downloads missing files for the selected symlinks and then restores
-// the local .ds/worktree links that make those symlinks usable.
+// Pull downloads missing files for the selected symlinks.
 func (a App) Pull(ctx context.Context, path string) error {
 	repo, c, cfg, err := a.open()
 	if err != nil {
@@ -364,8 +377,8 @@ func (a App) GC(ctx context.Context, opts GCOptions) error {
 		return err
 	}
 	defer l.Release()
-	if !opts.WorktreeOnly && !opts.Files {
-		opts.WorktreeOnly = true
+	if !opts.Files {
+		opts.Files = true
 	}
 	links, err := collectMerkSymlinks(repo, ".")
 	if err != nil {
@@ -378,12 +391,6 @@ func (a App) GC(ctx context.Context, opts GCOptions) error {
 			return err
 		}
 		live[h.String()] = true
-	}
-	if opts.WorktreeOnly {
-		root := filepath.Join(repo, ".ds", "worktree", hash.Algorithm)
-		if err := removeUnreferenced(root, live, opts.DryRun, a.Stdout); err != nil {
-			return err
-		}
 	}
 	if opts.Files {
 		root := filepath.Join(c.Root, "files", hash.Algorithm)
@@ -405,6 +412,9 @@ func (a App) open() (string, cache.Cache, config.Config, error) {
 	}
 	c, err := localstate.ResolveCache(repo, a.CacheFlag)
 	if err != nil {
+		return "", cache.Cache{}, config.Config{}, err
+	}
+	if err := localstate.BindCache(repo, c); err != nil {
 		return "", cache.Cache{}, config.Config{}, err
 	}
 	return repo, c, cfg, nil
@@ -463,24 +473,6 @@ func scan(repo string, c cache.Cache) (statusReport, error) {
 			})
 			return nil
 		}
-		work := merkpath.WorktreeFile(repo, h)
-		target, err := os.Readlink(work)
-		if err != nil {
-			report.Issues = append(report.Issues, issue{
-				Kind: "missing worktree symlink",
-				Path: rel(repo, path),
-				Hash: h.String(),
-			})
-			return nil
-		}
-		if target != cacheFile {
-			report.Issues = append(report.Issues, issue{
-				Kind:   "stale worktree symlink",
-				Path:   rel(repo, path),
-				Hash:   h.String(),
-				Detail: "target=" + target,
-			})
-		}
 		return nil
 	})
 	return report, err
@@ -529,10 +521,6 @@ func pluralKind(kind string) string {
 		return "missing cache files"
 	case "corrupt cache file":
 		return "corrupt cache files"
-	case "missing worktree symlink":
-		return "missing worktree symlinks"
-	case "stale worktree symlink":
-		return "stale worktree symlinks"
 	case "invalid config":
 		return "invalid config"
 	default:
@@ -580,10 +568,18 @@ func selectRemote(cfg config.Config, name string) (remote.Remote, error) {
 func ensureGitignore(repo string) error {
 	path := filepath.Join(repo, ".gitignore")
 	b, _ := os.ReadFile(path)
+	seen := map[string]bool{}
 	for _, line := range strings.Split(string(b), "\n") {
-		if strings.TrimSpace(line) == ".ds/" || strings.TrimSpace(line) == ".ds" {
-			return nil
+		seen[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, entry := range []string{".merk/cache", ".merk/.cache"} {
+		if !seen[entry] {
+			missing = append(missing, entry)
 		}
+	}
+	if len(missing) == 0 {
+		return nil
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -595,7 +591,7 @@ func ensureGitignore(repo string) error {
 			return err
 		}
 	}
-	_, err = f.WriteString(".ds/\n")
+	_, err = f.WriteString(strings.Join(missing, "\n") + "\n")
 	return err
 }
 
@@ -624,10 +620,10 @@ func removeUnreferenced(root string, live map[string]bool, dry bool, w io.Writer
 func shouldSkip(repo, path string) bool {
 	base := filepath.Base(path)
 	return base == ".git" ||
-		path == filepath.Join(repo, ".ds") ||
-		path == filepath.Join(repo, "dataset.yaml") ||
+		path == filepath.Join(repo, ".merk") ||
+		path == filepath.Join(repo, ".merk/config.toml") ||
 		path == filepath.Join(repo, ".gitignore") ||
-		strings.Contains(path, string(filepath.Separator)+".ds"+string(filepath.Separator))
+		strings.Contains(path, string(filepath.Separator)+".merk"+string(filepath.Separator))
 }
 
 func absFromRepo(repo, p string) string {

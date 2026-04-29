@@ -27,7 +27,7 @@ func ResolveRepo() (string, error) {
 	}
 }
 
-// ResolveCache keeps machine-local cache paths out of dataset.yaml.
+// ResolveCache keeps machine-local cache paths out of .merk/config.toml.
 func ResolveCache(repo, flagValue string) (cache.Cache, error) {
 	if flagValue != "" {
 		return cache.Cache{Root: abs(flagValue)}, nil
@@ -42,20 +42,44 @@ func ResolveCache(repo, flagValue string) (cache.Cache, error) {
 	if local.CachePath != "" {
 		return cache.Cache{Root: abs(local.CachePath)}, nil
 	}
-	return cache.Cache{}, fmt.Errorf("cache path is not configured; use --cache, MERK_CACHE, or .ds/local.yaml")
+	return cache.Cache{}, fmt.Errorf("cache path is not configured; use --cache, MERK_CACHE, or .merk/cache")
 }
 
-// InitDS creates the untracked local state directory used by materialization.
-func InitDS(repo string) error {
+// InitMerk creates the local project state directory used by materialization.
+func InitMerk(repo string) error {
 	for _, p := range []string{
-		filepath.Join(repo, ".ds"),
-		filepath.Join(repo, ".ds", "worktree", "sha256"),
+		filepath.Join(repo, ".merk"),
 	} {
 		if err := os.MkdirAll(p, 0o755); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func BindCache(repo string, c cache.Cache) error {
+	if c.Root == "" {
+		return nil
+	}
+	if err := InitMerk(repo); err != nil {
+		return err
+	}
+	link := filepath.Join(repo, ".merk", "cache")
+	target := abs(c.Root)
+	existing, err := os.Readlink(link)
+	if err == nil {
+		if !filepath.IsAbs(existing) {
+			existing = filepath.Join(filepath.Dir(link), existing)
+		}
+		if filepath.Clean(existing) == filepath.Clean(target) {
+			return nil
+		}
+		return fmt.Errorf("cache link %s points to %s, not %s", link, existing, target)
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read cache link %s: %w", link, err)
+	}
+	return os.Symlink(target, link)
 }
 
 func abs(path string) string {

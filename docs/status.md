@@ -22,7 +22,7 @@ Implemented:
 - Git-tracked symlink model
 - Local cache
 - SHA-256 file verification
-- Local materialization through `.ds/worktree`
+- Local cache binding through `.merk/cache`
 - Filesystem remote
 - Initial rsync/ssh command backend
 - CI

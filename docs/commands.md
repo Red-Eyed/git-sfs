@@ -2,7 +2,7 @@
 
 ## merk init
 
-Create initial project files, including a commented `dataset.yaml` starter file:
+Create initial project files, including a commented `.merk/config.toml` starter file:
 
 ```sh
 merk init
@@ -11,12 +11,12 @@ merk init
 Creates:
 
 ```text
-dataset.yaml
-.ds/
-.gitignore entry for .ds/
+.merk/config.toml
+.merk/
+.gitignore entries for .merk/cache and .merk/.cache
 ```
 
-It does not overwrite an existing `dataset.yaml` unless forced:
+It does not overwrite an existing `.merk/config.toml` unless forced:
 
 ```sh
 merk init --force
@@ -33,11 +33,11 @@ merk setup
 Responsibilities:
 
 - resolve cache path
-- create `.ds/`
-- create `.ds/worktree/`
+- create `.merk/`
+- create or read `.merk/cache`
 - create cache directories
-- validate `dataset.yaml`
-- repair `.ds/worktree` symlinks when cached files exist
+- validate `.merk/config.toml`
+- verify `.merk/cache` reaches the cache
 
 ## merk add
 
@@ -58,7 +58,6 @@ For each regular file, `merk`:
 - hashes bytes with SHA-256
 - stores bytes in the cache
 - replaces the file with a relative symlink
-- creates or repairs the `.ds/worktree` symlink
 
 ## merk status
 
@@ -74,8 +73,6 @@ Reports problems such as:
 - broken Git symlinks
 - missing cached files
 - corrupt cached files
-- missing `.ds/worktree` symlinks
-- stale `.ds/worktree` symlinks
 - invalid config
 
 Output starts with stable category counts:
@@ -86,8 +83,6 @@ unconverted files: 0
 broken git symlinks: 0
 missing cache files: 0
 corrupt cache files: 0
-missing worktree symlinks: 0
-stale worktree symlinks: 0
 invalid config: 0
 ```
 
@@ -139,7 +134,7 @@ the intended way to partially pull a dataset from the remote.
 
 ## merk materialize
 
-Create or repair local `.ds/worktree` symlinks:
+Verify local `.merk/cache` can reach selected cached files:
 
 ```sh
 merk materialize
@@ -150,7 +145,7 @@ This does not copy or modify cached bytes.
 
 ## merk dematerialize
 
-Remove local `.ds/worktree` symlinks:
+No-op compatibility command for the direct `.merk/cache` layout:
 
 ```sh
 merk dematerialize
@@ -161,16 +156,10 @@ This does not delete cached bytes.
 
 ## merk gc
 
-Show unused local state:
+Show unreferenced cached files:
 
 ```sh
 merk gc --dry-run
-```
-
-Remove unused worktree symlinks:
-
-```sh
-merk gc --worktree-only
 ```
 
 Remove unreferenced cached files:

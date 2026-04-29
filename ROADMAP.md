@@ -28,13 +28,13 @@ databases, daemons, custom protocols, and hidden metadata.
   - `locks`
 - SHA-256 hashing and verification
 - Git symlink validation
-- `.ds/worktree` materialization
+- `.merk/cache` cache-root symlink
 - Cache path resolution:
   - `--cache`
   - `MERK_CACHE`
-  - `.ds/local.yaml`
-- `dataset.yaml` parsing and validation
-- Rejection of cache paths in `dataset.yaml`
+  - `.merk/cache`
+- `.merk/config.toml` parsing and validation
+- Rejection of cache paths in `.merk/config.toml`
 - Filesystem remote backend
 - Initial rsync/ssh command backend
 - Partial pull by file or directory
@@ -75,7 +75,7 @@ databases, daemons, custom protocols, and hidden metadata.
 
 - Improve `merk status`
   - Separate tracked symlinks, missing cached files, corrupt cached files,
-    missing remote files, broken Git symlinks, broken worktree symlinks, and
+    missing remote files, broken Git symlinks, broken Git symlinks, and
     unconverted files.
   - Make output stable enough for CI parsing.
   - Define exit codes.
@@ -90,7 +90,7 @@ databases, daemons, custom protocols, and hidden metadata.
 - Add real Git integration tests
   - Use `git init`.
   - Confirm symlinks are tracked as symlinks.
-  - Confirm `.ds/` remains ignored.
+  - Confirm `.merk/` remains ignored.
 - Add real rsync/ssh integration tests
   - Gate behind environment variables.
   - Test upload, skip existing, pull, interruption retry, and permission errors.
@@ -113,7 +113,7 @@ databases, daemons, custom protocols, and hidden metadata.
   - Confirm final file is never corrupt after interrupted upload.
 - Improve `gc`
   - Better dry-run report.
-  - Clear distinction between worktree-link cleanup and cached-file cleanup.
+  - Cached-file cleanup only; no per-file local link layer.
   - Tests for keeping all referenced files.
 - Add typed errors
   - Missing cache config
