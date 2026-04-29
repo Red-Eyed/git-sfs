@@ -78,6 +78,26 @@ Reports problems such as:
 - stale `.ds/worktree` symlinks
 - invalid config
 
+Output starts with stable category counts:
+
+```text
+tracked symlinks: 2
+unconverted files: 0
+broken git symlinks: 0
+missing cache files: 0
+corrupt cache files: 0
+missing worktree symlinks: 0
+stale worktree symlinks: 0
+invalid config: 0
+```
+
+When issues exist, a `details:` section follows:
+
+```text
+details:
+missing cache file: data/train-000.tar.zst: <hash>
+```
+
 ## merk verify
 
 Strict CI-oriented verification:
@@ -87,6 +107,9 @@ merk verify
 ```
 
 Returns non-zero on failure.
+
+On failure, `merk verify` prints the same category-count report as
+`merk status`.
 
 ## merk push
 
@@ -110,6 +133,9 @@ merk pull data/
 ```
 
 Downloaded bytes are hash-verified before being accepted.
+
+When a path is provided, only symlinks below that path are considered. This is
+the intended way to partially pull a dataset from the remote.
 
 ## merk materialize
 

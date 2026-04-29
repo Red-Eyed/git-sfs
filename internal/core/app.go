@@ -34,6 +34,28 @@ type GCOptions struct {
 	Files        bool
 }
 
+type issue struct {
+	Kind   string
+	Path   string
+	Hash   string
+	Detail string
+}
+
+type statusReport struct {
+	TrackedSymlinks int
+	Issues          []issue
+}
+
+var issueKinds = []string{
+	"unconverted file",
+	"broken git symlink",
+	"missing cache file",
+	"corrupt cache file",
+	"missing worktree symlink",
+	"stale worktree symlink",
+	"invalid config",
+}
+
 // Init creates the tracked project config and the untracked .ds workspace.
 func (a App) Init(ctx context.Context, force bool) error {
 	repo, err := localstate.ResolveRepo()
@@ -166,20 +188,19 @@ func (a App) Status(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	links, problems, err := scan(repo, c)
+	report, err := scan(repo, c)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "tracked symlinks: %d\n", len(links))
-	for _, p := range problems {
-		fmt.Fprintln(a.Stdout, p)
-	}
 	if _, ok := cfg.Remotes["default"]; !ok {
-		fmt.Fprintln(a.Stdout, "invalid config: missing default remote")
-		problems = append(problems, "missing default remote")
+		report.Issues = append(report.Issues, issue{
+			Kind:   "invalid config",
+			Detail: "missing default remote",
+		})
 	}
-	if len(problems) > 0 {
-		return fmt.Errorf("status found %d problem(s)", len(problems))
+	printReport(a.Stdout, report)
+	if len(report.Issues) > 0 {
+		return fmt.Errorf("status found %d issue(s)", len(report.Issues))
 	}
 	return nil
 }
@@ -190,15 +211,13 @@ func (a App) Verify(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, problems, err := scan(repo, c)
+	report, err := scan(repo, c)
 	if err != nil {
 		return err
 	}
-	if len(problems) > 0 {
-		for _, p := range problems {
-			fmt.Fprintln(a.Stdout, p)
-		}
-		return fmt.Errorf("verify failed with %d problem(s)", len(problems))
+	if len(report.Issues) > 0 {
+		printReport(a.Stdout, report)
+		return fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
 	}
 	a.say("verify ok")
 	return nil
@@ -391,9 +410,8 @@ func (a App) open() (string, cache.Cache, config.Config, error) {
 	return repo, c, cfg, nil
 }
 
-func scan(repo string, c cache.Cache) ([]string, []string, error) {
-	var links []string
-	var problems []string
+func scan(repo string, c cache.Cache) (statusReport, error) {
+	var report statusReport
 	err := filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -410,32 +428,116 @@ func scan(repo string, c cache.Cache) ([]string, []string, error) {
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			if info.Mode().IsRegular() {
-				problems = append(problems, "not converted: "+rel(repo, path))
+				report.Issues = append(report.Issues, issue{
+					Kind: "unconverted file",
+					Path: rel(repo, path),
+				})
 			}
 			return nil
 		}
 		h, _, err := merkpath.ParseGitSymlink(repo, path)
 		if err != nil {
-			problems = append(problems, "broken git symlink: "+rel(repo, path)+": "+err.Error())
+			report.Issues = append(report.Issues, issue{
+				Kind:   "broken git symlink",
+				Path:   rel(repo, path),
+				Detail: err.Error(),
+			})
 			return nil
 		}
-		links = append(links, path)
-		if !c.HasValid(h) {
-			problems = append(problems, "missing or corrupt cache file: "+h.String())
+		report.TrackedSymlinks++
+		cacheFile := c.FilePath(h)
+		if _, err := os.Stat(cacheFile); err != nil {
+			report.Issues = append(report.Issues, issue{
+				Kind: "missing cache file",
+				Path: rel(repo, path),
+				Hash: h.String(),
+			})
+			return nil
+		}
+		if err := hash.VerifyFile(cacheFile, h); err != nil {
+			report.Issues = append(report.Issues, issue{
+				Kind:   "corrupt cache file",
+				Path:   rel(repo, path),
+				Hash:   h.String(),
+				Detail: err.Error(),
+			})
 			return nil
 		}
 		work := merkpath.WorktreeFile(repo, h)
 		target, err := os.Readlink(work)
 		if err != nil {
-			problems = append(problems, "missing .ds/worktree symlink: "+h.String())
+			report.Issues = append(report.Issues, issue{
+				Kind: "missing worktree symlink",
+				Path: rel(repo, path),
+				Hash: h.String(),
+			})
 			return nil
 		}
-		if target != c.FilePath(h) {
-			problems = append(problems, "stale .ds/worktree symlink: "+h.String())
+		if target != cacheFile {
+			report.Issues = append(report.Issues, issue{
+				Kind:   "stale worktree symlink",
+				Path:   rel(repo, path),
+				Hash:   h.String(),
+				Detail: "target=" + target,
+			})
 		}
 		return nil
 	})
-	return links, problems, err
+	return report, err
+}
+
+func printReport(w io.Writer, report statusReport) {
+	counts := map[string]int{}
+	for _, item := range report.Issues {
+		counts[item.Kind]++
+	}
+	fmt.Fprintf(w, "tracked symlinks: %d\n", report.TrackedSymlinks)
+	for _, kind := range issueKinds {
+		fmt.Fprintf(w, "%s: %d\n", pluralKind(kind), counts[kind])
+	}
+	if len(report.Issues) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "details:")
+	for _, item := range report.Issues {
+		fmt.Fprintln(w, formatIssue(item))
+	}
+}
+
+func formatIssue(item issue) string {
+	parts := []string{item.Kind}
+	if item.Path != "" {
+		parts = append(parts, item.Path)
+	}
+	if item.Hash != "" {
+		parts = append(parts, item.Hash)
+	}
+	out := strings.Join(parts, ": ")
+	if item.Detail != "" {
+		out += ": " + item.Detail
+	}
+	return out
+}
+
+func pluralKind(kind string) string {
+	switch kind {
+	case "unconverted file":
+		return "unconverted files"
+	case "broken git symlink":
+		return "broken git symlinks"
+	case "missing cache file":
+		return "missing cache files"
+	case "corrupt cache file":
+		return "corrupt cache files"
+	case "missing worktree symlink":
+		return "missing worktree symlinks"
+	case "stale worktree symlink":
+		return "stale worktree symlinks"
+	case "invalid config":
+		return "invalid config"
+	default:
+		return kind
+	}
 }
 
 func collectMerkSymlinks(repo, path string) ([]string, error) {

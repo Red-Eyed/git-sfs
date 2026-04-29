@@ -175,6 +175,13 @@ merk pull
 
 The files under `data/` now open normally through symlinks.
 
+You can also pull only the files you need:
+
+```sh
+merk pull data/train-000.tar.zst
+merk pull data/validation/
+```
+
 ## Commands
 
 ```sh
@@ -281,6 +288,9 @@ merk verify
 
 It exits non-zero if referenced files are missing, corrupt, or incorrectly
 materialized.
+
+`merk status` and `merk verify` print stable category counts before detailed
+messages, so CI can match clear strings such as `missing cache files: 0`.
 
 Safety details: [docs/safety.md](docs/safety.md)
 

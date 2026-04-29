@@ -60,11 +60,15 @@ merk verify
 merk pull data/train-000.tar.zst
 ```
 
+Only the cached file required by that Git symlink is downloaded.
+
 ## Pull One Directory
 
 ```sh
 merk pull data/train/
 ```
+
+Only files referenced by symlinks under that directory are downloaded.
 
 ## Use A Temporary Cache
 

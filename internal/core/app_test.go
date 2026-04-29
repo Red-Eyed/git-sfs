@@ -97,6 +97,51 @@ func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 	})
 }
 
+func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeDataset(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		h1, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h2, _, err := merkpath.ParseGitSymlink(repo, filepath.Join(repo, "data", "two.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheOne := filepath.Join(cacheDir, "files", hash.Algorithm, h1.Prefix(), h1.String())
+		cacheTwo := filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String())
+		if err := os.Remove(cacheOne); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(cacheTwo); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Pull(context.Background(), "data/one.bin"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheOne, h1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(cacheTwo); !os.IsNotExist(err) {
+			t.Fatalf("unselected cache file was restored: %v", err)
+		}
+	})
+}
+
 func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
@@ -109,7 +154,8 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 		if err := app(stdout).Status(context.Background()); err == nil {
 			t.Fatal("status should fail for unconverted file")
 		}
-		if !strings.Contains(stdout.String(), "not converted: data/blob") {
+		if !strings.Contains(stdout.String(), "unconverted files: 1") ||
+			!strings.Contains(stdout.String(), "unconverted file: data/blob") {
 			t.Fatalf("status did not report unconverted file: %q", stdout.String())
 		}
 		stdout.Reset()
@@ -127,7 +173,8 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 		if err := app(stdout).Verify(context.Background()); err == nil {
 			t.Fatal("verify should fail for corrupt cache file")
 		}
-		if !strings.Contains(stdout.String(), "missing or corrupt cache file") {
+		if !strings.Contains(stdout.String(), "corrupt cache files: 1") ||
+			!strings.Contains(stdout.String(), "corrupt cache file: data/blob") {
 			t.Fatalf("verify did not report corrupt cache: %q", stdout.String())
 		}
 	})

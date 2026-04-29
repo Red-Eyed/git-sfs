@@ -37,6 +37,7 @@ databases, daemons, custom protocols, and hidden metadata.
 - Rejection of cache paths in `dataset.yaml`
 - Filesystem remote backend
 - Initial rsync/ssh command backend
+- Partial pull by file or directory
 - Retry-safe local file writes with temp files and rename
 - Cache locking for mutating operations
 - Unit and integration tests
@@ -52,8 +53,8 @@ databases, daemons, custom protocols, and hidden metadata.
 ## Partial
 
 - `status` and `verify`
-  - Current implementation detects key problems.
-  - Output needs clearer categories and stable CI-oriented formatting.
+  - Current implementation detects key problems and prints stable category counts.
+  - Still needs optional remote checks and refined exit-code documentation.
 - rsync/ssh remotes
   - Command backend exists.
   - Needs validation against real rsync/ssh environments.
@@ -82,6 +83,10 @@ databases, daemons, custom protocols, and hidden metadata.
   - Verify all required invariants with precise messages.
   - Add optional remote existence verification.
   - Ensure corrupt remote files are rejected.
+- Keep partial pull behavior strong
+  - `merk pull <file>` must download only files needed for that path.
+  - `merk pull <directory>` must download only files needed below that directory.
+  - Add coverage for mixed present/missing cache files.
 - Add real Git integration tests
   - Use `git init`.
   - Confirm symlinks are tracked as symlinks.
