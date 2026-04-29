@@ -30,12 +30,12 @@ func TestLinkAndUnlink(t *testing.T) {
 	if err := Link(repo, c, h); err != nil {
 		t.Fatal(err)
 	}
-	target, err := os.Readlink(merkpath.WorktreeObject(repo, h))
+	target, err := os.Readlink(merkpath.WorktreeFile(repo, h))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target != c.ObjectPath(h) {
-		t.Fatalf("got %q want %q", target, c.ObjectPath(h))
+	if target != c.FilePath(h) {
+		t.Fatalf("got %q want %q", target, c.FilePath(h))
 	}
 	if err := Link(repo, c, h); err != nil {
 		t.Fatal(err)
@@ -48,9 +48,9 @@ func TestLinkAndUnlink(t *testing.T) {
 	}
 }
 
-func TestLinkFailsWhenObjectMissing(t *testing.T) {
+func TestLinkFailsWhenFileMissing(t *testing.T) {
 	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err := Link(t.TempDir(), cache.Cache{Root: t.TempDir()}, h); err == nil {
-		t.Fatal("expected missing object error")
+		t.Fatal("expected missing file error")
 	}
 }

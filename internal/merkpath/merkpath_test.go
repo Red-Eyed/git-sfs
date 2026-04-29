@@ -34,7 +34,7 @@ func TestParseGitSymlink(t *testing.T) {
 func TestRejectsAbsoluteGitSymlink(t *testing.T) {
 	repo := t.TempDir()
 	file := filepath.Join(repo, "data")
-	if err := os.Symlink("/tmp/cache/object", file); err != nil {
+	if err := os.Symlink("/tmp/cache/file", file); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := ParseGitSymlink(repo, file); err == nil {

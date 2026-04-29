@@ -8,15 +8,17 @@ repository simple, cloneable, and understandable.
 
 It is like Git LFS in spirit, but Git tracks normal symlinks instead of pointer
 files. The large file bytes live in a local content-addressed cache and can be
-synced to a remote over plain `rsync` or `ssh`.
+synced to a remote with familiar tools such as `rsync`, `ssh`, or `rclone`.
 
 ```text
 Git tracks symlinks.
 merk stores file bytes.
-rsync/ssh moves objects.
+rsync/ssh/rclone moves files.
 ```
 
 No LFS server. No database. No hidden manifest branch. No custom Git protocol.
+`merk` is meant to stay a thin layer over Git, the filesystem, and tools people
+already know.
 
 ## Why merk?
 
@@ -31,12 +33,12 @@ Use `merk` when you want:
 - A repo that stays small and fast
 - Large files addressed by SHA-256 content hash
 - A cache path that is local to each machine and never committed
-- A remote layout you can inspect with `ssh`, `rsync`, or `find`
-- CI checks that fail when referenced objects are missing or corrupt
+- A remote layout you can inspect with `ssh`, `rsync`, `rclone`, or `find`
+- CI checks that fail when referenced files are missing or corrupt
 - Another machine to clone the repo, run `merk setup`, run `merk pull`, and work
 
 `merk` is intentionally not a platform. It is a thin layer over Git symlinks,
-a local cache, and simple remote object storage.
+plain files, local directories, and well-known file transfer tools.
 
 ## How It Works
 
@@ -53,17 +55,17 @@ local cache, and replaces the file with a Git-tracked symlink:
 data/train-000.tar.zst -> ../.ds/worktree/sha256/ab/<hash>
 ```
 
-The local `.ds/worktree` path is untracked and points to the real cached object:
+The local `.ds/worktree` path is untracked and points to the real cached file:
 
 ```text
-.ds/worktree/sha256/ab/<hash> -> <cache>/objects/sha256/ab/<hash>
+.ds/worktree/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
 ```
 
 Opening `data/train-000.tar.zst` follows the symlink chain and reads the cached
 file bytes.
 
 Git stores the file list as ordinary directories and symlinks. The cache stores
-the bytes. The remote stores the same SHA-256 object layout.
+the bytes. The remote stores the same SHA-256 file layout.
 
 ## Install
 
@@ -151,7 +153,7 @@ git add dataset.yaml .gitignore data/
 git commit -m "track dataset files with merk"
 ```
 
-Upload objects:
+Upload files:
 
 ```sh
 merk push
@@ -187,8 +189,10 @@ merk materialize [path]
 merk dematerialize [path]
 merk gc --dry-run
 merk gc --worktree-only
-merk gc --objects
+merk gc --files
 ```
+
+Detailed command reference: [docs/commands.md](docs/commands.md)
 
 ## Configuration
 
@@ -223,12 +227,14 @@ MERK_CACHE
 .ds/local.yaml
 ```
 
+Detailed configuration reference: [docs/configuration.md](docs/configuration.md)
+
 ## Remote Storage
 
-Remote storage uses the same content-addressed object layout as the local cache:
+Remote storage uses the same content-addressed file layout as the local cache:
 
 ```text
-objects/sha256/ab/<full_hash>
+files/sha256/ab/<full_hash>
 ```
 
 The first supported remote styles are:
@@ -242,13 +248,27 @@ filesystem
 This keeps the remote easy to inspect, back up, mirror, or repair with ordinary
 Unix tools.
 
+Remote details: [docs/remotes.md](docs/remotes.md)
+
+## Documentation
+
+- [Concepts](docs/concepts.md)
+- [Installation](docs/installation.md)
+- [Configuration](docs/configuration.md)
+- [Commands](docs/commands.md)
+- [Workflows](docs/workflows.md)
+- [Remotes](docs/remotes.md)
+- [Safety](docs/safety.md)
+- [Development](docs/development.md)
+- [Project status](docs/status.md)
+
 ## Safety
 
 `merk` is designed around retry-safe operations:
 
-- Objects are addressed by SHA-256
+- Files are addressed by SHA-256
 - Downloads are hash-verified before being accepted
-- Corrupt cache objects are detected
+- Corrupt cache files are detected
 - Local cache paths are never written to Git-tracked config
 - `.ds/` is untracked and gitignored
 - Missing and broken symlinks are reported by `merk status` and `merk verify`
@@ -259,8 +279,10 @@ For CI, run:
 merk verify
 ```
 
-It exits non-zero if referenced objects are missing, corrupt, or incorrectly
+It exits non-zero if referenced files are missing, corrupt, or incorrectly
 materialized.
+
+Safety details: [docs/safety.md](docs/safety.md)
 
 ## Project Status
 
@@ -274,6 +296,6 @@ case boring:
 ```text
 clone repo
 configure cache
-pull objects
+pull files
 use files
 ```

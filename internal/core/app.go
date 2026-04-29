@@ -31,7 +31,7 @@ type App struct {
 type GCOptions struct {
 	DryRun       bool
 	WorktreeOnly bool
-	Objects      bool
+	Files        bool
 }
 
 // Init creates the tracked project config and the untracked .ds workspace.
@@ -58,7 +58,7 @@ func (a App) Init(ctx context.Context, force bool) error {
 }
 
 // Setup prepares machine-local state and repairs materialization links when the
-// referenced cache objects already exist.
+// referenced cache files already exist.
 func (a App) Setup(ctx context.Context) error {
 	repo, c, _, err := a.open()
 	if err != nil {
@@ -246,7 +246,7 @@ func (a App) Dematerialize(ctx context.Context, path string) error {
 	return nil
 }
 
-// Push uploads each referenced cache object at most once per invocation.
+// Push uploads each referenced cache file at most once per invocation.
 func (a App) Push(ctx context.Context, name string) error {
 	repo, c, cfg, err := a.open()
 	if err != nil {
@@ -276,16 +276,16 @@ func (a App) Push(ctx context.Context, name string) error {
 		}
 		seen[h] = true
 		if !c.HasValid(h) {
-			return fmt.Errorf("cache object for %s is missing or corrupt", h)
+			return fmt.Errorf("cache file for %s is missing or corrupt", h)
 		}
-		has, err := r.HasObject(ctx, h)
+		has, err := r.HasFile(ctx, h)
 		if err != nil {
 			return err
 		}
 		if has {
 			continue
 		}
-		if err := r.PushObject(ctx, h, c.ObjectPath(h)); err != nil {
+		if err := r.PushFile(ctx, h, c.FilePath(h)); err != nil {
 			return err
 		}
 		a.say("pushed " + h.String())
@@ -293,7 +293,7 @@ func (a App) Push(ctx context.Context, name string) error {
 	return nil
 }
 
-// Pull downloads missing objects for the selected symlinks and then restores
+// Pull downloads missing files for the selected symlinks and then restores
 // the local .ds/worktree links that make those symlinks usable.
 func (a App) Pull(ctx context.Context, path string) error {
 	repo, c, cfg, err := a.open()
@@ -322,8 +322,8 @@ func (a App) Pull(ctx context.Context, path string) error {
 			return err
 		}
 		if !c.HasValid(h) {
-			dst := c.ObjectPath(h)
-			if err := r.PullObject(ctx, h, dst); err != nil {
+			dst := c.FilePath(h)
+			if err := r.PullFile(ctx, h, dst); err != nil {
 				return fmt.Errorf("pull %s: %w", h, err)
 			}
 		}
@@ -345,7 +345,7 @@ func (a App) GC(ctx context.Context, opts GCOptions) error {
 		return err
 	}
 	defer l.Release()
-	if !opts.WorktreeOnly && !opts.Objects {
+	if !opts.WorktreeOnly && !opts.Files {
 		opts.WorktreeOnly = true
 	}
 	links, err := collectMerkSymlinks(repo, ".")
@@ -366,8 +366,8 @@ func (a App) GC(ctx context.Context, opts GCOptions) error {
 			return err
 		}
 	}
-	if opts.Objects {
-		root := filepath.Join(c.Root, "objects", hash.Algorithm)
+	if opts.Files {
+		root := filepath.Join(c.Root, "files", hash.Algorithm)
 		if err := removeUnreferenced(root, live, opts.DryRun, a.Stdout); err != nil {
 			return err
 		}
@@ -421,16 +421,16 @@ func scan(repo string, c cache.Cache) ([]string, []string, error) {
 		}
 		links = append(links, path)
 		if !c.HasValid(h) {
-			problems = append(problems, "missing or corrupt cache object: "+h.String())
+			problems = append(problems, "missing or corrupt cache file: "+h.String())
 			return nil
 		}
-		work := merkpath.WorktreeObject(repo, h)
+		work := merkpath.WorktreeFile(repo, h)
 		target, err := os.Readlink(work)
 		if err != nil {
 			problems = append(problems, "missing .ds/worktree symlink: "+h.String())
 			return nil
 		}
-		if target != c.ObjectPath(h) {
+		if target != c.FilePath(h) {
 			problems = append(problems, "stale .ds/worktree symlink: "+h.String())
 		}
 		return nil

@@ -35,10 +35,10 @@ func NewSSH(url string) Remote {
 }
 
 func (r rsyncRemote) remotePath(h hash.Hash) string {
-	return r.url + "/objects/" + hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
+	return r.url + "/files/" + hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
 }
 
-func (r rsyncRemote) HasObject(ctx context.Context, h hash.Hash) (bool, error) {
+func (r rsyncRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 	tmp, err := os.CreateTemp("", "merk-remote-check-*")
 	if err != nil {
 		return false, err
@@ -56,13 +56,13 @@ func (r rsyncRemote) HasObject(ctx context.Context, h hash.Hash) (bool, error) {
 	return hash.VerifyFile(name, h) == nil, nil
 }
 
-// PushObject uploads to a temporary remote object name before renaming it into
+// PushFile uploads to a temporary remote file name before renaming it into
 // the final content-addressed path.
-func (r rsyncRemote) PushObject(ctx context.Context, h hash.Hash, srcPath string) error {
+func (r rsyncRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
 	if err := hash.VerifyFile(srcPath, h); err != nil {
 		return err
 	}
-	if has, err := r.HasObject(ctx, h); err != nil {
+	if has, err := r.HasFile(ctx, h); err != nil {
 		return err
 	} else if has {
 		return nil
@@ -77,21 +77,21 @@ func (r rsyncRemote) PushObject(ctx context.Context, h hash.Hash, srcPath string
 		return err
 	}
 	if err := sshSh(ctx, r.url, "mv \"$1\" \"$2\"", remoteLocalPath(tmp), remoteLocalPath(dst)); err != nil {
-		return fmt.Errorf("publish remote object: %w", err)
+		return fmt.Errorf("publish remote file: %w", err)
 	}
-	has, err := r.HasObject(ctx, h)
+	has, err := r.HasFile(ctx, h)
 	if err != nil {
 		return err
 	}
 	if !has {
-		return fmt.Errorf("uploaded remote object failed verification: %s", h)
+		return fmt.Errorf("uploaded remote file failed verification: %s", h)
 	}
 	return nil
 }
 
-// PullObject downloads to a temporary local file and accepts it only after the
+// PullFile downloads to a temporary local file and accepts it only after the
 // downloaded bytes match the hash encoded in the Git symlink.
-func (r rsyncRemote) PullObject(ctx context.Context, h hash.Hash, dstPath string) error {
+func (r rsyncRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}
@@ -106,16 +106,16 @@ func (r rsyncRemote) PullObject(ctx context.Context, h hash.Hash, dstPath string
 	return os.Rename(tmp, dstPath)
 }
 
-func (r sshRemote) HasObject(ctx context.Context, h hash.Hash) (bool, error) {
-	return rsyncRemote{url: r.url}.HasObject(ctx, h)
+func (r sshRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
+	return rsyncRemote{url: r.url}.HasFile(ctx, h)
 }
 
-func (r sshRemote) PushObject(ctx context.Context, h hash.Hash, srcPath string) error {
-	return rsyncRemote{url: r.url}.PushObject(ctx, h, srcPath)
+func (r sshRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
+	return rsyncRemote{url: r.url}.PushFile(ctx, h, srcPath)
 }
 
-func (r sshRemote) PullObject(ctx context.Context, h hash.Hash, dstPath string) error {
-	return rsyncRemote{url: r.url}.PullObject(ctx, h, dstPath)
+func (r sshRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
+	return rsyncRemote{url: r.url}.PullFile(ctx, h, dstPath)
 }
 
 func sshHost(url string) string {

@@ -41,7 +41,7 @@ func VerifyFile(path string, want Hash) error {
 
 func (h Hash) String() string { return string(h) }
 
-// Prefix is the two-character fanout directory used by the object store.
+// Prefix is the two-character fanout directory used by the file store.
 func (h Hash) Prefix() string {
 	s := string(h)
 	if len(s) < 2 {

@@ -4,12 +4,21 @@
 
 `merk` is a Go CLI for storing large file bytes outside Git while Git tracks symlinks.
 
+Project direction:
+
+- Keep `merk` as small as possible.
+- Treat it as a layer on top of Git, the filesystem, and well-known file movers.
+- Prefer plain files, symlinks, directories, and subprocess calls over custom state.
+- Supported remote tools should stay boring and familiar: `rsync`, `ssh`, and `rclone`.
+- Do not add manifests, databases, background services, custom protocols, or hidden metadata.
+- If a feature needs a new internal format, first ask whether Git or the filesystem already provides the needed state.
+
 Core model:
 
 - Git tracks `dataset.yaml` and relative symlinks.
 - Git symlinks point into `.ds/worktree/sha256/<prefix>/<hash>`.
-- `.ds/worktree` symlinks point to cache objects.
-- Cache objects live at `<cache>/objects/sha256/<prefix>/<hash>`.
+- `.ds/worktree` symlinks point to cache files.
+- Cache files live at `<cache>/files/sha256/<prefix>/<hash>`.
 - Cache path is local state and must never be committed.
 
 ## Commands
@@ -33,8 +42,9 @@ If `just` is unavailable, run the commands in `Justfile` manually.
 - Keep the implementation boring and explicit.
 - Prefer standard library code unless a dependency is clearly worth it.
 - Keep CLI parsing thin; put behavior in internal packages.
-- Use temp files plus atomic rename for object writes.
-- Hash-verify bytes before accepting cache or remote objects.
+- Keep Git and filesystem state as the source of truth.
+- Use temp files plus atomic rename for file writes.
+- Hash-verify bytes before accepting cache or remote files.
 - Comments are welcome when they explain invariants, safety behavior, or non-obvious control flow.
 - Avoid comments that merely restate a line of code.
 
@@ -57,10 +67,10 @@ parent path is a file.
 When changing storage, symlink, cache, or remote behavior, add or update tests for:
 
 - Correct symlink target format
-- Missing cache object detection
-- Corrupt cache or remote object rejection
-- Pull after cache object removal
-- Push skipping existing remote objects
+- Missing cache file detection
+- Corrupt cache or remote file rejection
+- Pull after cache file removal
+- Push skipping existing remote files
 - Retry-safe temp-file behavior where practical
 
 ## Documentation

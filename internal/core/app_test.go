@@ -59,7 +59,7 @@ func TestAddVerifyDematerializeMaterializeAndStatus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := hash.VerifyFile(filepath.Join(cacheDir, "objects", hash.Algorithm, h.Prefix(), h.String()), h); err != nil {
+		if err := hash.VerifyFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -84,14 +84,14 @@ func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cacheObject := filepath.Join(cacheDir, "objects", hash.Algorithm, h.Prefix(), h.String())
-		if err := os.Remove(cacheObject); err != nil {
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := os.Remove(cacheFile); err != nil {
 			t.Fatal(err)
 		}
 		if err := app(&bytes.Buffer{}).Pull(context.Background(), "data/blob"); err != nil {
 			t.Fatal(err)
 		}
-		if err := hash.VerifyFile(cacheObject, h); err != nil {
+		if err := hash.VerifyFile(cacheFile, h); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -120,20 +120,20 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(cacheDir, "objects", hash.Algorithm, h.Prefix(), h.String()), []byte("corrupt"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), []byte("corrupt"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		stdout.Reset()
 		if err := app(stdout).Verify(context.Background()); err == nil {
-			t.Fatal("verify should fail for corrupt cache object")
+			t.Fatal("verify should fail for corrupt cache file")
 		}
-		if !strings.Contains(stdout.String(), "missing or corrupt cache object") {
+		if !strings.Contains(stdout.String(), "missing or corrupt cache file") {
 			t.Fatalf("verify did not report corrupt cache: %q", stdout.String())
 		}
 	})
 }
 
-func TestGCDoesNotDeleteReferencedObjects(t *testing.T) {
+func TestGCDoesNotDeleteReferencedFiles(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -148,20 +148,20 @@ func TestGCDoesNotDeleteReferencedObjects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dead := filepath.Join(cacheDir, "objects", hash.Algorithm, "ff", strings.Repeat("f", 64))
+		dead := filepath.Join(cacheDir, "files", hash.Algorithm, "ff", strings.Repeat("f", 64))
 		if err := os.MkdirAll(filepath.Dir(dead), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(dead, []byte("dead"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := app(&bytes.Buffer{}).GC(context.Background(), GCOptions{Objects: true}); err != nil {
+		if err := app(&bytes.Buffer{}).GC(context.Background(), GCOptions{Files: true}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(dead); !os.IsNotExist(err) {
-			t.Fatalf("unreferenced object was not removed: %v", err)
+			t.Fatalf("unreferenced file was not removed: %v", err)
 		}
-		live := filepath.Join(cacheDir, "objects", hash.Algorithm, h.Prefix(), h.String())
+		live := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		if err := hash.VerifyFile(live, h); err != nil {
 			t.Fatal(err)
 		}
@@ -214,13 +214,13 @@ func TestSetupRepairsExistingMaterialization(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(merkpath.WorktreeObject(repo, h)); err != nil {
+		if err := os.Remove(merkpath.WorktreeFile(repo, h)); err != nil {
 			t.Fatal(err)
 		}
 		if err := a.Setup(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Readlink(merkpath.WorktreeObject(repo, h)); err != nil {
+		if _, err := os.Readlink(merkpath.WorktreeFile(repo, h)); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -280,7 +280,7 @@ func TestGCDryRunAndWorktreeOnly(t *testing.T) {
 	})
 }
 
-func TestPullFailsForMissingRemoteObject(t *testing.T) {
+func TestPullFailsForMissingRemoteFile(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -295,11 +295,11 @@ func TestPullFailsForMissingRemoteObject(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(filepath.Join(cacheDir, "objects", hash.Algorithm, h.Prefix(), h.String())); err != nil {
+		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
 			t.Fatal(err)
 		}
 		if err := a.Pull(context.Background(), "data/blob"); err == nil {
-			t.Fatal("expected missing remote object error")
+			t.Fatal("expected missing remote file error")
 		}
 	})
 }
@@ -336,7 +336,7 @@ func TestMaterializeIgnoresNonMerkSymlinkSelection(t *testing.T) {
 	})
 }
 
-func TestPushSkipsExistingRemoteObjectAndRejectsMissingCache(t *testing.T) {
+func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -357,16 +357,16 @@ func TestPushSkipsExistingRemoteObjectAndRejectsMissingCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(filepath.Join(cacheDir, "objects", hash.Algorithm, h.Prefix(), h.String())); err != nil {
+		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
 			t.Fatal(err)
 		}
 		if err := a.Push(context.Background(), ""); err == nil {
-			t.Fatal("expected missing cache object error")
+			t.Fatal("expected missing cache file error")
 		}
 	})
 }
 
-func TestPullSkipsExistingValidCacheObject(t *testing.T) {
+func TestPullSkipsExistingValidCacheFile(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))

@@ -9,14 +9,14 @@ import (
 	"github.com/vadstup/merk/internal/hash"
 )
 
-// WorktreeObject is the untracked local hop that Git-tracked symlinks point at.
-func WorktreeObject(repo string, h hash.Hash) string {
+// WorktreeFile is the untracked local hop that Git-tracked symlinks point at.
+func WorktreeFile(repo string, h hash.Hash) string {
 	return filepath.Join(repo, ".ds", "worktree", hash.Algorithm, h.Prefix(), h.String())
 }
 
 // GitLinkTarget returns the relative symlink target that is safe to commit.
 func GitLinkTarget(repo, file string, h hash.Hash) (string, error) {
-	return filepath.Rel(filepath.Dir(file), WorktreeObject(repo, h))
+	return filepath.Rel(filepath.Dir(file), WorktreeFile(repo, h))
 }
 
 // ParseGitSymlink validates the committed symlink format and extracts its hash.
@@ -38,7 +38,7 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) != 2 {
-		return "", target, fmt.Errorf("git symlink %s has invalid object path", file)
+		return "", target, fmt.Errorf("git symlink %s has invalid file path", file)
 	}
 	// The first path component is redundant with the hash, but checking it keeps
 	// stale or hand-edited links from silently pointing at the wrong layout.

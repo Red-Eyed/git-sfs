@@ -25,17 +25,17 @@ func TestStoreUsesContentAddressedPathAndDetectsCorruption(t *testing.T) {
 	if err := c.Store(src, h); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.ObjectPath(h); filepath.Base(filepath.Dir(got)) != h.Prefix() {
-		t.Fatalf("object path %q does not include hash prefix %q", got, h.Prefix())
+	if got := c.FilePath(h); filepath.Base(filepath.Dir(got)) != h.Prefix() {
+		t.Fatalf("file path %q does not include hash prefix %q", got, h.Prefix())
 	}
 	if !c.HasValid(h) {
-		t.Fatal("stored object should be valid")
+		t.Fatal("stored file should be valid")
 	}
-	if err := os.WriteFile(c.ObjectPath(h), []byte("corrupt"), 0o644); err != nil {
+	if err := os.WriteFile(c.FilePath(h), []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if c.HasValid(h) {
-		t.Fatal("corrupt object should not be valid")
+		t.Fatal("corrupt file should not be valid")
 	}
 }
 

@@ -18,10 +18,10 @@ func NewFilesystem(root string) Remote {
 }
 
 func (r filesystemRemote) path(h hash.Hash) string {
-	return filepath.Join(r.root, "objects", hash.Algorithm, h.Prefix(), h.String())
+	return filepath.Join(r.root, "files", hash.Algorithm, h.Prefix(), h.String())
 }
 
-func (r filesystemRemote) HasObject(ctx context.Context, h hash.Hash) (bool, error) {
+func (r filesystemRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -30,9 +30,9 @@ func (r filesystemRemote) HasObject(ctx context.Context, h hash.Hash) (bool, err
 	return hash.VerifyFile(r.path(h), h) == nil, nil
 }
 
-// PushObject treats an existing valid object as success, which makes retries
+// PushFile treats an existing valid file as success, which makes retries
 // cheap after interrupted or duplicated uploads.
-func (r filesystemRemote) PushObject(ctx context.Context, h hash.Hash, srcPath string) error {
+func (r filesystemRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -48,9 +48,9 @@ func (r filesystemRemote) PushObject(ctx context.Context, h hash.Hash, srcPath s
 	return hash.VerifyFile(dst, h)
 }
 
-// PullObject verifies the source before copying and verifies the destination
+// PullFile verifies the source before copying and verifies the destination
 // again before returning success.
-func (r filesystemRemote) PullObject(ctx context.Context, h hash.Hash, dstPath string) error {
+func (r filesystemRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

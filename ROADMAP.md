@@ -1,0 +1,149 @@
+# Roadmap
+
+## Direction
+
+`merk` should stay as simple as possible: a thin layer on top of Git, the
+filesystem, and well-known remotes such as `rsync`, `ssh`, and `rclone`.
+
+The source of truth should be visible files and symlinks. Avoid manifests,
+databases, daemons, custom protocols, and hidden metadata.
+
+## Done
+
+- Go CLI scaffold with `cmd/merk`
+- Commands:
+  - `merk init`
+  - `merk setup`
+  - `merk add`
+  - `merk status`
+  - `merk verify`
+  - `merk push`
+  - `merk pull`
+  - `merk materialize`
+  - `merk dematerialize`
+  - `merk gc`
+- Cache layout:
+  - content files keyed by SHA-256
+  - `tmp`
+  - `locks`
+- SHA-256 hashing and verification
+- Git symlink validation
+- `.ds/worktree` materialization
+- Cache path resolution:
+  - `--cache`
+  - `MERK_CACHE`
+  - `.ds/local.yaml`
+- `dataset.yaml` parsing and validation
+- Rejection of cache paths in `dataset.yaml`
+- Filesystem remote backend
+- Initial rsync/ssh command backend
+- Retry-safe local file writes with temp files and rename
+- Cache locking for mutating operations
+- Unit and integration tests
+- Smoke test
+- GitHub CI
+- GitHub release workflow
+- Release archive build script
+- Install script
+- README
+- AGENTS.md
+- Justfile
+
+## Partial
+
+- `status` and `verify`
+  - Current implementation detects key problems.
+  - Output needs clearer categories and stable CI-oriented formatting.
+- rsync/ssh remotes
+  - Command backend exists.
+  - Needs validation against real rsync/ssh environments.
+- rclone remote
+  - Not implemented yet.
+  - Should be a thin wrapper around the `rclone` CLI, not a custom cloud API.
+- Concurrency
+  - Cache-level lock exists.
+  - Needs broader concurrent command tests.
+- Garbage collection
+  - Protects currently referenced files.
+  - Needs more careful dry-run output and safety tests.
+- Error handling
+  - Errors are clear enough for early use.
+  - Needs typed errors for important failure classes.
+
+## Remaining v1 Tasks
+
+- Improve `merk status`
+  - Separate tracked symlinks, missing cached files, corrupt cached files,
+    missing remote files, broken Git symlinks, broken worktree symlinks, and
+    unconverted files.
+  - Make output stable enough for CI parsing.
+  - Define exit codes.
+- Improve `merk verify`
+  - Verify all required invariants with precise messages.
+  - Add optional remote existence verification.
+  - Ensure corrupt remote files are rejected.
+- Add real Git integration tests
+  - Use `git init`.
+  - Confirm symlinks are tracked as symlinks.
+  - Confirm `.ds/` remains ignored.
+- Add real rsync/ssh integration tests
+  - Gate behind environment variables.
+  - Test upload, skip existing, pull, interruption retry, and permission errors.
+- Add rclone backend
+  - Use the installed `rclone` CLI.
+  - Keep the same plain file layout.
+  - Add integration tests gated behind environment variables.
+- Add fault-injection tests
+  - Partial copy
+  - Hash mismatch
+  - Missing remote file
+  - Corrupt remote file
+  - Disk/write failure where practical
+- Strengthen concurrency tests
+  - Concurrent pull
+  - Concurrent push
+  - Concurrent add of duplicate content
+- Improve remote publish safety
+  - Confirm temp path cleanup behavior.
+  - Confirm final file is never corrupt after interrupted upload.
+- Improve `gc`
+  - Better dry-run report.
+  - Clear distinction between worktree-link cleanup and cached-file cleanup.
+  - Tests for keeping all referenced files.
+- Add typed errors
+  - Missing cache config
+  - Invalid config
+  - Invalid symlink
+  - Missing cached file
+  - Corrupt cached file
+  - Missing remote file
+  - Corrupt remote file
+- Review cross-platform path behavior
+  - macOS
+  - Linux
+  - arm64
+  - x86_64
+- Dogfood a full workflow
+  - Create repo
+  - Add files
+  - Push files
+  - Clone elsewhere
+  - Setup cache
+  - Pull files
+  - Verify files open normally
+
+## Non-goals for v1
+
+- Manifest files
+- Tree files
+- Git LFS server
+- git-annex branch
+- Custom Git protocol
+- Database backend
+- Background daemon
+- Custom cloud API clients
+- Web UI
+- Encryption
+- Compression
+- Chunking
+- Automatic Git hooks

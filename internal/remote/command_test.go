@@ -34,7 +34,7 @@ func TestCommandRemoteHelpers(t *testing.T) {
 		t.Fatal("bad remote path")
 	}
 	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if got := (rsyncRemote{url: "host:/root"}).remotePath(h); got != "host:/root/objects/sha256/aa/"+h.String() {
+	if got := (rsyncRemote{url: "host:/root"}).remotePath(h); got != "host:/root/files/sha256/aa/"+h.String() {
 		t.Fatalf("bad remote path %q", got)
 	}
 }
@@ -51,18 +51,18 @@ func TestNewLocalSSHRemoteUsesFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := NewSSH(filepath.Join(dir, "remote"))
-	if err := r.PushObject(ctx, h, src); err != nil {
+	if err := r.PushFile(ctx, h, src); err != nil {
 		t.Fatal(err)
 	}
-	has, err := r.HasObject(ctx, h)
+	has, err := r.HasFile(ctx, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !has {
-		t.Fatal("object missing")
+		t.Fatal("file missing")
 	}
 	dst := filepath.Join(dir, "dst")
-	if err := r.PullObject(ctx, h, dst); err != nil {
+	if err := r.PullFile(ctx, h, dst); err != nil {
 		t.Fatal(err)
 	}
 	if err := hash.VerifyFile(dst, h); err != nil {
@@ -112,25 +112,25 @@ sh -c "$script" merk "$@"
 	}
 	remoteRoot := filepath.Join(dir, "remote")
 	r := rsyncRemote{url: "host:" + remoteRoot}
-	has, err := r.HasObject(ctx, h)
+	has, err := r.HasFile(ctx, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if has {
 		t.Fatal("remote should start empty")
 	}
-	if err := r.PushObject(ctx, h, src); err != nil {
+	if err := r.PushFile(ctx, h, src); err != nil {
 		t.Fatal(err)
 	}
-	has, err = r.HasObject(ctx, h)
+	has, err = r.HasFile(ctx, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !has {
-		t.Fatal("remote should have object")
+		t.Fatal("remote should have file")
 	}
 	dst := filepath.Join(dir, "dst")
-	if err := r.PullObject(ctx, h, dst); err != nil {
+	if err := r.PullFile(ctx, h, dst); err != nil {
 		t.Fatal(err)
 	}
 	if err := hash.VerifyFile(dst, h); err != nil {
@@ -138,7 +138,7 @@ sh -c "$script" merk "$@"
 	}
 
 	s := sshRemote{url: "host:" + remoteRoot}
-	has, err = s.HasObject(ctx, h)
+	has, err = s.HasFile(ctx, h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ sh -c "$script" merk "$@"
 		t.Fatal("ssh remote should delegate has")
 	}
 	dst2 := filepath.Join(dir, "dst2")
-	if err := s.PullObject(ctx, h, dst2); err != nil {
+	if err := s.PullFile(ctx, h, dst2); err != nil {
 		t.Fatal(err)
 	}
 	if err := hash.VerifyFile(dst2, h); err != nil {
@@ -160,14 +160,14 @@ sh -c "$script" merk "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PushObject(ctx, h2, src2); err != nil {
+	if err := s.PushFile(ctx, h2, src2); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestRsyncRemoteRejectsBadSource(t *testing.T) {
 	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if err := (rsyncRemote{url: "host:/remote"}).PushObject(context.Background(), h, filepath.Join(t.TempDir(), "missing")); err == nil {
+	if err := (rsyncRemote{url: "host:/remote"}).PushFile(context.Background(), h, filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("expected missing source error")
 	}
 }

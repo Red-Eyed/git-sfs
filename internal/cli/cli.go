@@ -89,14 +89,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "gc":
 		gfs := flag.NewFlagSet("gc", flag.ContinueOnError)
 		gfs.SetOutput(stderr)
-		var dryRun, worktreeOnly, objects bool
+		var dryRun, worktreeOnly, files bool
 		gfs.BoolVar(&dryRun, "dry-run", false, "show what would be deleted")
 		gfs.BoolVar(&worktreeOnly, "worktree-only", false, "remove unused worktree links")
-		gfs.BoolVar(&objects, "objects", false, "remove unreferenced cache objects")
+		gfs.BoolVar(&files, "files", false, "remove unreferenced cache files")
 		if err := gfs.Parse(cmdArgs); err != nil {
 			return err
 		}
-		return app.GC(ctx, core.GCOptions{DryRun: dryRun, WorktreeOnly: worktreeOnly, Objects: objects})
+		return app.GC(ctx, core.GCOptions{DryRun: dryRun, WorktreeOnly: worktreeOnly, Files: files})
 	case "help", "-h", "--help":
 		usage(stdout)
 		return nil

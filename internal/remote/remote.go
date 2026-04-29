@@ -10,9 +10,9 @@ import (
 
 // Remote hides backend details from push and pull workflow code.
 type Remote interface {
-	HasObject(ctx context.Context, h hash.Hash) (bool, error)
-	PushObject(ctx context.Context, h hash.Hash, srcPath string) error
-	PullObject(ctx context.Context, h hash.Hash, dstPath string) error
+	HasFile(ctx context.Context, h hash.Hash) (bool, error)
+	PushFile(ctx context.Context, h hash.Hash, srcPath string) error
+	PullFile(ctx context.Context, h hash.Hash, dstPath string) error
 }
 
 func New(cfg config.RemoteConfig) (Remote, error) {

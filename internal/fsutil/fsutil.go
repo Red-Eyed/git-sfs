@@ -8,7 +8,7 @@ import (
 )
 
 // AtomicCopy writes into the destination directory first, then renames into
-// place so interrupted copies do not publish partial final objects.
+// place so interrupted copies do not publish partial final files.
 func AtomicCopy(src, dst string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err

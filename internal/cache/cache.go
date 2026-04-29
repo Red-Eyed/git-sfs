@@ -12,9 +12,9 @@ type Cache struct {
 	Root string
 }
 
-// ObjectPath returns the deterministic content-addressed location for h.
-func (c Cache) ObjectPath(h hash.Hash) string {
-	return filepath.Join(c.Root, "objects", hash.Algorithm, h.Prefix(), h.String())
+// FilePath returns the deterministic content-addressed location for h.
+func (c Cache) FilePath(h hash.Hash) string {
+	return filepath.Join(c.Root, "files", hash.Algorithm, h.Prefix(), h.String())
 }
 
 func (c Cache) TmpDir() string   { return filepath.Join(c.Root, "tmp") }
@@ -22,7 +22,7 @@ func (c Cache) LocksDir() string { return filepath.Join(c.Root, "locks") }
 
 func (c Cache) Init() error {
 	for _, p := range []string{
-		filepath.Join(c.Root, "objects", hash.Algorithm),
+		filepath.Join(c.Root, "files", hash.Algorithm),
 		c.TmpDir(),
 		c.LocksDir(),
 	} {
@@ -34,13 +34,13 @@ func (c Cache) Init() error {
 }
 
 func (c Cache) HasValid(h hash.Hash) bool {
-	return hash.VerifyFile(c.ObjectPath(h), h) == nil
+	return hash.VerifyFile(c.FilePath(h), h) == nil
 }
 
 // Store copies src into the cache only after naming it by its expected hash.
-// The final object is accepted only if its bytes still match h.
+// The final file is accepted only if its bytes still match h.
 func (c Cache) Store(src string, h hash.Hash) error {
-	dst := c.ObjectPath(h)
+	dst := c.FilePath(h)
 	if c.HasValid(h) {
 		return nil
 	}
