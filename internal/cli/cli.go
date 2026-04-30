@@ -59,10 +59,18 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return app.Add(ctx, cmdArgs)
 	case "import":
+		ifs := flag.NewFlagSet("import", flag.ContinueOnError)
+		ifs.SetOutput(stderr)
+		var followSymlinks bool
+		ifs.BoolVar(&followSymlinks, "L", false, "follow source symlinks")
+		if err := ifs.Parse(cmdArgs); err != nil {
+			return err
+		}
+		cmdArgs = ifs.Args()
 		if len(cmdArgs) != 2 {
 			return fmt.Errorf("%s requires source and destination", cmd)
 		}
-		return app.Import(ctx, cmdArgs[0], cmdArgs[1])
+		return app.ImportWithOptions(ctx, cmdArgs[0], cmdArgs[1], core.ImportOptions{FollowSymlinks: followSymlinks})
 	case "status":
 		return app.Status(ctx)
 	case "verify":

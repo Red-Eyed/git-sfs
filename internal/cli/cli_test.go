@@ -102,6 +102,35 @@ func TestImportRequiresSourceAndDestination(t *testing.T) {
 	}
 }
 
+func TestImportParsesFollowSymlinkFlag(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "outside.bin")
+	link := filepath.Join(dir, "outside-link.bin")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(src, link); err != nil {
+		t.Fatal(err)
+	}
+	inDir(t, repo, func() {
+		var stdout, stderr bytes.Buffer
+		if err := run(context.Background(), []string{"init"}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if err := run(context.Background(), []string{"import", "-L", link, "data/blob"}, &stdout, &stderr); err != nil {
+			t.Fatalf("import -L failed: %v stderr=%s stdout=%s", err, stderr.String(), stdout.String())
+		}
+		info, err := os.Lstat(filepath.Join(repo, "data", "blob"))
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("import -L should create a destination symlink: info=%v err=%v", info, err)
+		}
+	})
+}
+
 func TestAddRequiresPath(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run(context.Background(), []string{"add"}, &stdout, &stderr); err == nil {

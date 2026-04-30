@@ -159,6 +159,12 @@ git-sfs import /mnt/incoming/data data/
 
 `git-sfs import` hashes the source, renames the bytes into the cache, and creates repo symlinks at the destination. The source and cache must be on the same filesystem so the import can stay a rename instead of becoming a second full copy.
 
+Source symlinks are rejected unless you pass `-L`:
+
+```sh
+git-sfs import -L /mnt/incoming/data data/
+```
+
 Commit the metadata:
 
 ```sh
@@ -197,6 +203,7 @@ git-sfs init
 git-sfs setup
 git-sfs add <path>
 git-sfs import <src> <dst>
+git-sfs import -L <src> <dst>
 git-sfs status
 git-sfs verify
 git-sfs push [remote]
