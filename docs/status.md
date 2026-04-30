@@ -33,10 +33,10 @@ Still needs work:
 - clearer `status` output
 - stricter `verify` behavior
 - broader Git integration tests
-- cloud rclone integration tests
-- stronger concurrency tests
-- fault-injection tests
 - better `gc` reports
 - typed errors for important failure cases
+- stronger concurrency tests
+- fault-injection tests
+- cloud rclone integration tests
 
 See [../ROADMAP.md](../ROADMAP.md) for the task list.

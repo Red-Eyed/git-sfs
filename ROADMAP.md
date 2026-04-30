@@ -19,8 +19,6 @@ databases, daemons, custom protocols, and hidden metadata.
   - `git-sfs verify`
   - `git-sfs push`
   - `git-sfs pull`
-  - `git-sfs materialize`
-  - `git-sfs dematerialize`
   - `git-sfs gc`
 - Cache layout:
   - content files keyed by SHA-256
@@ -73,25 +71,33 @@ databases, daemons, custom protocols, and hidden metadata.
 
 - Improve `git-sfs status`
   - Separate tracked symlinks, missing cached files, corrupt cached files,
-    missing remote files, broken Git symlinks, broken Git symlinks, and
-    unconverted files.
+    missing remote files, broken Git symlinks, and unconverted files.
   - Make output stable enough for CI parsing.
   - Define exit codes.
 - Improve `git-sfs verify`
   - Verify all required invariants with precise messages.
   - Add optional remote existence verification.
   - Ensure corrupt remote files are rejected.
-- Keep partial pull behavior strong
-  - `git-sfs pull <file>` must download only files needed for that path.
-  - `git-sfs pull <directory>` must download only files needed below that directory.
-  - Add coverage for mixed present/missing cache files.
 - Expand Git integration tests
   - One real workflow test already uses `git init`, `git add`, and `git clone`.
   - Confirm symlinks are tracked as symlinks.
   - Confirm `.git-sfs/` remains ignored.
-- Add cloud rclone integration tests
-  - Gate behind environment variables.
-  - Test upload, skip existing, pull, interruption retry, and permission errors.
+- Keep partial pull behavior strong
+  - `git-sfs pull <file>` must download only files needed for that path.
+  - `git-sfs pull <directory>` must download only files needed below that directory.
+  - Add coverage for mixed present/missing cache files.
+- Improve `gc`
+  - Better dry-run report.
+  - Cached-file cleanup only; no per-file local link layer.
+  - Tests for keeping all referenced files.
+- Add typed errors
+  - Missing cache config
+  - Invalid config
+  - Invalid symlink
+  - Missing cached file
+  - Corrupt cached file
+  - Missing remote file
+  - Corrupt remote file
 - Add fault-injection tests
   - Partial copy
   - Hash mismatch
@@ -105,18 +111,6 @@ databases, daemons, custom protocols, and hidden metadata.
 - Improve remote publish safety
   - Confirm temp path cleanup behavior.
   - Confirm final file is never corrupt after interrupted upload.
-- Improve `gc`
-  - Better dry-run report.
-  - Cached-file cleanup only; no per-file local link layer.
-  - Tests for keeping all referenced files.
-- Add typed errors
-  - Missing cache config
-  - Invalid config
-  - Invalid symlink
-  - Missing cached file
-  - Corrupt cached file
-  - Missing remote file
-  - Corrupt remote file
 - Review cross-platform path behavior
   - macOS
   - Linux
@@ -130,6 +124,9 @@ databases, daemons, custom protocols, and hidden metadata.
   - Setup cache
   - Pull files
   - Verify files open normally
+- Add cloud rclone integration tests
+  - Gate behind environment variables.
+  - Test upload, skip existing, pull, interruption retry, and permission errors.
 
 ## Non-goals for v1
 
