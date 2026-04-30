@@ -98,6 +98,12 @@ You can override the install location:
 GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
+On corporate networks with TLS interception, set `SSL_CERT_FILE` or
+`CURL_CA_BUNDLE` to your corporate CA bundle for both the bootstrap `curl` and
+the installer. If you cannot install the corporate CA, use
+`curl -kLsSf ... | GIT_SFS_INSECURE_TLS=1 sh` to make both the bootstrap
+download and installer downloads skip certificate verification.
+
 Or build from source:
 
 ```sh

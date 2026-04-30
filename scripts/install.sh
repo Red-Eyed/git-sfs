@@ -4,6 +4,24 @@ repo="${GIT_SFS_REPO:-Red-Eyed/git-sfs}"
 version="${GIT_SFS_VERSION:-latest}"
 install_dir="${GIT_SFS_INSTALL_DIR:-$HOME/.local/bin}"
 install_rclone="${GIT_SFS_INSTALL_RCLONE:-1}"
+insecure_tls="${GIT_SFS_INSECURE_TLS:-0}"
+ca_bundle="${GIT_SFS_SSL_CERT_FILE:-${SSL_CERT_FILE:-${CURL_CA_BUNDLE:-}}}"
+curl_flags="-LsSf"
+
+if [ -n "$ca_bundle" ]; then
+  echo "using TLS CA bundle from $ca_bundle"
+elif [ "$insecure_tls" = "1" ]; then
+  curl_flags="-kLsSf"
+  echo "warning: GIT_SFS_INSECURE_TLS=1 disables TLS certificate verification for downloads" >&2
+fi
+
+download() {
+  if [ -n "$ca_bundle" ]; then
+    curl $curl_flags --cacert "$ca_bundle" "$@"
+  else
+    curl $curl_flags "$@"
+  fi
+}
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
@@ -20,7 +38,7 @@ case "$arch" in
 esac
 
 if [ "$version" = "latest" ]; then
-  latest_url="$(curl -LsS -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")"
+  latest_url="$(download -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")"
   version="${latest_url##*/}"
 fi
 
@@ -37,7 +55,7 @@ rm -rf "$tmp"
 mkdir -p "$tmp" "$install_dir"
 trap 'rm -rf "$tmp"' EXIT
 
-curl -LsSf "$url" -o "$tmp/$asset"
+download "$url" -o "$tmp/$asset"
 tar -xzf "$tmp/$asset" -C "$tmp"
 install "$tmp/git-sfs" "$install_dir/git-sfs"
 
@@ -53,7 +71,7 @@ if [ "$install_rclone" != "0" ]; then
     fi
     rclone_zip="rclone-current-$rclone_os-$arch.zip"
     rclone_url="https://downloads.rclone.org/$rclone_zip"
-    curl -LsSf "$rclone_url" -o "$tmp/$rclone_zip"
+    download "$rclone_url" -o "$tmp/$rclone_zip"
     unzip -q "$tmp/$rclone_zip" -d "$tmp"
     install "$tmp"/rclone-*-*/rclone "$install_dir/rclone"
     echo "rclone installed to $install_dir/rclone"
