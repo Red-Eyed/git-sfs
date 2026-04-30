@@ -195,8 +195,14 @@ func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
 			t.Fatal(err)
 		}
 		ls := runGit(repo, "ls-files", "-s", "data/one.bin", "data/nested/two.bin")
-		if !strings.Contains(ls, "120000") {
-			t.Fatalf("expected git symlink entries, got:\n%s", ls)
+		if count := strings.Count(ls, "120000"); count != 2 {
+			t.Fatalf("expected two git symlink entries, got %d:\n%s", count, ls)
+		}
+		if tracked := runGit(repo, "ls-files", "--", ".git-sfs"); tracked != ".git-sfs/config.toml\n" {
+			t.Fatalf(".git-sfs should only track config.toml, got:\n%s", tracked)
+		}
+		if ignored := runGit(repo, "ls-files", "--others", "--exclude-standard", ".git-sfs"); ignored != "" {
+			t.Fatalf(".git-sfs cache files should be ignored, got:\n%s", ignored)
 		}
 		if status := runGit(repo, "status", "--short"); strings.Contains(status, ".git-sfs/cache") {
 			t.Fatalf(".git-sfs/cache should stay ignored, got:\n%s", status)
