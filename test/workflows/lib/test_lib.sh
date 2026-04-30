@@ -36,6 +36,8 @@ assert_symlink() {
 resolve_symlink_target() {
   local path="$1"
   local dir target
+  # Resolve relative symlink targets against the link's directory so assertions
+  # can compare real filesystem locations.
   dir="$(cd "$(dirname "$path")" && pwd -P)"
   target="$(readlink "$path")"
   cd "$dir" && cd "$(dirname "$target")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$target")"
@@ -62,5 +64,7 @@ hash_from_link() {
 cache_file_for() {
   local cache="$1"
   local hash="$2"
+  # The cache layout is part of the public on-disk model, so tests compute the
+  # expected file location directly instead of asking production code for it.
   printf '%s/files/sha256/%s/%s\n' "$cache" "${hash%${hash#??}}" "$hash"
 }
