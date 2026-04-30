@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"git-sfs/internal/cache"
 	"git-sfs/internal/config"
@@ -382,32 +384,108 @@ func (a App) Push(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	hashes, err := uniquePushHashes(repo, links)
+	if err != nil {
+		return err
+	}
+	workers := pushWorkerCount(len(hashes))
+	jobs := make(chan hash.Hash)
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var once sync.Once
+	var wg sync.WaitGroup
+	var outMu sync.Mutex
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for h := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				if !c.HasValid(h) {
+					once.Do(func() {
+						errCh <- fmt.Errorf("cache file for %s is missing or corrupt", h)
+						cancel()
+					})
+					return
+				}
+				has, err := r.HasFile(ctx, h)
+				if err != nil {
+					once.Do(func() {
+						errCh <- err
+						cancel()
+					})
+					return
+				}
+				if has {
+					continue
+				}
+				if err := r.PushFile(ctx, h, c.FilePath(h)); err != nil {
+					once.Do(func() {
+						errCh <- err
+						cancel()
+					})
+					return
+				}
+				outMu.Lock()
+				a.say("pushed " + h.String())
+				outMu.Unlock()
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, h := range hashes {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- h:
+			}
+		}
+	}()
+	wg.Wait()
+	select {
+	case err := <-errCh:
+		return err
+	default:
+		return nil
+	}
+}
+
+func uniquePushHashes(repo string, links []string) ([]hash.Hash, error) {
 	seen := map[hash.Hash]bool{}
+	hashes := make([]hash.Hash, 0, len(links))
 	for _, l := range links {
 		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if seen[h] {
 			continue
 		}
 		seen[h] = true
-		if !c.HasValid(h) {
-			return fmt.Errorf("cache file for %s is missing or corrupt", h)
-		}
-		has, err := r.HasFile(ctx, h)
-		if err != nil {
-			return err
-		}
-		if has {
-			continue
-		}
-		if err := r.PushFile(ctx, h, c.FilePath(h)); err != nil {
-			return err
-		}
-		a.say("pushed " + h.String())
+		hashes = append(hashes, h)
 	}
-	return nil
+	return hashes, nil
+}
+
+func pushWorkerCount(n int) int {
+	if n < 1 {
+		return 1
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers > 4 {
+		workers = 4
+	}
+	if workers > n {
+		workers = n
+	}
+	if workers < 1 {
+		return 1
+	}
+	return workers
 }
 
 // Pull downloads missing files for the selected symlinks.

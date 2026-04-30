@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"git-sfs/internal/hash"
 	"git-sfs/internal/sfspath"
@@ -83,6 +84,88 @@ func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestPushUsesParallelRcloneUploads(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteRoot := filepath.Join(t.TempDir(), "remote")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+if [ "${1:-}" = "--config" ]; then
+  shift 2
+fi
+cmd="$1"
+src="$2"
+dst="$3"
+map_path() {
+  case "$1" in
+    testremote:*) printf '%s/%s\n' "$RCLONE_TEST_ROOT" "${1#testremote:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+src="$(map_path "$src")"
+dst="$(map_path "$dst")"
+case "$cmd" in
+  copyto)
+    case "$src" in
+      "$RCLONE_TEST_ROOT"/*)
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst"
+        ;;
+      *)
+      printf 'start %s\n' "$src" >> "$RCLONE_TEST_LOG"
+      sleep 1
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst"
+      printf 'end %s\n' "$src" >> "$RCLONE_TEST_LOG"
+        ;;
+    esac
+    ;;
+  moveto)
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteRoot)
+	logPath := filepath.Join(t.TempDir(), "rclone.log")
+	t.Setenv("RCLONE_TEST_LOG", logPath)
+	writeRcloneDataset(t, repo, "testremote", "dataset")
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		if time.Since(start) > 1800*time.Millisecond {
+			t.Fatalf("push took too long to be parallel: %s", time.Since(start))
+		}
+	})
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("unexpected rclone log:\n%s", log)
+	}
+	if !strings.HasPrefix(lines[0], "start ") || !strings.HasPrefix(lines[1], "start ") {
+		t.Fatalf("uploads did not start in parallel:\n%s", log)
+	}
 }
 
 func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
@@ -541,6 +624,12 @@ func writeDataset(t *testing.T, repo, remote string) {
 	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
 }
 
+func writeRcloneDataset(t *testing.T, repo, host, path string) {
+	t.Helper()
+	content := "version = 1\n\n[remotes.default]\ntype = rclone\nhost = " + host + "\npath = " + path + "\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
+}
+
 func writeLocal(t *testing.T, repo, cacheDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(repo, ".git-sfs"), 0o755); err != nil {
@@ -557,6 +646,13 @@ func mustWrite(t *testing.T, path string, content []byte) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTool(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }
