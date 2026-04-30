@@ -116,8 +116,7 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeRcloneDataset(t, repo, "local", remoteDir)
-	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
+	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nurl = local:"+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
@@ -188,13 +187,14 @@ func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
 		if err := a.Init(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
-		mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"))
+		mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nurl = local:"+remoteDir+"\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"))
 		runGit(repo, "add", ".git-sfs/config.toml", ".gitignore")
 		runGit(repo, "commit", "-m", "initialize git-sfs")
 
 		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data"}); err != nil {
 			t.Fatal(err)
 		}
+		runGit(repo, "add", "data")
 		ls := runGit(repo, "ls-files", "-s", "data/one.bin", "data/nested/two.bin")
 		if count := strings.Count(ls, "120000"); count != 2 {
 			t.Fatalf("expected two git symlink entries, got %d:\n%s", count, ls)
@@ -208,7 +208,6 @@ func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
 		if status := runGit(repo, "status", "--short"); strings.Contains(status, ".git-sfs/cache") {
 			t.Fatalf(".git-sfs/cache should stay ignored, got:\n%s", status)
 		}
-		runGit(repo, "add", "data")
 		runGit(repo, "commit", "-m", "track dataset")
 
 		if err := app(&bytes.Buffer{}).Push(context.Background(), ""); err != nil {
