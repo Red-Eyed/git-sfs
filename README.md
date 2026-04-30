@@ -142,13 +142,13 @@ Add large files:
 git-sfs add data/
 ```
 
-Move a huge external file or directory into the cache without first copying it into the repository:
+Import a huge external file or directory into the cache without first copying it into the repository:
 
 ```sh
-git-sfs mv /mnt/incoming/data data/
+git-sfs import /mnt/incoming/data data/
 ```
 
-`git-sfs mv` hashes the source, renames the bytes into the cache, and creates repo symlinks at the destination. The source and cache must be on the same filesystem so the move can stay a rename instead of becoming a second full copy.
+`git-sfs import` hashes the source, renames the bytes into the cache, and creates repo symlinks at the destination. The source and cache must be on the same filesystem so the import can stay a rename instead of becoming a second full copy.
 
 Commit the metadata:
 
@@ -187,7 +187,7 @@ git-sfs pull data/validation/
 git-sfs init
 git-sfs setup
 git-sfs add <path>
-git-sfs mv <src> <dst>
+git-sfs import <src> <dst>
 git-sfs status
 git-sfs verify
 git-sfs push [remote]
@@ -300,7 +300,7 @@ bytes and `git-sfs verify` reports corruption. To update a large file, replace
 the symlink with a new regular file, run `git-sfs add <path>`, commit the new
 symlink, and push the new cached bytes.
 
-`git-sfs mv <src> <dst>` is for importing very large external files or
+`git-sfs import <src> <dst>` is for importing very large external files or
 directories without making a second repository copy. It relies on filesystem
 rename semantics, so the source and cache must be on the same filesystem. If
 they are not, use `git-sfs add` after placing the file where you want it, or

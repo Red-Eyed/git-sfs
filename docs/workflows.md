@@ -35,10 +35,10 @@ git-sfs push
 
 ## Import Huge Data Without A Second Copy
 
-Use `git-sfs mv` when a file or tree already exists outside the repository and is too large to copy into place first:
+Use `git-sfs import` when a file or tree already exists outside the repository and is too large to copy into place first:
 
 ```sh
-git-sfs mv /mnt/incoming/dataset data/dataset
+git-sfs import /mnt/incoming/dataset data/dataset
 git add data/dataset
 git commit -m "track imported dataset"
 git-sfs push

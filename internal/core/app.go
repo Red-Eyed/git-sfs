@@ -207,7 +207,9 @@ func (a App) Add(ctx context.Context, paths []string) error {
 	return nil
 }
 
-func (a App) Move(ctx context.Context, srcPath, dstPath string) error {
+// Import ingests external files into the cache with renames and creates Git
+// symlinks at the destination paths.
+func (a App) Import(ctx context.Context, srcPath, dstPath string) error {
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
@@ -218,7 +220,7 @@ func (a App) Move(ctx context.Context, srcPath, dstPath string) error {
 	if err := c.Init(); err != nil {
 		return err
 	}
-	l, err := lock.Acquire(ctx, c.LocksDir(), "mv")
+	l, err := lock.Acquire(ctx, c.LocksDir(), "import")
 	if err != nil {
 		return err
 	}
@@ -233,7 +235,7 @@ func (a App) Move(ctx context.Context, srcPath, dstPath string) error {
 			return err
 		}
 		if err := c.Move(pair.Src, h); err != nil {
-			return fmt.Errorf("move %s: %w", pair.Src, err)
+			return fmt.Errorf("import %s: %w", pair.Src, err)
 		}
 		if err := c.Protect(h); err != nil {
 			return err
@@ -251,7 +253,7 @@ func (a App) Move(ctx context.Context, srcPath, dstPath string) error {
 		if err := os.Symlink(target, pair.Dst); err != nil {
 			return err
 		}
-		a.say("moved " + pair.Src + " -> " + rel(repo, pair.Dst) + " -> " + h.String())
+		a.say("imported " + pair.Src + " -> " + rel(repo, pair.Dst) + " -> " + h.String())
 	}
 	removeEmptyDirs(dirs)
 	return nil

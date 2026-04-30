@@ -138,7 +138,7 @@ func TestMoveFileIntoCacheWithoutCopyingToRepo(t *testing.T) {
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, src, []byte("large payload"))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Move(context.Background(), src, "data/blob.bin"); err != nil {
+		if err := app(&bytes.Buffer{}).Import(context.Background(), src, "data/blob.bin"); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -175,7 +175,7 @@ func TestMoveDirectoryIntoCache(t *testing.T) {
 	mustWrite(t, filepath.Join(srcDir, "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(srcDir, "nested", "two.bin"), []byte("two"))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Move(context.Background(), srcDir, "data/imported"); err != nil {
+		if err := app(&bytes.Buffer{}).Import(context.Background(), srcDir, "data/imported"); err != nil {
 			t.Fatal(err)
 		}
 	})

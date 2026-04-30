@@ -71,7 +71,7 @@ func TestCommandDispatch(t *testing.T) {
 	})
 }
 
-func TestCommandDispatchMove(t *testing.T) {
+func TestCommandDispatchImport(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -85,20 +85,20 @@ func TestCommandDispatchMove(t *testing.T) {
 		if err := run(context.Background(), []string{"init"}, &stdout, &stderr); err != nil {
 			t.Fatal(err)
 		}
-		if err := run(context.Background(), []string{"mv", src, "data/blob"}, &stdout, &stderr); err != nil {
-			t.Fatalf("mv failed: %v stderr=%s stdout=%s", err, stderr.String(), stdout.String())
+		if err := run(context.Background(), []string{"import", src, "data/blob"}, &stdout, &stderr); err != nil {
+			t.Fatalf("import failed: %v stderr=%s stdout=%s", err, stderr.String(), stdout.String())
 		}
 		info, err := os.Lstat(filepath.Join(repo, "data", "blob"))
 		if err != nil || info.Mode()&os.ModeSymlink == 0 {
-			t.Fatalf("mv should create a destination symlink: info=%v err=%v", info, err)
+			t.Fatalf("import should create a destination symlink: info=%v err=%v", info, err)
 		}
 	})
 }
 
-func TestMoveRequiresSourceAndDestination(t *testing.T) {
+func TestImportRequiresSourceAndDestination(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if err := run(context.Background(), []string{"mv", "only-one"}, &stdout, &stderr); err == nil {
-		t.Fatal("expected mv without source and destination to fail")
+	if err := run(context.Background(), []string{"import", "only-one"}, &stdout, &stderr); err == nil {
+		t.Fatal("expected import without source and destination to fail")
 	}
 }
 
