@@ -6,8 +6,8 @@ Global flags:
 git-sfs --verbose push
 ```
 
-`--verbose` prints remote subprocess commands to stderr, which is useful when
-debugging `rclone` remotes.
+`--verbose` prints command debug output to stderr, including remote subprocess
+commands when a remote backend is involved.
 
 ## git-sfs init
 

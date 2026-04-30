@@ -67,14 +67,17 @@ var issueKinds = []string{
 }
 
 // Init creates the tracked project config and the untracked .git-sfs workspace.
-func (a App) Init(ctx context.Context, force bool) error {
+func (a App) Init(ctx context.Context, force bool) (err error) {
+	a.debugf("init: start")
+	defer a.debugDone("init", &err)
 	repo, err := localstate.ResolveRepo()
 	if err != nil {
 		return err
 	}
 	cfgPath := filepath.Join(repo, a.ConfigPath)
 	if _, err := os.Stat(cfgPath); err == nil && !force {
-		return fmt.Errorf("%s already exists; use --force to overwrite", a.ConfigPath)
+		err = fmt.Errorf("%s already exists; use --force to overwrite", a.ConfigPath)
+		return err
 	}
 	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
@@ -108,7 +111,9 @@ func (a App) Init(ctx context.Context, force bool) error {
 
 // Setup prepares machine-local state and repairs materialization links when the
 // referenced cache files already exist.
-func (a App) Setup(ctx context.Context) error {
+func (a App) Setup(ctx context.Context) (err error) {
+	a.debugf("setup: start")
+	defer a.debugDone("setup", &err)
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
@@ -151,7 +156,9 @@ func (a App) Setup(ctx context.Context) error {
 
 // Add converts regular files into git-sfs symlinks after copying their bytes into
 // the local content-addressed cache.
-func (a App) Add(ctx context.Context, paths []string) error {
+func (a App) Add(ctx context.Context, paths []string) (err error) {
+	a.debugf("add: start paths=%d", len(paths))
+	defer a.debugDone("add", &err)
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
@@ -229,7 +236,9 @@ func (a App) Import(ctx context.Context, srcPath, dstPath string) error {
 
 // ImportWithOptions ingests external files into the cache with renames and
 // creates Git symlinks at the destination paths.
-func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opts ImportOptions) error {
+func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opts ImportOptions) (err error) {
+	a.debugf("import: start src=%s dst=%s follow_symlinks=%t", srcPath, dstPath, opts.FollowSymlinks)
+	defer a.debugDone("import", &err)
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
@@ -290,7 +299,9 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 }
 
 // Status reports user-actionable problems without mutating repository state.
-func (a App) Status(ctx context.Context) error {
+func (a App) Status(ctx context.Context) (err error) {
+	a.debugf("status: start")
+	defer a.debugDone("status", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
@@ -313,7 +324,9 @@ func (a App) Status(ctx context.Context) error {
 }
 
 // Verify is the CI-oriented strict check; any reported problem is a failure.
-func (a App) Verify(ctx context.Context) error {
+func (a App) Verify(ctx context.Context) (err error) {
+	a.debugf("verify: start")
+	defer a.debugDone("verify", &err)
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
@@ -379,7 +392,9 @@ func (a App) Dematerialize(ctx context.Context, path string) error {
 }
 
 // Push uploads each referenced cache file at most once per invocation.
-func (a App) Push(ctx context.Context, name string) error {
+func (a App) Push(ctx context.Context, name string) (err error) {
+	a.debugf("push: start remote=%s", name)
+	defer a.debugDone("push", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
@@ -506,7 +521,9 @@ func pushWorkerCount(n int) int {
 }
 
 // Pull downloads missing files for the selected symlinks.
-func (a App) Pull(ctx context.Context, path string) error {
+func (a App) Pull(ctx context.Context, path string) (err error) {
+	a.debugf("pull: start path=%s", path)
+	defer a.debugDone("pull", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
@@ -549,7 +566,9 @@ func (a App) Pull(ctx context.Context, path string) error {
 }
 
 // GC removes only data that is not referenced by the current Git symlink tree.
-func (a App) GC(ctx context.Context, opts GCOptions) error {
+func (a App) GC(ctx context.Context, opts GCOptions) (err error) {
+	a.debugf("gc: start dry_run=%t files=%t", opts.DryRun, opts.Files)
+	defer a.debugDone("gc", &err)
 	repo, c, _, err := a.open()
 	if err != nil {
 		return err
@@ -956,4 +975,22 @@ func (a App) say(s string) {
 	if !a.Quiet {
 		fmt.Fprintln(a.Stdout, s)
 	}
+}
+
+func (a App) debugf(format string, args ...any) {
+	if !a.Verbose {
+		return
+	}
+	fmt.Fprintf(a.Stderr, "debug: "+format+"\n", args...)
+}
+
+func (a App) debugDone(name string, err *error) {
+	if !a.Verbose {
+		return
+	}
+	if err != nil && *err != nil {
+		a.debugf("%s: error: %v", name, *err)
+		return
+	}
+	a.debugf("%s: done", name)
 }

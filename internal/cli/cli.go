@@ -48,6 +48,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	cmd, cmdArgs := rest[0], rest[1:]
+	if opts.verbose {
+		fmt.Fprintf(stderr, "debug: command=%s args=%q\n", cmd, cmdArgs)
+	}
 	switch cmd {
 	case "init":
 		return app.Init(ctx, has(cmdArgs, "--force"))

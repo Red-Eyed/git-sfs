@@ -25,6 +25,16 @@ func TestRunHelp(t *testing.T) {
 	}
 }
 
+func TestVerboseHelpOutputsDebug(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"--verbose", "help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "debug: command=help") {
+		t.Fatalf("missing verbose dispatch output: %q", stderr.String())
+	}
+}
+
 func TestUnknownCommandFails(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run(context.Background(), []string{"wat"}, &stdout, &stderr); err == nil {
@@ -62,9 +72,31 @@ func TestCommandDispatch(t *testing.T) {
 			{"pull", "data/blob"},
 			{"gc", "--dry-run"},
 		} {
-			if err := run(context.Background(), args, &stdout, &stderr); err != nil {
+			stderr.Reset()
+			verboseArgs := append([]string{"--verbose"}, args...)
+			if err := run(context.Background(), verboseArgs, &stdout, &stderr); err != nil {
 				t.Fatalf("%v: %v stderr=%s stdout=%s", args, err, stderr.String(), stdout.String())
 			}
+			if !strings.Contains(stderr.String(), "debug: command="+args[0]) {
+				t.Fatalf("%v missing verbose dispatch output: %q", args, stderr.String())
+			}
+		}
+	})
+}
+
+func TestVerboseInitOutputsDebug(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inDir(t, repo, func() {
+		var stdout, stderr bytes.Buffer
+		if err := run(context.Background(), []string{"--verbose", "init"}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		got := stderr.String()
+		if !strings.Contains(got, "debug: command=init") || !strings.Contains(got, "debug: init: start") {
+			t.Fatalf("missing init verbose output: %q", got)
 		}
 	})
 }

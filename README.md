@@ -268,8 +268,8 @@ Unix tools.
 
 Remote details: [docs/remotes.md](docs/remotes.md)
 
-Use `git-sfs --verbose push` or `git-sfs --verbose pull` to print remote
-subprocess commands while debugging rclone behavior.
+Use `git-sfs --verbose ...` to print command debug output to stderr, including
+remote subprocess commands while debugging rclone behavior.
 
 ## Documentation
 

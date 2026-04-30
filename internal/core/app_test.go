@@ -54,6 +54,28 @@ func TestAddVerifyAndStatus(t *testing.T) {
 	}
 }
 
+func TestVerboseAddOutputsDebug(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+
+	stderr := &bytes.Buffer{}
+	app := app(&bytes.Buffer{})
+	app.Stderr = stderr
+	app.Verbose = true
+	inDir(t, repo, func() {
+		if err := app.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	got := stderr.String()
+	if !strings.Contains(got, "debug: add: start") || !strings.Contains(got, "debug: add: done") {
+		t.Fatalf("missing verbose add output: %q", got)
+	}
+}
+
 func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
