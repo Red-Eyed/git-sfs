@@ -9,12 +9,17 @@ REMOTE="$WORK/remote"
 REPO_A="$WORK/repo-a"
 REPO_B="$WORK/repo-b"
 
+run_git_sfs() {
+  "$BIN" --quiet "$@" </dev/null
+}
+
 cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
 mkdir -p "$WORK" "$REPO_A" "$REPO_B"
+export GIT_TERMINAL_PROMPT=0
 go build -o "$BIN" "$ROOT/cmd/git-sfs"
 
 init_repo() {
@@ -38,14 +43,14 @@ init_repo "$REPO_A" "$CACHE_A"
 mkdir -p "$REPO_A/data"
 printf "large payload" > "$REPO_A/data/blob.bin"
 
-(cd "$REPO_A" && "$BIN" setup && "$BIN" add data && "$BIN" verify && "$BIN" push)
+(cd "$REPO_A" && run_git_sfs setup && run_git_sfs add data && run_git_sfs verify && run_git_sfs push)
 
 mkdir -p "$REPO_B/.git" "$REPO_B/.git-sfs" "$REPO_B/data"
 cp "$REPO_A/.git-sfs/config.toml" "$REPO_B/.git-sfs/config.toml"
 cp -P "$REPO_A/data/blob.bin" "$REPO_B/data/blob.bin"
 ln -s "$CACHE_B" "$REPO_B/.git-sfs/cache"
 
-(cd "$REPO_B" && "$BIN" setup && "$BIN" pull data/blob.bin && "$BIN" verify)
+(cd "$REPO_B" && run_git_sfs setup && run_git_sfs pull data/blob.bin && run_git_sfs verify)
 test "$(cat "$REPO_B/data/blob.bin")" = "large payload"
 
 echo "smoke ok"

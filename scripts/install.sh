@@ -6,6 +6,9 @@ install_dir="${GIT_SFS_INSTALL_DIR:-$HOME/.local/bin}"
 install_rclone="${GIT_SFS_INSTALL_RCLONE:-1}"
 insecure_tls="${GIT_SFS_INSECURE_TLS:-0}"
 ca_bundle="${GIT_SFS_SSL_CERT_FILE:-${SSL_CERT_FILE:-${CURL_CA_BUNDLE:-}}}"
+release_base_url="${GIT_SFS_RELEASE_BASE_URL:-https://github.com/$repo/releases/download}"
+release_latest_url="${GIT_SFS_RELEASE_LATEST_URL:-https://github.com/$repo/releases/latest}"
+rclone_base_url="${GIT_SFS_RCLONE_BASE_URL:-https://downloads.rclone.org}"
 curl_flags="-LsSf"
 
 if [ -n "$ca_bundle" ]; then
@@ -38,12 +41,12 @@ case "$arch" in
 esac
 
 if [ "$version" = "latest" ]; then
-  latest_url="$(download -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest")"
+  latest_url="$(download -o /dev/null -w '%{url_effective}' "$release_latest_url")"
   version="${latest_url##*/}"
 fi
 
 asset="git-sfs-$version-$os-$arch.tar.gz"
-url="https://github.com/$repo/releases/download/$version/$asset"
+url="$release_base_url/$version/$asset"
 tmp="${TMPDIR:-/tmp}/git-sfs-install-$$"
 rclone_os="$os"
 
@@ -67,14 +70,14 @@ if [ "$install_rclone" != "0" ]; then
     echo "rclone installation requires unzip; install unzip or rerun with GIT_SFS_INSTALL_RCLONE=0" >&2
     exit 1
   fi
-  download "https://downloads.rclone.org/version.txt" -o "$tmp/rclone-version.txt"
+  download "$rclone_base_url/version.txt" -o "$tmp/rclone-version.txt"
   rclone_version="$(awk 'NF {print $NF; exit}' "$tmp/rclone-version.txt")"
   if [ -z "$rclone_version" ]; then
     echo "failed to determine latest stable rclone version" >&2
     exit 1
   fi
   rclone_zip="rclone-$rclone_version-$rclone_os-$arch.zip"
-  rclone_url="https://downloads.rclone.org/$rclone_version/$rclone_zip"
+  rclone_url="$rclone_base_url/$rclone_version/$rclone_zip"
   download "$rclone_url" -o "$tmp/$rclone_zip"
   unzip -q "$tmp/$rclone_zip" -d "$tmp"
   install "$tmp"/rclone-*-*/rclone "$install_dir/rclone"

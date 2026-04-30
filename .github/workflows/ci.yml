@@ -52,3 +52,9 @@ jobs:
 
       - name: Smoke test
         run: bash scripts/smoke.sh
+
+      - name: End-to-end test
+        run: bash scripts/e2e.sh
+
+      - name: Workflow suite
+        run: bash test/workflows/run.sh

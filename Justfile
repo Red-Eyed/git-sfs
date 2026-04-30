@@ -21,8 +21,14 @@ build:
 smoke:
     env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash scripts/smoke.sh
 
-check: fmt test build smoke
-    git diff --check
+e2e:
+    env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash scripts/e2e.sh
+
+workflows:
+    env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash test/workflows/run.sh
+
+check: fmt test build smoke e2e workflows
+    git --no-pager diff --check
 
 release-snapshot:
     env GO={{go}} GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} sh scripts/build-release.sh snapshot dist
