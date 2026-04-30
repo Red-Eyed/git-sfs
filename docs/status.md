@@ -33,7 +33,7 @@ Still needs work:
 - clearer `status` output
 - stricter `verify` behavior
 - real Git integration tests
-- real rclone integration tests
+- cloud rclone integration tests
 - stronger concurrency tests
 - fault-injection tests
 - better `gc` reports

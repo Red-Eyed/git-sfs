@@ -12,8 +12,8 @@ By default this installs to:
 $HOME/.local/bin/git-sfs
 ```
 
-The installer also installs `rclone` into the same directory when `rclone` is
-not already available on `PATH`. To skip this:
+The installer also installs the latest stable `rclone` into the same directory
+by default. To skip this:
 
 ```sh
 GIT_SFS_INSTALL_RCLONE=0 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh

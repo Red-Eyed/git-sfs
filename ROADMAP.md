@@ -37,6 +37,7 @@ databases, daemons, custom protocols, and hidden metadata.
 - Rejection of cache paths in `.git-sfs/config.toml`
 - Filesystem remote backend
 - Rclone command backend
+- Local rclone integration tests
 - Partial pull by file or directory
 - Retry-safe local file writes with temp files and rename
 - Cache locking for mutating operations
@@ -57,7 +58,7 @@ databases, daemons, custom protocols, and hidden metadata.
   - Still needs optional remote checks and refined exit-code documentation.
 - rclone remote
   - Thin wrapper around the `rclone` CLI, not a custom cloud API.
-  - Needs validation against real rclone environments.
+  - Has local-backend integration coverage; cloud remotes still need validation.
 - Concurrency
   - Cache-level lock exists.
   - Needs broader concurrent command tests.
@@ -88,7 +89,7 @@ databases, daemons, custom protocols, and hidden metadata.
   - Use `git init`.
   - Confirm symlinks are tracked as symlinks.
   - Confirm `.git-sfs/` remains ignored.
-- Add real rclone integration tests
+- Add cloud rclone integration tests
   - Gate behind environment variables.
   - Test upload, skip existing, pull, interruption retry, and permission errors.
 - Add fault-injection tests

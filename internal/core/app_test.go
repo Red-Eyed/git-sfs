@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -103,6 +104,46 @@ func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := hash.VerifyFile(cacheFile, h); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
+	if _, err := exec.LookPath("rclone"); err != nil {
+		t.Skip("rclone is not installed")
+	}
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeRcloneDataset(t, repo, "local", remoteDir)
+	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
+
+	inDir(t, repo, func() {
+		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := app(&bytes.Buffer{}).Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := os.Remove(cacheFile); err != nil {
+			t.Fatal(err)
+		}
+		if err := app(&bytes.Buffer{}).Pull(context.Background(), "data/blob"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheFile, h); err != nil {
+			t.Fatal(err)
+		}
+		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := hash.VerifyFile(remoteFile, h); err != nil {
 			t.Fatal(err)
 		}
 	})
