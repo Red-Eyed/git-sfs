@@ -75,5 +75,5 @@ This prevents absolute machine-local cache paths from being committed.
 - timestamp tracking
 - automatic Git hooks
 
-Use filesystem permissions, SSH/rclone configuration, and normal Git review for
+Use filesystem permissions, rclone configuration, and normal Git review for
 those concerns.

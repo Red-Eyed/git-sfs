@@ -17,11 +17,11 @@ type Config struct {
 }
 
 type RemoteConfig struct {
-	Type  string
-	URL   string
-	Host  string
-	Path  string
-	Shell string
+	Type   string
+	URL    string
+	Host   string
+	Path   string
+	Config string
 }
 
 type Settings struct {
@@ -36,7 +36,7 @@ func Default() Config {
 	return Config{
 		Version: Version,
 		Remotes: map[string]RemoteConfig{
-			"default": {Type: "rsync", Host: "user@host", Path: "/mnt/datasets/project"},
+			"default": {Type: "rclone", Host: "remote-name", Path: "datasets/project", Config: "rclone.conf"},
 		},
 		Settings: Settings{Algorithm: "sha256"},
 	}
@@ -56,28 +56,18 @@ version = 1
 
 # The default remote is used by git-sfs push and git-sfs pull when no remote is named.
 [remotes.default]
-# Supported today: rsync, ssh, rclone, filesystem.
-# Use rsync for a normal SSH destination. The host can be an SSH config alias,
-# user@host, or user@host:port.
-type = "rsync"
-host = "user@host"
-path = "/mnt/datasets/project"
+# Supported today: rclone and filesystem.
+type = "rclone"
+host = "remote-name"
+path = "datasets/project"
+# Relative paths are resolved from .git-sfs.
+# Do not commit rclone configs that contain secrets or tokens.
+config = "rclone.conf"
 
 # Examples you can copy by removing the leading # characters.
-# [remotes.backup]
-# type = "ssh"
-# host = "storage"
-# path = "/mnt/datasets/project"
-# shell = "sh"
-#
 # [remotes.local]
 # type = "filesystem"
 # path = "/mnt/datasets/project"
-#
-# [remotes.cloud]
-# type = "rclone"
-# host = "remote-name"
-# path = "datasets/project"
 
 [settings]
 # Only sha256 is supported in v1.
@@ -156,8 +146,8 @@ func Load(path string) (Config, error) {
 				rc.Host = val
 			case "path":
 				rc.Path = val
-			case "shell":
-				rc.Shell = val
+			case "config":
+				rc.Config = val
 			default:
 				return Config{}, fmt.Errorf("unknown remote field %q", key)
 			}
@@ -182,9 +172,6 @@ func Load(path string) (Config, error) {
 		}
 		if rc.URL == "" && rc.Path == "" {
 			return Config{}, fmt.Errorf("remote %q requires url or path", name)
-		}
-		if rc.Shell != "" && rc.Shell != "sh" && rc.Shell != "cmd" {
-			return Config{}, fmt.Errorf("remote %q has unsupported shell %q", name, rc.Shell)
 		}
 	}
 	return cfg, nil

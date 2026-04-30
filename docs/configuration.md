@@ -10,9 +10,10 @@
 version = 1
 
 [remotes.default]
-type = "rsync"
-host = "user@host"
-path = "/mnt/datasets/project"
+type = "rclone"
+host = "remote-name"
+path = "datasets/project"
+config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
@@ -26,10 +27,10 @@ Allowed here:
 - remote URLs
 - remote hosts
 - remote paths
-- remote shell for command targets
+- rclone config paths
 - shared settings
 
-Supported remote types are `filesystem`, `rsync`, `ssh`, and `rclone`.
+Supported remote types are `filesystem` and `rclone`.
 
 Forbidden here:
 
@@ -38,6 +39,10 @@ Forbidden here:
 - tokens
 - machine-local absolute paths
 - temporary state
+
+Relative rclone config paths are resolved from `.git-sfs`. For example,
+`config = "rclone.conf"` uses `.git-sfs/rclone.conf`. Commit that file only
+when it contains shareable, non-secret rclone settings.
 
 ## .git-sfs/cache
 

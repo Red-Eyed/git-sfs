@@ -3,7 +3,7 @@
 ## Direction
 
 `git-sfs` should stay as simple as possible: a thin layer on top of Git, the
-filesystem, and well-known remotes such as `rsync`, `ssh`, and `rclone`.
+filesystem, and `rclone`.
 
 The source of truth should be visible files and symlinks. Avoid manifests,
 databases, daemons, custom protocols, and hidden metadata.
@@ -36,7 +36,7 @@ databases, daemons, custom protocols, and hidden metadata.
 - `.git-sfs/config.toml` parsing and validation
 - Rejection of cache paths in `.git-sfs/config.toml`
 - Filesystem remote backend
-- Initial rsync/ssh command backend
+- Rclone command backend
 - Partial pull by file or directory
 - Retry-safe local file writes with temp files and rename
 - Cache locking for mutating operations
@@ -55,12 +55,9 @@ databases, daemons, custom protocols, and hidden metadata.
 - `status` and `verify`
   - Current implementation detects key problems and prints stable category counts.
   - Still needs optional remote checks and refined exit-code documentation.
-- rsync/ssh remotes
-  - Command backend exists.
-  - Needs validation against real rsync/ssh environments.
 - rclone remote
-  - Not implemented yet.
-  - Should be a thin wrapper around the `rclone` CLI, not a custom cloud API.
+  - Thin wrapper around the `rclone` CLI, not a custom cloud API.
+  - Needs validation against real rclone environments.
 - Concurrency
   - Cache-level lock exists.
   - Needs broader concurrent command tests.
@@ -91,13 +88,9 @@ databases, daemons, custom protocols, and hidden metadata.
   - Use `git init`.
   - Confirm symlinks are tracked as symlinks.
   - Confirm `.git-sfs/` remains ignored.
-- Add real rsync/ssh integration tests
+- Add real rclone integration tests
   - Gate behind environment variables.
   - Test upload, skip existing, pull, interruption retry, and permission errors.
-- Add rclone backend
-  - Use the installed `rclone` CLI.
-  - Keep the same plain file layout.
-  - Add integration tests gated behind environment variables.
 - Add fault-injection tests
   - Partial copy
   - Hash mismatch

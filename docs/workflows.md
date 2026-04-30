@@ -203,50 +203,20 @@ git-sfs push
 git-sfs pull
 ```
 
-## Work With An rsync Remote
-
-```toml
-[remotes.default]
-type = "rsync"
-host = "user@host"
-path = "/mnt/datasets/project"
-```
-
-Then:
-
-```sh
-git-sfs push
-git-sfs pull
-```
-
-## Work With An ssh Remote
-
-```toml
-[remotes.default]
-type = "ssh"
-host = "storage"
-path = "/mnt/datasets/project"
-shell = "sh"
-```
-
-Then:
-
-```sh
-git-sfs push
-git-sfs pull
-```
-
 ## Work With An rclone Remote
 
-First configure credentials with `rclone config`, then use the configured
-remote name in `.git-sfs/config.toml`:
+Use a configured rclone remote name in `.git-sfs/config.toml`:
 
 ```toml
 [remotes.default]
 type = "rclone"
 host = "remote-name"
 path = "datasets/project"
+config = "rclone.conf"
 ```
+
+Relative `config` paths are resolved from `.git-sfs`. Commit the rclone config
+only when it contains no secrets or tokens.
 
 `git-sfs` should call the installed `rclone` CLI and keep the same plain file
 layout. It does not implement cloud-provider APIs directly.

@@ -24,7 +24,7 @@ Implemented:
 - SHA-256 file verification
 - Local cache binding through `.git-sfs/cache`
 - Filesystem remote
-- Initial rsync/ssh/rclone command backends
+- Rclone command backend
 - CI
 - Release archives
 - Install script
@@ -35,7 +35,7 @@ Still needs work:
 - clearer `status` output
 - stricter `verify` behavior
 - real Git integration tests
-- real rsync/ssh integration tests
+- real rclone integration tests
 - stronger concurrency tests
 - fault-injection tests
 - better `gc` reports

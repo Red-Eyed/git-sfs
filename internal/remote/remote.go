@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"git-sfs/internal/config"
 	"git-sfs/internal/hash"
@@ -17,8 +18,9 @@ type Remote interface {
 }
 
 type Options struct {
-	Debug io.Writer
-	Shell string
+	Debug        io.Writer
+	ConfigDir    string
+	RcloneConfig string
 }
 
 func New(cfg config.RemoteConfig) (Remote, error) {
@@ -29,19 +31,8 @@ func NewWithOptions(cfg config.RemoteConfig, opts Options) (Remote, error) {
 	switch cfg.Type {
 	case "filesystem", "fs":
 		return NewFilesystem(remotePathConfig(cfg)), nil
-	case "rsync":
-		opts.Shell = rcShell(cfg)
-		if cfg.Host != "" || cfg.Path != "" {
-			return NewRsyncTargetWithOptions(cfg.Host, cfg.Path, opts), nil
-		}
-		return NewRsyncWithOptions(cfg.URL, opts), nil
-	case "ssh":
-		opts.Shell = rcShell(cfg)
-		if cfg.Host != "" || cfg.Path != "" {
-			return NewSSHTargetWithOptions(cfg.Host, cfg.Path, opts), nil
-		}
-		return NewSSHWithOptions(cfg.URL, opts), nil
 	case "rclone":
+		opts.RcloneConfig = rcloneConfigPath(opts.ConfigDir, cfg.Config)
 		if cfg.Host != "" || cfg.Path != "" {
 			return NewRcloneTargetWithOptions(cfg.Host, cfg.Path, opts), nil
 		}
@@ -51,11 +42,11 @@ func NewWithOptions(cfg config.RemoteConfig, opts Options) (Remote, error) {
 	}
 }
 
-func rcShell(cfg config.RemoteConfig) string {
-	if cfg.Shell != "" {
-		return cfg.Shell
+func rcloneConfigPath(configDir, config string) string {
+	if config == "" || filepath.IsAbs(config) {
+		return config
 	}
-	return "sh"
+	return filepath.Join(configDir, config)
 }
 
 func remotePathConfig(cfg config.RemoteConfig) string {

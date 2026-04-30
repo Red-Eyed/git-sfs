@@ -7,7 +7,7 @@ git-sfs --verbose push
 ```
 
 `--verbose` prints remote subprocess commands to stderr, which is useful when
-debugging `ssh`, `rsync`, or `rclone` remotes.
+debugging `rclone` remotes.
 
 ## git-sfs init
 

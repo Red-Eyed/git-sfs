@@ -9,12 +9,12 @@ and understandable.
 
 It is like Git LFS in spirit, but Git tracks normal symlinks instead of pointer
 files. The large file bytes live in a local content-addressed cache and can be
-synced to a remote with familiar tools such as `rsync`, `ssh`, or `rclone`.
+synced to a remote with `rclone` or a plain filesystem path.
 
 ```text
 Git tracks symlinks.
 git-sfs stores file bytes.
-rsync/ssh/rclone moves files.
+rclone moves files.
 ```
 
 No LFS server. No database. No hidden manifest branch. No custom Git protocol.
@@ -34,7 +34,7 @@ Use `git-sfs` when you want:
 - A repo that stays small and fast
 - Large files addressed by SHA-256 content hash
 - A cache path that is local to each machine and never committed
-- A remote layout you can inspect with `ssh`, `rsync`, `rclone`, or `find`
+- A remote layout you can inspect with `rclone` or `find`
 - CI checks that fail when referenced files are missing or corrupt
 - Another machine to clone the repo, run `git-sfs setup`, run `git-sfs pull`, and work
 
@@ -132,10 +132,10 @@ Edit `.git-sfs/config.toml` and set your remote:
 version = 1
 
 [remotes.default]
-type = "rsync"
-host = "user@host"
-path = "/mnt/datasets/project"
-# shell = "cmd" # for Windows OpenSSH targets
+type = "rclone"
+host = "remote-name"
+path = "datasets/project"
+config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
@@ -226,9 +226,10 @@ Detailed command reference: [docs/commands.md](docs/commands.md)
 version = 1
 
 [remotes.default]
-type = "rsync"
-host = "user@host"
-path = "/mnt/datasets/project"
+type = "rclone"
+host = "remote-name"
+path = "datasets/project"
+config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
@@ -259,8 +260,6 @@ files/sha256/ab/<full_hash>
 The first supported remote styles are:
 
 ```text
-rsync
-ssh
 rclone
 filesystem
 ```
@@ -271,7 +270,7 @@ Unix tools.
 Remote details: [docs/remotes.md](docs/remotes.md)
 
 Use `git-sfs --verbose push` or `git-sfs --verbose pull` to print remote
-subprocess commands while debugging SSH, rsync, or rclone behavior.
+subprocess commands while debugging rclone behavior.
 
 ## Documentation
 

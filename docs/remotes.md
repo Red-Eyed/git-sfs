@@ -9,9 +9,8 @@ files/sha256/ab/<full_hash>
 This makes remotes inspectable with ordinary tools:
 
 ```sh
-ssh user@host find /mnt/datasets/project/files -type f
-rsync --list-only user@host:/mnt/datasets/project/files/
 rclone lsf remote-name:datasets/project/files
+find /mnt/datasets/project/files -type f
 ```
 
 ## filesystem
@@ -39,68 +38,6 @@ Good for:
 - tests
 - simple single-machine workflows
 
-## rsync
-
-Use an rsync-style destination:
-
-```toml
-[remotes.default]
-type = "rsync"
-host = "user@host"
-path = "/mnt/datasets/project"
-```
-
-Windows paths on an rsync target keep the drive letter after the host:
-
-```toml
-[remotes.default]
-type = "rsync"
-host = "user@host"
-path = "D:/datasets/project"
-```
-
-To use a non-default SSH port without relying on SSH config:
-
-```toml
-[remotes.default]
-type = "rsync"
-host = "user@192.0.2.10:2222"
-path = "D:/datasets/project"
-shell = "cmd"
-```
-
-Good for:
-
-- SSH-accessible servers
-- simple Unix storage
-- backup-friendly infrastructure
-
-## ssh
-
-Use SSH command behavior with the same remote path style:
-
-```toml
-[remotes.default]
-type = "ssh"
-host = "storage"
-path = "/mnt/datasets/project"
-```
-
-Windows paths on an SSH target use the same host/path split:
-
-```toml
-[remotes.default]
-type = "ssh"
-host = "user@host:2222"
-path = "D:/datasets/project"
-shell = "cmd"
-```
-
-The current implementation delegates file transfer behavior through the command
-backend and should remain inspectable as plain files on the remote host.
-Use `shell = "cmd"` for Windows OpenSSH targets. Omit `shell`, or set
-`shell = "sh"`, for Unix-like targets.
-
 ## rclone
 
 Use any remote configured with the installed `rclone` CLI:
@@ -110,6 +47,7 @@ Use any remote configured with the installed `rclone` CLI:
 type = "rclone"
 host = "remote-name"
 path = "datasets/project"
+config = "rclone.conf"
 ```
 
 Windows paths inside an rclone remote are passed through unchanged:
@@ -119,15 +57,22 @@ Windows paths inside an rclone remote are passed through unchanged:
 type = "rclone"
 host = "remote-name"
 path = "D:/datasets/project"
+config = "rclone.conf"
 ```
+
+`config` is optional. When set to a relative path, it is resolved from
+`.git-sfs`, so `config = "rclone.conf"` uses `.git-sfs/rclone.conf`.
+Only commit that file when it contains shareable, non-secret rclone settings.
+Keep tokens, passwords, and machine-local credentials in each user's normal
+rclone config instead.
 
 Rules for rclone support:
 
 - call the installed `rclone` CLI
 - keep the same `files/sha256/...` layout
 - do not add cloud-specific SDKs
-- do not add provider-specific config to `.git-sfs/config.toml`
-- let users manage rclone credentials with rclone itself
+- keep provider config in rclone's own config format
+- do not commit rclone secrets or tokens
 
 ## Remote Safety
 
