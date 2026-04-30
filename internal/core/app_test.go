@@ -117,6 +117,7 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
 	writeRcloneDataset(t, repo, "local", remoteDir)
+	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
@@ -174,16 +175,17 @@ func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
-	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))
 
 	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		a.CacheFlag = cacheDir
 		runGit(repo, "init", "-q")
 		runGit(repo, "config", "user.email", "git-sfs@example.com")
 		runGit(repo, "config", "user.name", "git-sfs")
 
-		if err := app(&bytes.Buffer{}).Init(context.Background(), false); err != nil {
+		if err := a.Init(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
 		mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"))
