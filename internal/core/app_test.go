@@ -62,11 +62,11 @@ func TestVerboseAddOutputsDebug(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 
 	stderr := &bytes.Buffer{}
-	app := app(&bytes.Buffer{})
-	app.Stderr = stderr
-	app.Verbose = true
+	a := app(&bytes.Buffer{})
+	a.Stderr = stderr
+	a.Verbose = true
 	inDir(t, repo, func() {
-		if err := app.Add(context.Background(), []string{"data"}); err != nil {
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
 			t.Fatal(err)
 		}
 	})

@@ -75,6 +75,8 @@ curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/insta
 
 ```
 
+The installer prints the `git-sfs` and `rclone` versions it installs.
+
 Prebuilt release binaries are published for:
 
 ```text
@@ -203,6 +205,7 @@ git-sfs pull data/validation/
 
 ```sh
 git-sfs init
+git-sfs --version
 git-sfs setup
 git-sfs add <path>
 git-sfs import <src> <dst>

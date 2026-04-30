@@ -4,10 +4,13 @@ Global flags:
 
 ```sh
 git-sfs --verbose push
+git-sfs --version
 ```
 
 `--verbose` prints command debug output to stderr, including remote subprocess
 commands when a remote backend is involved.
+
+`--version` prints the `git-sfs` release version from the build tag.
 
 ## git-sfs init
 

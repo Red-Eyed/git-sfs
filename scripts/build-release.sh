@@ -12,7 +12,7 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
   arch="${target#*/}"
   name="git-sfs-$version-$os-$arch"
   mkdir -p "$out/$name"
-  env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 "$go_bin" build -trimpath -ldflags="-s -w" -o "$out/$name/git-sfs" ./cmd/git-sfs
+  env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 "$go_bin" build -trimpath -ldflags="-s -w -X git-sfs/internal/version.Version=$version" -o "$out/$name/git-sfs" ./cmd/git-sfs
   tar -C "$out/$name" -czf "$out/$name.tar.gz" git-sfs
   rm -rf "$out/$name"
 done

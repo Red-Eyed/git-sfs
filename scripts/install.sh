@@ -59,21 +59,25 @@ download "$url" -o "$tmp/$asset"
 tar -xzf "$tmp/$asset" -C "$tmp"
 install "$tmp/git-sfs" "$install_dir/git-sfs"
 
-echo "git-sfs installed to $install_dir/git-sfs"
+git_sfs_version="$("$install_dir/git-sfs" --version)"
+echo "git-sfs $git_sfs_version installed to $install_dir/git-sfs"
 
 if [ "$install_rclone" != "0" ]; then
-  if command -v rclone >/dev/null 2>&1; then
-    echo "rclone already available at $(command -v rclone)"
-  else
-    if ! command -v unzip >/dev/null 2>&1; then
-      echo "rclone installation requires unzip; install unzip or rerun with GIT_SFS_INSTALL_RCLONE=0" >&2
-      exit 1
-    fi
-    rclone_zip="rclone-current-$rclone_os-$arch.zip"
-    rclone_url="https://downloads.rclone.org/$rclone_zip"
-    download "$rclone_url" -o "$tmp/$rclone_zip"
-    unzip -q "$tmp/$rclone_zip" -d "$tmp"
-    install "$tmp"/rclone-*-*/rclone "$install_dir/rclone"
-    echo "rclone installed to $install_dir/rclone"
+  if ! command -v unzip >/dev/null 2>&1; then
+    echo "rclone installation requires unzip; install unzip or rerun with GIT_SFS_INSTALL_RCLONE=0" >&2
+    exit 1
   fi
+  download "https://downloads.rclone.org/version.txt" -o "$tmp/rclone-version.txt"
+  rclone_version="$(awk 'NF {print $NF; exit}' "$tmp/rclone-version.txt")"
+  if [ -z "$rclone_version" ]; then
+    echo "failed to determine latest stable rclone version" >&2
+    exit 1
+  fi
+  rclone_zip="rclone-$rclone_version-$rclone_os-$arch.zip"
+  rclone_url="https://downloads.rclone.org/$rclone_version/$rclone_zip"
+  download "$rclone_url" -o "$tmp/$rclone_zip"
+  unzip -q "$tmp/$rclone_zip" -d "$tmp"
+  install "$tmp"/rclone-*-*/rclone "$install_dir/rclone"
+  rclone_installed_version="$("$install_dir/rclone" --version | awk 'NR==1 {print $2; exit}')"
+  echo "rclone $rclone_installed_version installed to $install_dir/rclone"
 fi

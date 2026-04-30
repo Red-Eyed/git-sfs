@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"git-sfs/internal/core"
+	"git-sfs/internal/version"
 )
 
 type options struct {
@@ -15,6 +16,7 @@ type options struct {
 	config  string
 	verbose bool
 	quiet   bool
+	version bool
 }
 
 func Run(ctx context.Context, args []string) error {
@@ -29,8 +31,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.StringVar(&opts.config, "config", ".git-sfs/config.toml", "dataset config path")
 	fs.BoolVar(&opts.verbose, "verbose", false, "verbose output")
 	fs.BoolVar(&opts.quiet, "quiet", false, "quiet output")
+	fs.BoolVar(&opts.version, "version", false, "print version")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if opts.version {
+		fmt.Fprintln(stdout, version.Version)
+		return nil
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {

@@ -42,6 +42,8 @@ If `just` is unavailable, run the commands in `Justfile` manually.
 
 Common user request: when asked to commit, push, and update version after changes, stage the finished changes, commit them with a focused message, create the next sequential version tag unless a specific version is named, push `main`, and push the new tag.
 
+Release versions are tracked by Git tags and should be embedded into built binaries and installer output.
+
 ## Style
 
 - Keep the implementation boring and explicit.

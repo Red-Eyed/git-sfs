@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"git-sfs/internal/version"
 )
 
 func TestHelp(t *testing.T) {
@@ -22,6 +24,19 @@ func TestHelp(t *testing.T) {
 func TestRunHelp(t *testing.T) {
 	if err := Run(context.Background(), []string{"help"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"--version"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != version.Version {
+		t.Fatalf("version = %q, want %q", got, version.Version)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr, got %q", stderr.String())
 	}
 }
 
