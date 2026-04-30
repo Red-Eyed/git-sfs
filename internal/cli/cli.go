@@ -87,18 +87,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			path = cmdArgs[0]
 		}
 		return app.Pull(ctx, path)
-	case "materialize":
-		path := "."
-		if len(cmdArgs) > 0 {
-			path = cmdArgs[0]
-		}
-		return app.Materialize(ctx, path)
-	case "dematerialize":
-		path := "."
-		if len(cmdArgs) > 0 {
-			path = cmdArgs[0]
-		}
-		return app.Dematerialize(ctx, path)
 	case "gc":
 		gfs := flag.NewFlagSet("gc", flag.ContinueOnError)
 		gfs.SetOutput(stderr)
@@ -128,5 +116,5 @@ func has(args []string, want string) bool {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: git-sfs [--cache path] [--config path] <command> [args]")
-	fmt.Fprintln(w, "commands: init setup add import status verify push pull materialize dematerialize gc")
+	fmt.Fprintln(w, "commands: init setup add import status verify push pull gc")
 }

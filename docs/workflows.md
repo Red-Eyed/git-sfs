@@ -106,7 +106,6 @@ git-sfs pull
 
 ```sh
 git-sfs setup
-git-sfs materialize
 git-sfs verify
 ```
 
@@ -117,7 +116,6 @@ If cached files exist, `.git-sfs/cache` can be rebound without downloading.
 ```sh
 rm -rf .git-sfs/cache
 git-sfs --cache /mnt/shared/git-sfs-cache setup
-git-sfs materialize
 git-sfs verify
 ```
 
@@ -167,10 +165,10 @@ Git should show symlinks and config, not large file bytes.
 ## Clean Local Materialization
 
 ```sh
-git-sfs dematerialize data/
+git-sfs setup
 ```
 
-This leaves cached bytes in place. In the direct `.git-sfs/cache` layout there are no per-file local links to remove.
+`setup` repairs the local cache binding and leaves cached bytes in place.
 
 ## Clean Unused Local Cache Files
 

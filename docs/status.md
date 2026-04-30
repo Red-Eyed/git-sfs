@@ -10,8 +10,6 @@ setup
 add
 push
 pull
-materialize
-dematerialize
 status
 verify
 gc

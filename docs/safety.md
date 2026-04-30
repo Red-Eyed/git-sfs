@@ -41,11 +41,7 @@ git-sfs status
 git-sfs verify
 ```
 
-Repair local materialization:
-
-```sh
-git-sfs materialize
-```
+Repair local cache binding with `git-sfs setup`.
 
 ## Cache Corruption
 

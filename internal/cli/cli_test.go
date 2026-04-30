@@ -60,8 +60,6 @@ func TestCommandDispatch(t *testing.T) {
 			{"verify"},
 			{"push"},
 			{"pull", "data/blob"},
-			{"dematerialize", "data/blob"},
-			{"materialize", "data/blob"},
 			{"gc", "--dry-run"},
 		} {
 			if err := run(context.Background(), args, &stdout, &stderr); err != nil {

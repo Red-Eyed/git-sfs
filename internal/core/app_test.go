@@ -13,7 +13,7 @@ import (
 	"git-sfs/internal/sfspath"
 )
 
-func TestAddVerifyDematerializeMaterializeAndStatus(t *testing.T) {
+func TestAddVerifyAndStatus(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))

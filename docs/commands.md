@@ -164,28 +164,6 @@ Downloaded bytes are hash-verified before being accepted.
 When a path is provided, only symlinks below that path are considered. This is
 the intended way to partially pull a dataset from the remote.
 
-## git-sfs materialize
-
-Verify local `.git-sfs/cache` can reach selected cached files:
-
-```sh
-git-sfs materialize
-git-sfs materialize data/
-```
-
-This does not copy or modify cached bytes.
-
-## git-sfs dematerialize
-
-No-op compatibility command for the direct `.git-sfs/cache` layout:
-
-```sh
-git-sfs dematerialize
-git-sfs dematerialize data/
-```
-
-This does not delete cached bytes.
-
 ## git-sfs gc
 
 Show unreferenced cached files:

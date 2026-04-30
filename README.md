@@ -72,6 +72,7 @@ the bytes. The remote stores the same SHA-256 file layout.
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
+
 ```
 
 Prebuilt release binaries are published for:
@@ -210,8 +211,6 @@ git-sfs status
 git-sfs verify
 git-sfs push [remote]
 git-sfs pull [path]
-git-sfs materialize [path]
-git-sfs dematerialize [path]
 git-sfs gc --dry-run
 git-sfs gc --files
 ```
@@ -302,7 +301,7 @@ git-sfs verify
 ```
 
 It exits non-zero if referenced files are missing, corrupt, or incorrectly
-materialized.
+bound to the local cache.
 
 `git-sfs status` and `git-sfs verify` print stable category counts before detailed
 messages, so CI can match clear strings such as `missing cache files: 0`.

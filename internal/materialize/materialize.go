@@ -21,7 +21,7 @@ func Link(repo string, c cache.Cache, h hash.Hash) error {
 	return nil
 }
 
-// Unlink is kept for the dematerialize command; direct cache symlinks have no per-file hop.
+// Unlink is kept for local cache compatibility; direct cache symlinks have no per-file hop.
 func Unlink(repo string, h hash.Hash) error {
 	return nil
 }
