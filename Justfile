@@ -1,4 +1,4 @@
-go := env_var_or_default("GO", "/Users/vadstup/.local/go/bin/go")
+go := env_var_or_default("GO", "go")
 gocache := env_var_or_default("GOCACHE", "/private/tmp/git-sfs-go-cache")
 gomodcache := env_var_or_default("GOMODCACHE", "/private/tmp/git-sfs-go-modcache")
 

@@ -14,13 +14,15 @@ just check
 
 ## Local Go Paths
 
-The `Justfile` defaults to:
+The `Justfile` defaults to the `go` binary on `PATH`.
 
-```text
-/Users/vadstup/.local/go/bin/go
+Override when needed:
+
+```sh
+GO=/path/to/go just check
 ```
 
-It also uses writable caches in this workspace:
+It also defaults to writable caches:
 
 ```text
 /private/tmp/git-sfs-go-cache
