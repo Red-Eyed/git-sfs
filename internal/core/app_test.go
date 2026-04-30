@@ -116,7 +116,6 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeRcloneDataset(t, repo, "local", remoteDir)
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
@@ -387,6 +386,54 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 		}
 		if _, err := os.Stat(cacheTwo); !os.IsNotExist(err) {
 			t.Fatalf("unselected cache file was restored: %v", err)
+		}
+	})
+}
+
+func TestPullWithMixedPresentAndMissingCacheFiles(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeDataset(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "nested", "two.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheOne := filepath.Join(cacheDir, "files", hash.Algorithm, h1.Prefix(), h1.String())
+		cacheTwo := filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String())
+		if err := os.Remove(cacheTwo); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Pull(context.Background(), "data/"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheOne, h1); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheTwo, h2); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Pull(context.Background(), "data/one.bin"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheOne, h1); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
