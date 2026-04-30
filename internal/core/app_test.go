@@ -149,6 +149,109 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	})
 }
 
+func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	if _, err := exec.LookPath("rclone"); err != nil {
+		t.Skip("rclone is not installed")
+	}
+
+	runGit := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		if dir != "" {
+			cmd.Dir = dir
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeRcloneDataset(t, repo, "local", remoteDir)
+	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))
+
+	inDir(t, repo, func() {
+		runGit(repo, "init", "-q")
+		runGit(repo, "config", "user.email", "git-sfs@example.com")
+		runGit(repo, "config", "user.name", "git-sfs")
+
+		if err := app(&bytes.Buffer{}).Init(context.Background(), false); err != nil {
+			t.Fatal(err)
+		}
+		mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"))
+		runGit(repo, "add", ".git-sfs/config.toml", ".gitignore")
+		runGit(repo, "commit", "-m", "initialize git-sfs")
+
+		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		ls := runGit(repo, "ls-files", "-s", "data/one.bin", "data/nested/two.bin")
+		if !strings.Contains(ls, "120000") {
+			t.Fatalf("expected git symlink entries, got:\n%s", ls)
+		}
+		if status := runGit(repo, "status", "--short"); strings.Contains(status, ".git-sfs/cache") {
+			t.Fatalf(".git-sfs/cache should stay ignored, got:\n%s", status)
+		}
+		runGit(repo, "add", "data")
+		runGit(repo, "commit", "-m", "track dataset")
+
+		if err := app(&bytes.Buffer{}).Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	clone := filepath.Join(t.TempDir(), "clone")
+	runGit("", "clone", repo, clone)
+	cloneCache := filepath.Join(t.TempDir(), "clone-cache")
+	inDir(t, clone, func() {
+		a := app(&bytes.Buffer{})
+		a.CacheFlag = cloneCache
+		if err := a.Setup(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		h1, _, err := sfspath.ParseGitSymlink(clone, filepath.Join(clone, "data", "one.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h2, _, err := sfspath.ParseGitSymlink(clone, filepath.Join(clone, "data", "nested", "two.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheOne := filepath.Join(cloneCache, "files", hash.Algorithm, h1.Prefix(), h1.String())
+		cacheTwo := filepath.Join(cloneCache, "files", hash.Algorithm, h2.Prefix(), h2.String())
+		if err := os.Remove(cacheOne); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(cacheTwo); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Pull(context.Background(), "data/one.bin"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheOne, h1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(cacheTwo); !os.IsNotExist(err) {
+			t.Fatalf("unselected cache file was restored: %v", err)
+		}
+		if err := a.Pull(context.Background(), "data/"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hash.VerifyFile(cacheTwo, h2); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestPushUsesParallelRcloneUploads(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")

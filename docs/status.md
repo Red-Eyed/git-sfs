@@ -32,7 +32,7 @@ Still needs work:
 
 - clearer `status` output
 - stricter `verify` behavior
-- real Git integration tests
+- broader Git integration tests
 - cloud rclone integration tests
 - stronger concurrency tests
 - fault-injection tests

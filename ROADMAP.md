@@ -85,8 +85,8 @@ databases, daemons, custom protocols, and hidden metadata.
   - `git-sfs pull <file>` must download only files needed for that path.
   - `git-sfs pull <directory>` must download only files needed below that directory.
   - Add coverage for mixed present/missing cache files.
-- Add real Git integration tests
-  - Use `git init`.
+- Expand Git integration tests
+  - One real workflow test already uses `git init`, `git add`, and `git clone`.
   - Confirm symlinks are tracked as symlinks.
   - Confirm `.git-sfs/` remains ignored.
 - Add cloud rclone integration tests
