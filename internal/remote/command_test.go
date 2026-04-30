@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -44,6 +45,9 @@ func TestNewCommandRemotesUseFilesystemForLocalPaths(t *testing.T) {
 	}
 	if got := NewRcloneTarget("remote-name", "D:/data").(rcloneRemote); got.url != "remote-name:D:/data" {
 		t.Fatalf("bad rclone host/path remote: %#v", got)
+	}
+	if got := NewRsyncTargetWithOptions("host", "D:/data", Options{Shell: "cmd"}).(rsyncRemote); got.shell != "cmd" {
+		t.Fatalf("bad rsync shell: %#v", got)
 	}
 }
 
@@ -312,9 +316,30 @@ func TestRunIncludesCommandOutput(t *testing.T) {
 exit 9
 `)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	err := run(context.Background(), "bad")
+	err := run(context.Background(), nil, "bad")
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("missing command output: %v", err)
+	}
+}
+
+func TestRunWritesDebugCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts are not used on windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTool(t, filepath.Join(bin, "ok"), `exit 0
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var debug bytes.Buffer
+	if err := run(context.Background(), &debug, "ok", "arg with space"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(debug.String(), "run: ok") || !strings.Contains(debug.String(), `"arg with space"`) {
+		t.Fatalf("missing debug command: %q", debug.String())
 	}
 }
 

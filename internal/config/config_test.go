@@ -19,7 +19,7 @@ func TestDatasetRejectsCachePath(t *testing.T) {
 
 func TestLoadDataset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	content := "version = 1\n\n[remotes.default]\ntype = filesystem\npath = /tmp/remote\n\n[remotes.backup]\ntype = rsync\nhost = host\npath = /remote\n\n[settings]\nalgorithm = sha256\n"
+	content := "version = 1\n\n[remotes.default]\ntype = filesystem\npath = /tmp/remote\n\n[remotes.backup]\ntype = rsync\nhost = host\npath = /remote\nshell = sh\n\n[settings]\nalgorithm = sha256\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestLoadDataset(t *testing.T) {
 	if cfg.Version != Version {
 		t.Fatalf("version = %d", cfg.Version)
 	}
-	if cfg.Remotes["default"].Type != "filesystem" || cfg.Remotes["backup"].Host != "host" || cfg.Remotes["backup"].Path != "/remote" {
+	if cfg.Remotes["default"].Type != "filesystem" || cfg.Remotes["backup"].Host != "host" || cfg.Remotes["backup"].Path != "/remote" || cfg.Remotes["backup"].Shell != "sh" {
 		t.Fatalf("unexpected remotes: %#v", cfg.Remotes)
 	}
 	if cfg.Settings.Algorithm != "sha256" {
@@ -53,6 +53,7 @@ func TestLoadDatasetErrors(t *testing.T) {
 		"unknown root":           "version = 1\nwat = true\n",
 		"unknown settings field": "version = 1\n[settings]\nother = x\n",
 		"remote missing path":    "version = 1\n[remotes.default]\ntype = filesystem\n[settings]\nalgorithm = sha256\n",
+		"bad shell":              "version = 1\n[remotes.default]\ntype = ssh\nhost = h\npath = p\nshell = powershell\n[settings]\nalgorithm = sha256\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -82,6 +83,7 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 		"type = \"rsync\"",
 		"host = \"user@host\"",
 		"path = \"/mnt/datasets/project\"",
+		"# shell = \"sh\"",
 		"# type = \"ssh\"",
 		"# type = \"filesystem\"",
 		"# type = \"rclone\"",

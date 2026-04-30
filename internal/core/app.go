@@ -374,7 +374,7 @@ func (a App) Push(ctx context.Context, name string) error {
 		return err
 	}
 	defer l.Release()
-	r, err := selectRemote(cfg, name)
+	r, err := a.selectRemote(cfg, name)
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func (a App) Pull(ctx context.Context, path string) error {
 		return err
 	}
 	defer l.Release()
-	r, err := selectRemote(cfg, "")
+	r, err := a.selectRemote(cfg, "")
 	if err != nil {
 		return err
 	}
@@ -641,7 +641,7 @@ func collectGitSFSSymlinks(repo, path string) ([]string, error) {
 	return out, err
 }
 
-func selectRemote(cfg config.Config, name string) (remote.Remote, error) {
+func (a App) selectRemote(cfg config.Config, name string) (remote.Remote, error) {
 	if name == "" {
 		name = "default"
 	}
@@ -649,7 +649,11 @@ func selectRemote(cfg config.Config, name string) (remote.Remote, error) {
 	if !ok {
 		return nil, fmt.Errorf("remote %q is not configured", name)
 	}
-	return remote.New(rc)
+	var debug io.Writer
+	if a.Verbose {
+		debug = a.Stderr
+	}
+	return remote.NewWithOptions(rc, remote.Options{Debug: debug})
 }
 
 func ensureGitignore(repo string) error {

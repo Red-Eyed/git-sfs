@@ -1,5 +1,14 @@
 # Commands
 
+Global flags:
+
+```sh
+git-sfs --verbose push
+```
+
+`--verbose` prints remote subprocess commands to stderr, which is useful when
+debugging `ssh`, `rsync`, or `rclone` remotes.
+
 ## git-sfs init
 
 Create initial project files, including a commented `.git-sfs/config.toml` starter file:

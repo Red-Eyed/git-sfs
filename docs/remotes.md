@@ -66,6 +66,7 @@ To use a non-default SSH port without relying on SSH config:
 type = "rsync"
 host = "user@192.0.2.10:2222"
 path = "D:/datasets/project"
+shell = "cmd"
 ```
 
 Good for:
@@ -92,10 +93,13 @@ Windows paths on an SSH target use the same host/path split:
 type = "ssh"
 host = "user@host:2222"
 path = "D:/datasets/project"
+shell = "cmd"
 ```
 
 The current implementation delegates file transfer behavior through the command
 backend and should remain inspectable as plain files on the remote host.
+Use `shell = "cmd"` for Windows OpenSSH targets. Omit `shell`, or set
+`shell = "sh"`, for Unix-like targets.
 
 ## rclone
 

@@ -135,6 +135,7 @@ version = 1
 type = "rsync"
 host = "user@host"
 path = "/mnt/datasets/project"
+# shell = "cmd" # for Windows OpenSSH targets
 
 [settings]
 algorithm = "sha256"
@@ -268,6 +269,9 @@ This keeps the remote easy to inspect, back up, mirror, or repair with ordinary
 Unix tools.
 
 Remote details: [docs/remotes.md](docs/remotes.md)
+
+Use `git-sfs --verbose push` or `git-sfs --verbose pull` to print remote
+subprocess commands while debugging SSH, rsync, or rclone behavior.
 
 ## Documentation
 

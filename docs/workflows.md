@@ -226,6 +226,7 @@ git-sfs pull
 type = "ssh"
 host = "storage"
 path = "/mnt/datasets/project"
+shell = "sh"
 ```
 
 Then:

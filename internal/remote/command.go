@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,58 +16,89 @@ import (
 )
 
 type rsyncRemote struct {
-	url  string
-	host string
-	path string
+	url   string
+	host  string
+	path  string
+	shell string
+	debug io.Writer
 }
 type sshRemote struct {
-	url  string
-	host string
-	path string
+	url   string
+	host  string
+	path  string
+	shell string
+	debug io.Writer
 }
-type rcloneRemote struct{ url string }
+type rcloneRemote struct {
+	url   string
+	debug io.Writer
+}
 
 // NewRsync accepts local filesystem paths too, which keeps tests and single-box
 // workflows from needing an ssh server.
 func NewRsync(url string) Remote {
+	return NewRsyncWithOptions(url, Options{})
+}
+
+func NewRsyncWithOptions(url string, opts Options) Remote {
 	url = strings.TrimRight(url, "/")
 	if !isCommandRemoteURL(url) {
 		return NewFilesystem(url)
 	}
-	return rsyncRemote{url: url}
+	return rsyncRemote{url: url, shell: commandShell(opts), debug: opts.Debug}
 }
 
 func NewRsyncTarget(host, path string) Remote {
+	return NewRsyncTargetWithOptions(host, path, Options{})
+}
+
+func NewRsyncTargetWithOptions(host, path string, opts Options) Remote {
 	if host == "" {
 		return NewFilesystem(path)
 	}
-	return rsyncRemote{host: host, path: strings.TrimRight(path, "/")}
+	return rsyncRemote{host: host, path: strings.TrimRight(path, "/"), shell: commandShell(opts), debug: opts.Debug}
 }
 
 func NewSSH(url string) Remote {
+	return NewSSHWithOptions(url, Options{})
+}
+
+func NewSSHWithOptions(url string, opts Options) Remote {
 	url = strings.TrimRight(url, "/")
 	if !isCommandRemoteURL(url) {
 		return NewFilesystem(url)
 	}
-	return sshRemote{url: url}
+	return sshRemote{url: url, shell: commandShell(opts), debug: opts.Debug}
 }
 
 func NewSSHTarget(host, path string) Remote {
+	return NewSSHTargetWithOptions(host, path, Options{})
+}
+
+func NewSSHTargetWithOptions(host, path string, opts Options) Remote {
 	if host == "" {
 		return NewFilesystem(path)
 	}
-	return sshRemote{host: host, path: strings.TrimRight(path, "/")}
+	return sshRemote{host: host, path: strings.TrimRight(path, "/"), shell: commandShell(opts), debug: opts.Debug}
 }
 
 func NewRclone(url string) Remote {
-	return rcloneRemote{url: strings.TrimRight(url, "/")}
+	return NewRcloneWithOptions(url, Options{})
+}
+
+func NewRcloneWithOptions(url string, opts Options) Remote {
+	return rcloneRemote{url: strings.TrimRight(url, "/"), debug: opts.Debug}
 }
 
 func NewRcloneTarget(host, path string) Remote {
+	return NewRcloneTargetWithOptions(host, path, Options{})
+}
+
+func NewRcloneTargetWithOptions(host, path string, opts Options) Remote {
 	if host == "" {
-		return NewRclone(path)
+		return NewRcloneWithOptions(path, opts)
 	}
-	return rcloneRemote{url: host + ":" + strings.TrimLeft(strings.TrimRight(path, "/"), "/")}
+	return rcloneRemote{url: host + ":" + strings.TrimLeft(strings.TrimRight(path, "/"), "/"), debug: opts.Debug}
 }
 
 func (r rsyncRemote) remotePath(h hash.Hash) string {
@@ -104,7 +136,28 @@ func (r rsyncRemote) rsync(ctx context.Context, args ...string) error {
 		cmdArgs = append(cmdArgs, "-e", "ssh -p "+port)
 	}
 	cmdArgs = append(cmdArgs, args...)
-	return run(ctx, "rsync", cmdArgs...)
+	return run(ctx, r.debug, "rsync", cmdArgs...)
+}
+
+func (r rsyncRemote) remoteMkdir(ctx context.Context, path string) error {
+	if r.shell == "cmd" {
+		return sshCmd(ctx, r.debug, r.hostForCommand(), "cmd", "/C", "if", "not", "exist", path, "mkdir", path)
+	}
+	return sshSh(ctx, r.debug, r.hostForCommand(), "mkdir -p \"$1\"", path)
+}
+
+func (r rsyncRemote) remoteMove(ctx context.Context, src, dst string) error {
+	if r.shell == "cmd" {
+		return sshCmd(ctx, r.debug, r.hostForCommand(), "cmd", "/C", "move", "/Y", src, dst)
+	}
+	return sshSh(ctx, r.debug, r.hostForCommand(), "mv \"$1\" \"$2\"", src, dst)
+}
+
+func (r rsyncRemote) remoteProtect(ctx context.Context, path string) error {
+	if r.shell == "cmd" {
+		return sshCmd(ctx, r.debug, r.hostForCommand(), "cmd", "/C", "attrib", "+R", path)
+	}
+	return sshSh(ctx, r.debug, r.hostForCommand(), "chmod a-w \"$1\"", path)
 }
 
 func (r rsyncRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
@@ -138,17 +191,17 @@ func (r rsyncRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) 
 	}
 	dst := r.remotePath(h)
 	dir := dst[:strings.LastIndex(dst, "/")]
-	if err := sshSh(ctx, r.hostForCommand(), "mkdir -p \"$1\"", remoteLocalPath(dir)); err != nil {
+	if err := r.remoteMkdir(ctx, remoteLocalPath(dir)); err != nil {
 		return fmt.Errorf("create remote dir: %w", err)
 	}
 	tmp := dst + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	if err := r.rsync(ctx, "--partial", srcPath, tmp); err != nil {
 		return err
 	}
-	if err := sshSh(ctx, r.hostForCommand(), "mv \"$1\" \"$2\"", remoteLocalPath(tmp), remoteLocalPath(dst)); err != nil {
+	if err := r.remoteMove(ctx, remoteLocalPath(tmp), remoteLocalPath(dst)); err != nil {
 		return fmt.Errorf("publish remote file: %w", err)
 	}
-	if err := sshSh(ctx, r.hostForCommand(), "chmod a-w \"$1\"", remoteLocalPath(dst)); err != nil {
+	if err := r.remoteProtect(ctx, remoteLocalPath(dst)); err != nil {
 		return fmt.Errorf("protect remote file: %w", err)
 	}
 	has, err := r.HasFile(ctx, h)
@@ -185,15 +238,15 @@ func (r rsyncRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) 
 }
 
 func (r sshRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
-	return rsyncRemote{url: r.url, host: r.host, path: r.path}.HasFile(ctx, h)
+	return rsyncRemote{url: r.url, host: r.host, path: r.path, shell: r.shell, debug: r.debug}.HasFile(ctx, h)
 }
 
 func (r sshRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
-	return rsyncRemote{url: r.url, host: r.host, path: r.path}.PushFile(ctx, h, srcPath)
+	return rsyncRemote{url: r.url, host: r.host, path: r.path, shell: r.shell, debug: r.debug}.PushFile(ctx, h, srcPath)
 }
 
 func (r sshRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
-	return rsyncRemote{url: r.url, host: r.host, path: r.path}.PullFile(ctx, h, dstPath)
+	return rsyncRemote{url: r.url, host: r.host, path: r.path, shell: r.shell, debug: r.debug}.PullFile(ctx, h, dstPath)
 }
 
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
@@ -205,7 +258,7 @@ func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 	tmp.Close()
 	os.Remove(name)
 	defer os.Remove(name)
-	if err := run(ctx, "rclone", "copyto", r.remotePath(h), name); err != nil {
+	if err := run(ctx, r.debug, "rclone", "copyto", r.remotePath(h), name); err != nil {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
@@ -225,10 +278,10 @@ func (r rcloneRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string)
 	}
 	dst := r.remotePath(h)
 	tmp := dst + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	if err := run(ctx, "rclone", "copyto", srcPath, tmp); err != nil {
+	if err := run(ctx, r.debug, "rclone", "copyto", srcPath, tmp); err != nil {
 		return err
 	}
-	if err := run(ctx, "rclone", "moveto", tmp, dst); err != nil {
+	if err := run(ctx, r.debug, "rclone", "moveto", tmp, dst); err != nil {
 		return fmt.Errorf("publish remote file: %w", err)
 	}
 	has, err := r.HasFile(ctx, h)
@@ -247,7 +300,7 @@ func (r rcloneRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string)
 	}
 	tmp := dstPath + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	defer os.Remove(tmp)
-	if err := run(ctx, "rclone", "copyto", r.remotePath(h), tmp); err != nil {
+	if err := run(ctx, r.debug, "rclone", "copyto", r.remotePath(h), tmp); err != nil {
 		return err
 	}
 	if err := hash.VerifyFile(tmp, h); err != nil {
@@ -312,18 +365,39 @@ func isWindowsDrivePath(path string) bool {
 	return ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z')
 }
 
-func sshSh(ctx context.Context, host, script string, args ...string) error {
+func commandShell(opts Options) string {
+	if opts.Shell == "cmd" {
+		return "cmd"
+	}
+	return "sh"
+}
+
+func sshSh(ctx context.Context, debug io.Writer, host, script string, args ...string) error {
+	cmdArgs := sshArgs(host)
+	cmdArgs = append(cmdArgs, "sh", "-c", script, "git-sfs")
+	cmdArgs = append(cmdArgs, args...)
+	return run(ctx, debug, "ssh", cmdArgs...)
+}
+
+func sshCmd(ctx context.Context, debug io.Writer, host string, args ...string) error {
+	cmdArgs := sshArgs(host)
+	cmdArgs = append(cmdArgs, args...)
+	return run(ctx, debug, "ssh", cmdArgs...)
+}
+
+func sshArgs(host string) []string {
 	sshHost, port := splitHostPort(host)
 	cmdArgs := []string{}
 	if port != "" {
 		cmdArgs = append(cmdArgs, "-p", port)
 	}
-	cmdArgs = append(cmdArgs, sshHost, "sh", "-c", script, "git-sfs")
-	cmdArgs = append(cmdArgs, args...)
-	return run(ctx, "ssh", cmdArgs...)
+	return append(cmdArgs, sshHost)
 }
 
-func run(ctx context.Context, name string, args ...string) error {
+func run(ctx context.Context, debug io.Writer, name string, args ...string) error {
+	if debug != nil {
+		fmt.Fprintln(debug, "run:", shellQuote(append([]string{name}, args...)))
+	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
@@ -336,4 +410,16 @@ func run(ctx context.Context, name string, args ...string) error {
 		return err
 	}
 	return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+}
+
+func shellQuote(args []string) string {
+	parts := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "" || strings.ContainsAny(arg, " \t\n\"'\\") {
+			parts = append(parts, strconv.Quote(arg))
+			continue
+		}
+		parts = append(parts, arg)
+	}
+	return strings.Join(parts, " ")
 }

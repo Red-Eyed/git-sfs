@@ -17,10 +17,11 @@ type Config struct {
 }
 
 type RemoteConfig struct {
-	Type string
-	URL  string
-	Host string
-	Path string
+	Type  string
+	URL   string
+	Host  string
+	Path  string
+	Shell string
 }
 
 type Settings struct {
@@ -67,6 +68,7 @@ path = "/mnt/datasets/project"
 # type = "ssh"
 # host = "storage"
 # path = "/mnt/datasets/project"
+# shell = "sh"
 #
 # [remotes.local]
 # type = "filesystem"
@@ -154,6 +156,8 @@ func Load(path string) (Config, error) {
 				rc.Host = val
 			case "path":
 				rc.Path = val
+			case "shell":
+				rc.Shell = val
 			default:
 				return Config{}, fmt.Errorf("unknown remote field %q", key)
 			}
@@ -178,6 +182,9 @@ func Load(path string) (Config, error) {
 		}
 		if rc.URL == "" && rc.Path == "" {
 			return Config{}, fmt.Errorf("remote %q requires url or path", name)
+		}
+		if rc.Shell != "" && rc.Shell != "sh" && rc.Shell != "cmd" {
+			return Config{}, fmt.Errorf("remote %q has unsupported shell %q", name, rc.Shell)
 		}
 	}
 	return cfg, nil

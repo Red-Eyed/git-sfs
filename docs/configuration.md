@@ -26,6 +26,7 @@ Allowed here:
 - remote URLs
 - remote hosts
 - remote paths
+- remote shell for command targets
 - shared settings
 
 Supported remote types are `filesystem`, `rsync`, `ssh`, and `rclone`.
