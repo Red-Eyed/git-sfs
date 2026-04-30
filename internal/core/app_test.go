@@ -28,10 +28,10 @@ func TestAddVerifyAndStatus(t *testing.T) {
 		if err := app.Add(context.Background(), []string{"data"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := app.Verify(context.Background()); err != nil {
+		if err := app.Verify(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
-		if err := app.Status(context.Background()); err != nil {
+		if err := app.Status(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -249,7 +249,7 @@ func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
 		if err := hash.VerifyFile(cacheTwo, h2); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Verify(context.Background()); err != nil {
+		if err := a.Verify(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
 		if status := runGit(clone, "status", "--short"); status != "" {
@@ -552,7 +552,7 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	inDir(t, repo, func() {
-		if err := app(stdout).Status(context.Background()); err == nil {
+		if err := app(stdout).Status(context.Background(), true); err == nil {
 			t.Fatal("status should fail for unconverted file")
 		}
 		if !strings.Contains(stdout.String(), "unconverted files: 1") ||
@@ -575,7 +575,7 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		if err := app(stdout).Verify(context.Background()); err == nil {
+		if err := app(stdout).Verify(context.Background(), false); err == nil {
 			t.Fatal("verify should fail for corrupt cache file")
 		}
 		if !strings.Contains(stdout.String(), "corrupt cache files: 1") ||
@@ -656,16 +656,63 @@ func TestInitSetupAndGitignore(t *testing.T) {
 func TestStatusReportsInvalidConfig(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	content := "version = 1\n\n[settings]\nalgorithm = sha256\n"
-	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
+		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte("version = 1\n\n[settings]\nalgorithm = sha256\n"))
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Status(context.Background()); err == nil {
+		if err := app(stdout).Status(context.Background(), true); err == nil {
 			t.Fatal("expected invalid config status")
 		}
 		if !strings.Contains(stdout.String(), "missing default remote") {
 			t.Fatalf("missing status output: %q", stdout.String())
+		}
+	})
+}
+
+func TestStatusReportsRemoteProblems(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeDataset(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		stdout := &bytes.Buffer{}
+		if err := app(stdout).Status(context.Background(), true); err == nil {
+			t.Fatal("expected remote check to pass when remote file is missing")
+		}
+		if !strings.Contains(stdout.String(), "missing remote files: 1") {
+			t.Fatalf("missing remote status output: %q", stdout.String())
+		}
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(remoteFile, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(remoteFile, []byte("corrupt"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		if err := app(stdout).Verify(context.Background(), true); err == nil {
+			t.Fatal("expected remote verify to fail")
+		}
+		if !strings.Contains(stdout.String(), "corrupt remote files: 1") {
+			t.Fatalf("missing corrupt remote output: %q", stdout.String())
 		}
 	})
 }

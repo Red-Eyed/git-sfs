@@ -82,9 +82,23 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return app.ImportWithOptions(ctx, cmdArgs[0], cmdArgs[1], core.ImportOptions{FollowSymlinks: followSymlinks})
 	case "status":
-		return app.Status(ctx)
+		sfs := flag.NewFlagSet("status", flag.ContinueOnError)
+		sfs.SetOutput(stderr)
+		var remote bool
+		sfs.BoolVar(&remote, "remote", false, "check remote files")
+		if err := sfs.Parse(cmdArgs); err != nil {
+			return err
+		}
+		return app.Status(ctx, remote)
 	case "verify":
-		return app.Verify(ctx)
+		vfs := flag.NewFlagSet("verify", flag.ContinueOnError)
+		vfs.SetOutput(stderr)
+		var remote bool
+		vfs.BoolVar(&remote, "remote", false, "check remote files")
+		if err := vfs.Parse(cmdArgs); err != nil {
+			return err
+		}
+		return app.Verify(ctx, remote)
 	case "push":
 		remote := ""
 		if len(cmdArgs) > 0 {

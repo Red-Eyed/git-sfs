@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"git-sfs/internal/errs"
 	"git-sfs/internal/fsutil"
 	"git-sfs/internal/hash"
 )
@@ -45,6 +47,11 @@ func (r rcloneRemote) remotePath(h hash.Hash) string {
 }
 
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
+	ok, err := r.CheckFile(ctx, h)
+	return ok, err
+}
+
+func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) {
 	tmp, err := os.CreateTemp("", "git-sfs-rclone-check-*")
 	if err != nil {
 		return false, err
@@ -59,7 +66,10 @@ func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 		}
 		return false, nil
 	}
-	return hash.VerifyFile(name, h) == nil, nil
+	if err := hash.VerifyFile(name, h); err != nil {
+		return false, errors.Join(errs.ErrCorruptRemoteFile, err)
+	}
+	return true, nil
 }
 
 func (r rcloneRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {

@@ -2,9 +2,11 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 
+	"git-sfs/internal/errs"
 	"git-sfs/internal/fsutil"
 	"git-sfs/internal/hash"
 )
@@ -22,12 +24,23 @@ func (r filesystemRemote) path(h hash.Hash) string {
 }
 
 func (r filesystemRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
+	ok, err := r.CheckFile(ctx, h)
+	return ok, err
+}
+
+func (r filesystemRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
 	default:
 	}
-	return hash.VerifyFile(r.path(h), h) == nil, nil
+	if err := hash.VerifyFile(r.path(h), h); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, errors.Join(errs.ErrCorruptRemoteFile, err)
+	}
+	return true, nil
 }
 
 // PushFile treats an existing valid file as success, which makes retries

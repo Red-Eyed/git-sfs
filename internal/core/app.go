@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"git-sfs/internal/cache"
 	"git-sfs/internal/config"
+	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
 	"git-sfs/internal/localstate"
 	"git-sfs/internal/lock"
@@ -63,6 +65,8 @@ var issueKinds = []string{
 	"broken git symlink",
 	"missing cache file",
 	"corrupt cache file",
+	"missing remote file",
+	"corrupt remote file",
 	"invalid config",
 }
 
@@ -299,22 +303,16 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 }
 
 // Status reports user-actionable problems without mutating repository state.
-func (a App) Status(ctx context.Context) (err error) {
+func (a App) Status(ctx context.Context, checkRemote bool) (err error) {
 	a.debugf("status: start")
 	defer a.debugDone("status", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
-	report, err := scan(repo, c)
+	report, err := scan(ctx, repo, c, cfg, checkRemote)
 	if err != nil {
 		return err
-	}
-	if _, ok := cfg.Remotes["default"]; !ok {
-		report.Issues = append(report.Issues, issue{
-			Kind:   "invalid config",
-			Detail: "missing default remote",
-		})
 	}
 	printReport(a.Stdout, report)
 	if len(report.Issues) > 0 {
@@ -324,14 +322,14 @@ func (a App) Status(ctx context.Context) (err error) {
 }
 
 // Verify is the CI-oriented strict check; any reported problem is a failure.
-func (a App) Verify(ctx context.Context) (err error) {
+func (a App) Verify(ctx context.Context, checkRemote bool) (err error) {
 	a.debugf("verify: start")
 	defer a.debugDone("verify", &err)
-	repo, c, _, err := a.open()
+	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
-	report, err := scan(repo, c)
+	report, err := scan(ctx, repo, c, cfg, checkRemote)
 	if err != nil {
 		return err
 	}
@@ -436,12 +434,12 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 				}
 				if !c.HasValid(h) {
 					once.Do(func() {
-						errCh <- fmt.Errorf("cache file for %s is missing or corrupt", h)
+						errCh <- fmt.Errorf("%w: %s", errs.ErrMissingCachedFile, h)
 						cancel()
 					})
 					return
 				}
-				has, err := r.HasFile(ctx, h)
+				has, err := r.CheckFile(ctx, h)
 				if err != nil {
 					once.Do(func() {
 						errCh <- err
@@ -621,8 +619,9 @@ func (a App) open() (string, cache.Cache, config.Config, error) {
 	return repo, c, cfg, nil
 }
 
-func scan(repo string, c cache.Cache) (statusReport, error) {
+func scan(ctx context.Context, repo string, c cache.Cache, cfg config.Config, checkRemote bool) (statusReport, error) {
 	var report statusReport
+	defaultRemote, hasDefault := cfg.Remotes["default"]
 	err := filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -674,6 +673,43 @@ func scan(repo string, c cache.Cache) (statusReport, error) {
 			})
 			return nil
 		}
+		if checkRemote {
+			if !hasDefault {
+				report.Issues = append(report.Issues, issue{
+					Kind:   "invalid config",
+					Detail: "missing default remote",
+				})
+				return nil
+			}
+			r, err := remote.NewWithOptions(defaultRemote, remote.Options{})
+			if err != nil {
+				report.Issues = append(report.Issues, issue{
+					Kind:   "invalid config",
+					Detail: err.Error(),
+				})
+				return nil
+			}
+			ok, err := r.CheckFile(ctx, h)
+			if err != nil {
+				if errors.Is(err, errs.ErrCorruptRemoteFile) {
+					report.Issues = append(report.Issues, issue{
+						Kind:   "corrupt remote file",
+						Path:   rel(repo, path),
+						Hash:   h.String(),
+						Detail: err.Error(),
+					})
+					return nil
+				}
+				return err
+			}
+			if !ok {
+				report.Issues = append(report.Issues, issue{
+					Kind: "missing remote file",
+					Path: rel(repo, path),
+					Hash: h.String(),
+				})
+			}
+		}
 		return nil
 	})
 	return report, err
@@ -722,6 +758,10 @@ func pluralKind(kind string) string {
 		return "missing cache files"
 	case "corrupt cache file":
 		return "corrupt cache files"
+	case "missing remote file":
+		return "missing remote files"
+	case "corrupt remote file":
+		return "corrupt remote files"
 	case "invalid config":
 		return "invalid config"
 	default:

@@ -13,6 +13,7 @@ import (
 // Remote hides backend details from push and pull workflow code.
 type Remote interface {
 	HasFile(ctx context.Context, h hash.Hash) (bool, error)
+	CheckFile(ctx context.Context, h hash.Hash) (bool, error)
 	PushFile(ctx context.Context, h hash.Hash, srcPath string) error
 	PullFile(ctx context.Context, h hash.Hash, dstPath string) error
 }
