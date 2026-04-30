@@ -140,5 +140,15 @@ func has(args []string, want string) bool {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: git-sfs [--cache path] [--config path] <command> [args]")
-	fmt.Fprintln(w, "commands: init setup add import status verify push pull gc")
+	fmt.Fprintln(w, "commands:")
+	fmt.Fprintln(w, "  init")
+	fmt.Fprintln(w, "  setup")
+	fmt.Fprintln(w, "  add")
+	fmt.Fprintln(w, "  import")
+	fmt.Fprintln(w, "  status")
+	fmt.Fprintln(w, "  verify")
+	fmt.Fprintln(w, "  push")
+	fmt.Fprintln(w, "  pull")
+	fmt.Fprintln(w, "  gc")
+	fmt.Fprintln(w, "  help")
 }

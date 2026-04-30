@@ -16,8 +16,23 @@ func TestHelp(t *testing.T) {
 	if err := run(context.Background(), []string{"help"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "commands:") {
-		t.Fatalf("help output missing commands: %q", stdout.String())
+	got := stdout.String()
+	for _, want := range []string{
+		"commands:",
+		"  init",
+		"  setup",
+		"  add",
+		"  import",
+		"  status",
+		"  verify",
+		"  push",
+		"  pull",
+		"  gc",
+		"  help",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help output missing %q: %q", want, got)
+		}
 	}
 }
 
