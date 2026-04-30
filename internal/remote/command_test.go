@@ -13,6 +13,15 @@ import (
 )
 
 func TestRcloneTarget(t *testing.T) {
+	if got := NewRcloneTarget("local", "/tmp/data").(rcloneRemote); got.url != "local:/tmp/data" {
+		t.Fatalf("bad absolute unix host/path remote: %#v", got)
+	}
+	if got := NewRcloneTarget("remote-name", "dataset/root").(rcloneRemote); got.url != "remote-name:dataset/root" {
+		t.Fatalf("bad relative host/path remote: %#v", got)
+	}
+	if got := NewRcloneTarget("remote-name", "/dataset/root/").(rcloneRemote); got.url != "remote-name:/dataset/root" {
+		t.Fatalf("bad absolute host/path remote with trailing slash: %#v", got)
+	}
 	if got := NewRcloneTarget("remote-name", "D:/data").(rcloneRemote); got.url != "remote-name:D:/data" {
 		t.Fatalf("bad rclone host/path remote: %#v", got)
 	}

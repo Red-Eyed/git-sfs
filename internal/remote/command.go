@@ -39,7 +39,15 @@ func NewRcloneTargetWithOptions(host, path string, opts Options) Remote {
 	if host == "" {
 		return NewRcloneWithOptions(path, opts)
 	}
-	return rcloneRemote{url: host + ":" + strings.TrimLeft(strings.TrimRight(path, "/"), "/"), config: opts.RcloneConfig, debug: opts.Debug}
+	path = strings.TrimRight(path, "/")
+	if strings.HasPrefix(path, "/") || isWindowsAbsPath(path) {
+		return rcloneRemote{url: host + ":" + path, config: opts.RcloneConfig, debug: opts.Debug}
+	}
+	return rcloneRemote{url: host + ":" + strings.TrimLeft(path, "/"), config: opts.RcloneConfig, debug: opts.Debug}
+}
+
+func isWindowsAbsPath(path string) bool {
+	return len(path) >= 3 && path[1] == ':' && path[2] == '/'
 }
 
 func (r rcloneRemote) remotePath(h hash.Hash) string {
