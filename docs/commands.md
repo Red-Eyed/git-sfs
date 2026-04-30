@@ -59,6 +59,22 @@ For each regular file, `git-sfs`:
 - stores bytes in the cache
 - replaces the file with a relative symlink
 
+## git-sfs mv
+
+Move an external file into the cache and create a symlink inside the repository:
+
+```sh
+git-sfs mv /mnt/incoming/train-000.tar.zst data/train-000.tar.zst
+```
+
+Move an external directory recursively:
+
+```sh
+git-sfs mv /mnt/incoming/dataset data/dataset
+```
+
+`git-sfs mv` is for very large data where making a temporary repository copy is too expensive. It hashes each source file, renames it into the cache, verifies the cached bytes, and creates the destination symlink. The source and cache must be on the same filesystem; cross-filesystem moves fail clearly instead of silently copying a second copy.
+
 ## git-sfs status
 
 Report repository state:

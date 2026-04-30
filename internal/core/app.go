@@ -33,6 +33,11 @@ type GCOptions struct {
 	Files  bool
 }
 
+type movePair struct {
+	Src string
+	Dst string
+}
+
 type issue struct {
 	Kind   string
 	Path   string
@@ -199,6 +204,56 @@ func (a App) Add(ctx context.Context, paths []string) error {
 		}
 		a.say("added " + rel(repo, file) + " -> " + h.String())
 	}
+	return nil
+}
+
+func (a App) Move(ctx context.Context, srcPath, dstPath string) error {
+	repo, c, _, err := a.open()
+	if err != nil {
+		return err
+	}
+	if err := localstate.InitGitSFS(repo); err != nil {
+		return err
+	}
+	if err := c.Init(); err != nil {
+		return err
+	}
+	l, err := lock.Acquire(ctx, c.LocksDir(), "mv")
+	if err != nil {
+		return err
+	}
+	defer l.Release()
+	pairs, dirs, err := planMove(repo, srcPath, dstPath)
+	if err != nil {
+		return err
+	}
+	for _, pair := range pairs {
+		h, err := hash.File(pair.Src)
+		if err != nil {
+			return err
+		}
+		if err := c.Move(pair.Src, h); err != nil {
+			return fmt.Errorf("move %s: %w", pair.Src, err)
+		}
+		if err := c.Protect(h); err != nil {
+			return err
+		}
+		if err := materialize.Link(repo, c, h); err != nil {
+			return err
+		}
+		target, err := sfspath.GitLinkTarget(repo, pair.Dst, h)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(pair.Dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.Symlink(target, pair.Dst); err != nil {
+			return err
+		}
+		a.say("moved " + pair.Src + " -> " + rel(repo, pair.Dst) + " -> " + h.String())
+	}
+	removeEmptyDirs(dirs)
 	return nil
 }
 
@@ -636,6 +691,85 @@ func shouldSkip(repo, path string) bool {
 		path == filepath.Join(repo, ".git-sfs/config.toml") ||
 		path == filepath.Join(repo, ".gitignore") ||
 		strings.Contains(path, string(filepath.Separator)+".git-sfs"+string(filepath.Separator))
+}
+
+func planMove(repo, srcPath, dstPath string) ([]movePair, []string, error) {
+	src, err := filepath.Abs(srcPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	dst := absFromRepo(repo, dstPath)
+	relDst, err := filepath.Rel(repo, dst)
+	if err != nil || relDst == "." || strings.HasPrefix(relDst, "..") {
+		return nil, nil, fmt.Errorf("destination must be inside repository: %s", dstPath)
+	}
+	if shouldSkip(repo, dst) || strings.Contains(dst, string(filepath.Separator)+".git-sfs"+string(filepath.Separator)) {
+		return nil, nil, fmt.Errorf("destination must not be inside .git-sfs: %s", dstPath)
+	}
+	info, err := os.Lstat(src)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, fmt.Errorf("source symlinks are not supported: %s", srcPath)
+	}
+	if info.Mode().IsRegular() {
+		if _, err := os.Lstat(dst); err == nil {
+			return nil, nil, fmt.Errorf("destination already exists: %s", dstPath)
+		} else if !os.IsNotExist(err) {
+			return nil, nil, err
+		}
+		return []movePair{{Src: src, Dst: dst}}, nil, nil
+	}
+	if !info.IsDir() {
+		return nil, nil, fmt.Errorf("source must be a regular file or directory: %s", srcPath)
+	}
+	if st, err := os.Lstat(dst); err == nil && !st.IsDir() {
+		return nil, nil, fmt.Errorf("destination exists and is not a directory: %s", dstPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, nil, err
+	}
+	var pairs []movePair
+	var dirs []string
+	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == src {
+			return nil
+		}
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			dirs = append(dirs, path)
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("source contains unsupported non-regular file: %s", path)
+		}
+		out := filepath.Join(dst, relPath)
+		if _, err := os.Lstat(out); err == nil {
+			return fmt.Errorf("destination already exists: %s", out)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		pairs = append(pairs, movePair{Src: path, Dst: out})
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	dirs = append(dirs, src)
+	return pairs, dirs, nil
+}
+
+func removeEmptyDirs(dirs []string) {
+	for _, dir := range dirs {
+		_ = os.Remove(dir)
+	}
 }
 
 func absFromRepo(repo, p string) string {

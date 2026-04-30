@@ -58,6 +58,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("add requires at least one path")
 		}
 		return app.Add(ctx, cmdArgs)
+	case "mv":
+		if len(cmdArgs) != 2 {
+			return fmt.Errorf("mv requires source and destination")
+		}
+		return app.Move(ctx, cmdArgs[0], cmdArgs[1])
 	case "status":
 		return app.Status(ctx)
 	case "verify":
@@ -115,5 +120,5 @@ func has(args []string, want string) bool {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: git-sfs [--cache path] [--config path] <command> [args]")
-	fmt.Fprintln(w, "commands: init setup add status verify push pull materialize dematerialize gc")
+	fmt.Fprintln(w, "commands: init setup add mv status verify push pull materialize dematerialize gc")
 }

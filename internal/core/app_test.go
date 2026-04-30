@@ -130,6 +130,66 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 	})
 }
 
+func TestMoveFileIntoCacheWithoutCopyingToRepo(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	src := filepath.Join(t.TempDir(), "outside.bin")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, src, []byte("large payload"))
+	inDir(t, repo, func() {
+		if err := app(&bytes.Buffer{}).Move(context.Background(), src, "data/blob.bin"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still exists after move: %v", err)
+	}
+	dst := filepath.Join(repo, "data", "blob.bin")
+	info, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("destination should be a symlink")
+	}
+	h, _, err := sfspath.ParseGitSymlink(repo, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+	if err := hash.VerifyFile(cacheFile, h); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(cacheFile); err != nil || info.Mode().Perm()&0o222 != 0 {
+		t.Fatalf("cache file should exist and be read-only: info=%v err=%v", info, err)
+	}
+}
+
+func TestMoveDirectoryIntoCache(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	srcDir := filepath.Join(t.TempDir(), "incoming")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(srcDir, "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(srcDir, "nested", "two.bin"), []byte("two"))
+	inDir(t, repo, func() {
+		if err := app(&bytes.Buffer{}).Move(context.Background(), srcDir, "data/imported"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Fatalf("source directory should be removed when empty: %v", err)
+	}
+	for _, rel := range []string{"data/imported/one.bin", "data/imported/nested/two.bin"} {
+		info, err := os.Lstat(filepath.Join(repo, rel))
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s should be a symlink: info=%v err=%v", rel, info, err)
+		}
+	}
+}
+
 func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")

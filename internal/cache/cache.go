@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -63,4 +64,50 @@ func (c Cache) Store(src string, h hash.Hash) error {
 		return err
 	}
 	return fsutil.MakeReadOnly(dst)
+}
+
+// Move renames src into the cache, verifies it by hash, then publishes the final immutable object.
+func (c Cache) Move(src string, h hash.Hash) error {
+	dst := c.FilePath(h)
+	srcAbs, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(srcAbs) == filepath.Clean(dst) {
+		return fsutil.MakeReadOnly(dst)
+	}
+	if c.HasValid(h) {
+		if err := fsutil.MakeReadOnly(dst); err != nil {
+			return err
+		}
+		return os.Remove(src)
+	}
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(c.TmpDir(), 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(src, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
+		return err
+	}
+	tmp := filepath.Join(c.TmpDir(), "."+h.String()+".move")
+	_ = os.Remove(tmp)
+	if err := os.Rename(src, tmp); err != nil {
+		return fmt.Errorf("move into cache staging failed; source and cache must be on the same filesystem: %w", err)
+	}
+	if err := hash.VerifyFile(tmp, h); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return fmt.Errorf("publish cached file %s: %w", dst, err)
+	}
+	return nil
 }
