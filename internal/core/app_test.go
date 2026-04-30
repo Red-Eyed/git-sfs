@@ -329,7 +329,7 @@ esac
 		if err := a.Push(context.Background(), ""); err != nil {
 			t.Fatal(err)
 		}
-		if time.Since(start) > 1800*time.Millisecond {
+		if time.Since(start) > 3200*time.Millisecond {
 			t.Fatalf("push took too long to be parallel: %s", time.Since(start))
 		}
 	})

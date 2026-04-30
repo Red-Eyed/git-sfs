@@ -1,11 +1,13 @@
 package sfspath
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
 )
 
@@ -26,7 +28,7 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 		return "", "", err
 	}
 	if filepath.IsAbs(target) {
-		return "", target, fmt.Errorf("git symlink %s has absolute target %s", file, target)
+		return "", target, errors.Join(errs.ErrInvalidSymlink, fmt.Errorf("git symlink %s has absolute target %s", file, target))
 	}
 	// Git symlinks point through .git-sfs/cache so machine-local cache paths
 	// never appear in committed metadata.
@@ -34,11 +36,11 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 	wantRoot := filepath.Join(repo, ".git-sfs", "cache", "files", hash.Algorithm)
 	rel, err := filepath.Rel(wantRoot, resolved)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
-		return "", target, fmt.Errorf("git symlink %s does not point into .git-sfs/cache", file)
+		return "", target, errors.Join(errs.ErrInvalidSymlink, fmt.Errorf("git symlink %s does not point into .git-sfs/cache", file))
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) != 2 {
-		return "", target, fmt.Errorf("git symlink %s has invalid file path", file)
+		return "", target, errors.Join(errs.ErrInvalidSymlink, fmt.Errorf("git symlink %s has invalid file path", file))
 	}
 	// The first path component is redundant with the hash, but checking it keeps
 	// stale or hand-edited links from silently pointing at the wrong layout.
@@ -47,7 +49,7 @@ func ParseGitSymlink(repo, file string) (hash.Hash, string, error) {
 		return "", target, err
 	}
 	if parts[0] != h.Prefix() {
-		return "", target, fmt.Errorf("git symlink %s prefix %q does not match hash", file, parts[0])
+		return "", target, errors.Join(errs.ErrInvalidSymlink, fmt.Errorf("git symlink %s prefix %q does not match hash", file, parts[0]))
 	}
 	return h, target, nil
 }

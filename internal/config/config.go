@@ -2,10 +2,13 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"git-sfs/internal/errs"
 )
 
 const Version = 1
@@ -100,41 +103,41 @@ func Load(path string) (Config, error) {
 				section = "remotes"
 				remote = strings.TrimPrefix(name, "remotes.")
 				if remote == "" {
-					return Config{}, fmt.Errorf("invalid remote section %q", name)
+					return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("invalid remote section %q", name))
 				}
 				cfg.Remotes[remote] = RemoteConfig{}
 			case name == "cache" || strings.HasPrefix(name, "cache."):
-				return Config{}, fmt.Errorf(".git-sfs/config.toml must not contain local cache configuration")
+				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf(".git-sfs/config.toml must not contain local cache configuration"))
 			default:
-				return Config{}, fmt.Errorf("unknown .git-sfs/config.toml section %q", name)
+				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown .git-sfs/config.toml section %q", name))
 			}
 			continue
 		}
 		key, val, ok := field(line)
 		if !ok {
-			return Config{}, fmt.Errorf("invalid config line %q", line)
+			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("invalid config line %q", line))
 		}
 		switch section {
 		case "":
 			if key == "version" {
 				if val != "1" {
-					return Config{}, fmt.Errorf("unsupported .git-sfs/config.toml version %q", val)
+					return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unsupported .git-sfs/config.toml version %q", val))
 				}
 				cfg.Version = Version
 				continue
 			}
 			if key == "cache" {
-				return Config{}, fmt.Errorf(".git-sfs/config.toml must not contain local cache configuration")
+				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf(".git-sfs/config.toml must not contain local cache configuration"))
 			}
-			return Config{}, fmt.Errorf("unknown .git-sfs/config.toml field %q", key)
+			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown .git-sfs/config.toml field %q", key))
 		case "settings":
 			if key != "algorithm" {
-				return Config{}, fmt.Errorf("unknown settings field %q", key)
+				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown settings field %q", key))
 			}
 			cfg.Settings.Algorithm = val
 		case "remotes":
 			if remote == "" {
-				return Config{}, fmt.Errorf("remote field %q appears before remote name", key)
+				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote field %q appears before remote name", key))
 			}
 			rc := cfg.Remotes[remote]
 			switch key {
@@ -149,7 +152,7 @@ func Load(path string) (Config, error) {
 			case "config":
 				rc.Config = val
 			default:
-				return Config{}, fmt.Errorf("unknown remote field %q", key)
+				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown remote field %q", key))
 			}
 			cfg.Remotes[remote] = rc
 		}
@@ -158,20 +161,20 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.Version != Version {
-		return Config{}, fmt.Errorf(".git-sfs/config.toml must declare version = 1")
+		return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf(".git-sfs/config.toml must declare version = 1"))
 	}
 	if cfg.Settings.Algorithm == "" {
 		cfg.Settings.Algorithm = "sha256"
 	}
 	if cfg.Settings.Algorithm != "sha256" {
-		return Config{}, fmt.Errorf("unsupported hash algorithm %q", cfg.Settings.Algorithm)
+		return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unsupported hash algorithm %q", cfg.Settings.Algorithm))
 	}
 	for name, rc := range cfg.Remotes {
 		if rc.Type == "" {
-			return Config{}, fmt.Errorf("remote %q requires type", name)
+			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote %q requires type", name))
 		}
 		if rc.URL == "" && rc.Path == "" {
-			return Config{}, fmt.Errorf("remote %q requires url or path", name)
+			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote %q requires url or path", name))
 		}
 	}
 	return cfg, nil

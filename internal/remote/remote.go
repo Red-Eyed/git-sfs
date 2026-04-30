@@ -2,11 +2,13 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 
 	"git-sfs/internal/config"
+	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
 )
 
@@ -39,7 +41,7 @@ func NewWithOptions(cfg config.RemoteConfig, opts Options) (Remote, error) {
 		}
 		return NewRcloneWithOptions(cfg.URL, opts), nil
 	default:
-		return nil, fmt.Errorf("unsupported remote type %q", cfg.Type)
+		return nil, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unsupported remote type %q", cfg.Type))
 	}
 }
 

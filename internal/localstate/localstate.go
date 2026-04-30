@@ -1,12 +1,14 @@
 package localstate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"git-sfs/internal/cache"
 	"git-sfs/internal/config"
+	"git-sfs/internal/errs"
 )
 
 // ResolveRepo walks upward from the current directory until it finds .git.
@@ -21,7 +23,7 @@ func ResolveRepo() (string, error) {
 		}
 		parent := filepath.Dir(wd)
 		if parent == wd {
-			return "", fmt.Errorf("not inside a Git repository")
+			return "", errs.ErrInvalidConfig
 		}
 		wd = parent
 	}
@@ -42,7 +44,7 @@ func ResolveCache(repo, flagValue string) (cache.Cache, error) {
 	if local.CachePath != "" {
 		return cache.Cache{Root: abs(local.CachePath)}, nil
 	}
-	return cache.Cache{}, fmt.Errorf("cache path is not configured; use --cache, GIT_SFS_CACHE, or .git-sfs/cache")
+	return cache.Cache{}, errs.ErrMissingCacheConfig
 }
 
 // InitGitSFS creates the local project state directory used by materialization.
@@ -74,7 +76,7 @@ func BindCache(repo string, c cache.Cache) error {
 		if filepath.Clean(existing) == filepath.Clean(target) {
 			return nil
 		}
-		return fmt.Errorf("cache link %s points to %s, not %s", link, existing, target)
+		return errors.Join(errs.ErrInvalidConfig, fmt.Errorf("cache link %s points to %s, not %s", link, existing, target))
 	}
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read cache link %s: %w", link, err)
