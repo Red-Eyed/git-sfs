@@ -593,8 +593,12 @@ func (a App) GC(ctx context.Context, opts GCOptions) (err error) {
 	}
 	if opts.Files {
 		root := filepath.Join(c.Root, "files", hash.Algorithm)
-		if err := removeUnreferenced(root, live, opts.DryRun, a.Stdout); err != nil {
+		removed, err := removeUnreferenced(root, live, opts.DryRun, a.Stdout)
+		if err != nil {
 			return err
+		}
+		if opts.DryRun {
+			fmt.Fprintf(a.Stdout, "gc dry-run would remove %d file(s)\n", removed)
 		}
 	}
 	return nil
@@ -840,8 +844,9 @@ func ensureGitignore(repo string) error {
 	return err
 }
 
-func removeUnreferenced(root string, live map[string]bool, dry bool, w io.Writer) error {
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+func removeUnreferenced(root string, live map[string]bool, dry bool, w io.Writer) (int, error) {
+	var removed int
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -856,10 +861,13 @@ func removeUnreferenced(root string, live map[string]bool, dry bool, w io.Writer
 		}
 		if dry {
 			fmt.Fprintln(w, "would remove "+path)
+			removed++
 			return nil
 		}
+		removed++
 		return os.Remove(path)
 	})
+	return removed, err
 }
 
 func shouldSkip(repo, path string) bool {

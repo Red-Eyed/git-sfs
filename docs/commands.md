@@ -182,3 +182,11 @@ git-sfs gc --files
 ```
 
 `git-sfs gc` must never delete files referenced by the current Git symlink tree.
+
+In dry-run mode, `git-sfs gc` prints each unreferenced file it would remove and a
+stable summary count:
+
+```text
+would remove /path/to/cache/files/sha256/...
+gc dry-run would remove 1 file(s)
+```
