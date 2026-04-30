@@ -37,6 +37,9 @@ func TestCommandRemoteHelpers(t *testing.T) {
 	if got := (rsyncRemote{url: "host:/root"}).remotePath(h); got != "host:/root/files/sha256/aa/"+h.String() {
 		t.Fatalf("bad remote path %q", got)
 	}
+	if got := (rcloneRemote{url: "remote:root"}).remotePath(h); got != "remote:root/files/sha256/aa/"+h.String() {
+		t.Fatalf("bad rclone remote path %q", got)
+	}
 }
 
 func TestNewLocalSSHRemoteUsesFilesystem(t *testing.T) {
@@ -169,6 +172,80 @@ func TestRsyncRemoteRejectsBadSource(t *testing.T) {
 	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err := (rsyncRemote{url: "host:/remote"}).PushFile(context.Background(), h, filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("expected missing source error")
+	}
+}
+
+func TestRcloneRemoteWithFakeCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts are not used on windows")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+cmd="$1"
+src="$2"
+dst="$3"
+map_path() {
+  case "$1" in
+    testremote:*) printf '%s/%s\n' "$RCLONE_TEST_ROOT" "${1#testremote:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+src="$(map_path "$src")"
+dst="$(map_path "$dst")"
+case "$cmd" in
+  copyto)
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+    ;;
+  moveto)
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", filepath.Join(dir, "remote"))
+
+	src := filepath.Join(dir, "src")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h, err := hash.File(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rcloneRemote{url: "testremote:dataset"}
+	has, err := r.HasFile(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("remote should start empty")
+	}
+	if err := r.PushFile(ctx, h, src); err != nil {
+		t.Fatal(err)
+	}
+	has, err = r.HasFile(ctx, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("remote should have file")
+	}
+	dst := filepath.Join(dir, "dst")
+	if err := r.PullFile(ctx, h, dst); err != nil {
+		t.Fatal(err)
+	}
+	if err := hash.VerifyFile(dst, h); err != nil {
+		t.Fatal(err)
 	}
 }
 

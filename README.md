@@ -89,6 +89,9 @@ By default this installs `git-sfs` into:
 $HOME/.local/bin
 ```
 
+If `rclone` is not already on `PATH`, the installer also installs the `rclone`
+CLI into the same directory. Set `GIT_SFS_INSTALL_RCLONE=0` to skip that step.
+
 You can override the install location:
 
 ```sh
@@ -242,6 +245,7 @@ The first supported remote styles are:
 ```text
 rsync
 ssh
+rclone
 filesystem
 ```
 

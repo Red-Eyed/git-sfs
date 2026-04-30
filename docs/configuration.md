@@ -25,6 +25,8 @@ Allowed here:
 - remote URLs
 - shared settings
 
+Supported remote types are `filesystem`, `rsync`, `ssh`, and `rclone`.
+
 Forbidden here:
 
 - local cache paths

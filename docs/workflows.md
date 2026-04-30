@@ -226,9 +226,10 @@ git-sfs push
 git-sfs pull
 ```
 
-## Planned rclone Remote
+## Work With An rclone Remote
 
-The intended shape is:
+First configure credentials with `rclone config`, then use the configured
+remote name in `.git-sfs/config.toml`:
 
 ```toml
 [remotes.default]
@@ -237,4 +238,4 @@ url = "remote-name:datasets/project"
 ```
 
 `git-sfs` should call the installed `rclone` CLI and keep the same plain file
-layout. It should not implement cloud-provider APIs directly.
+layout. It does not implement cloud-provider APIs directly.

@@ -53,7 +53,7 @@ version = 1
 
 # The default remote is used by git-sfs push and git-sfs pull when no remote is named.
 [remotes.default]
-# Supported today: rsync, ssh, filesystem.
+# Supported today: rsync, ssh, rclone, filesystem.
 # Use rsync for a normal host:path destination.
 type = "rsync"
 url = "user@host:/mnt/datasets/project"
@@ -66,6 +66,10 @@ url = "user@host:/mnt/datasets/project"
 # [remotes.local]
 # type = "filesystem"
 # url = "/mnt/datasets/project"
+#
+# [remotes.cloud]
+# type = "rclone"
+# url = "remote-name:datasets/project"
 
 [settings]
 # Only sha256 is supported in v1.

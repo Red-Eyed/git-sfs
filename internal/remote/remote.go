@@ -23,6 +23,8 @@ func New(cfg config.RemoteConfig) (Remote, error) {
 		return NewRsync(cfg.URL), nil
 	case "ssh":
 		return NewSSH(cfg.URL), nil
+	case "rclone":
+		return NewRclone(cfg.URL), nil
 	default:
 		return nil, fmt.Errorf("unsupported remote type %q", cfg.Type)
 	}

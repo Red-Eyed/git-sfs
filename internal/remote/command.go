@@ -16,6 +16,7 @@ import (
 
 type rsyncRemote struct{ url string }
 type sshRemote struct{ url string }
+type rcloneRemote struct{ url string }
 
 // NewRsync accepts local filesystem paths too, which keeps tests and single-box
 // workflows from needing an ssh server.
@@ -35,7 +36,15 @@ func NewSSH(url string) Remote {
 	return sshRemote{url: url}
 }
 
+func NewRclone(url string) Remote {
+	return rcloneRemote{url: strings.TrimRight(url, "/")}
+}
+
 func (r rsyncRemote) remotePath(h hash.Hash) string {
+	return r.url + "/files/" + hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
+}
+
+func (r rcloneRemote) remotePath(h hash.Hash) string {
 	return r.url + "/files/" + hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
 }
 
@@ -126,6 +135,72 @@ func (r sshRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) er
 
 func (r sshRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
 	return rsyncRemote{url: r.url}.PullFile(ctx, h, dstPath)
+}
+
+func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
+	tmp, err := os.CreateTemp("", "git-sfs-rclone-check-*")
+	if err != nil {
+		return false, err
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	defer os.Remove(name)
+	if err := run(ctx, "rclone", "copyto", r.remotePath(h), name); err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	return hash.VerifyFile(name, h) == nil, nil
+}
+
+func (r rcloneRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
+	if err := hash.VerifyFile(srcPath, h); err != nil {
+		return err
+	}
+	if has, err := r.HasFile(ctx, h); err != nil {
+		return err
+	} else if has {
+		return nil
+	}
+	dst := r.remotePath(h)
+	tmp := dst + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if err := run(ctx, "rclone", "copyto", srcPath, tmp); err != nil {
+		return err
+	}
+	if err := run(ctx, "rclone", "moveto", tmp, dst); err != nil {
+		return fmt.Errorf("publish remote file: %w", err)
+	}
+	has, err := r.HasFile(ctx, h)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return fmt.Errorf("uploaded remote file failed verification: %s", h)
+	}
+	return nil
+}
+
+func (r rcloneRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return err
+	}
+	tmp := dstPath + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	defer os.Remove(tmp)
+	if err := run(ctx, "rclone", "copyto", r.remotePath(h), tmp); err != nil {
+		return err
+	}
+	if err := hash.VerifyFile(tmp, h); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, fsutil.ReadOnlyMode(0o644)); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dstPath); err != nil {
+		return err
+	}
+	return fsutil.MakeReadOnly(dstPath)
 }
 
 func sshHost(url string) string {

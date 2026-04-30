@@ -83,6 +83,7 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 		"url = \"user@host:/mnt/datasets/project\"",
 		"# type = \"ssh\"",
 		"# type = \"filesystem\"",
+		"# type = \"rclone\"",
 		"algorithm = \"sha256\"",
 	} {
 		if !strings.Contains(text, want) {

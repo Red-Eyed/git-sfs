@@ -62,7 +62,7 @@ backend and should remain inspectable as plain files on the remote host.
 
 ## rclone
 
-Planned backend:
+Use any remote configured with the installed `rclone` CLI:
 
 ```toml
 [remotes.default]
