@@ -17,6 +17,7 @@ import (
 	"git-sfs/internal/localstate"
 	"git-sfs/internal/lock"
 	"git-sfs/internal/materialize"
+	"git-sfs/internal/progress"
 	"git-sfs/internal/remote"
 	"git-sfs/internal/sfspath"
 )
@@ -127,6 +128,8 @@ func (a App) Setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	bar := progress.New(a.Stderr, "setup", len(links), a.Quiet)
+	defer bar.Close()
 	for _, l := range links {
 		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
@@ -140,6 +143,7 @@ func (a App) Setup(ctx context.Context) error {
 				return err
 			}
 		}
+		bar.Step()
 	}
 	a.say("setup complete")
 	return nil
@@ -185,6 +189,8 @@ func (a App) Add(ctx context.Context, paths []string) error {
 		}
 	}
 	sort.Strings(files)
+	bar := progress.New(a.Stderr, "add", len(files), a.Quiet)
+	defer bar.Close()
 	for _, file := range files {
 		h, err := hash.File(file)
 		if err != nil {
@@ -210,6 +216,7 @@ func (a App) Add(ctx context.Context, paths []string) error {
 			return err
 		}
 		a.say("added " + rel(repo, file) + " -> " + h.String())
+		bar.Step()
 	}
 	return nil
 }
@@ -242,6 +249,8 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 	if err != nil {
 		return err
 	}
+	bar := progress.New(a.Stderr, "import", len(pairs), a.Quiet)
+	defer bar.Close()
 	imported := map[string]hash.Hash{}
 	for _, pair := range pairs {
 		h, ok := imported[pair.Key]
@@ -273,6 +282,7 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 			return err
 		}
 		a.say("imported " + pair.Src + " -> " + rel(repo, pair.Dst) + " -> " + h.String())
+		bar.Step()
 	}
 	removeSourceLinks(links)
 	removeEmptyDirs(dirs)
@@ -329,6 +339,8 @@ func (a App) Materialize(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	bar := progress.New(a.Stderr, "pull", len(links), a.Quiet)
+	defer bar.Close()
 	for _, l := range links {
 		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
@@ -340,6 +352,7 @@ func (a App) Materialize(ctx context.Context, path string) error {
 		if err := materialize.Link(repo, c, h); err != nil {
 			return err
 		}
+		bar.Step()
 	}
 	return nil
 }
@@ -388,6 +401,8 @@ func (a App) Push(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	bar := progress.New(a.Stderr, "push", len(hashes), a.Quiet)
+	defer bar.Close()
 	workers := pushWorkerCount(len(hashes))
 	jobs := make(chan hash.Hash)
 	errCh := make(chan error, 1)
@@ -420,6 +435,7 @@ func (a App) Push(ctx context.Context, name string) error {
 					return
 				}
 				if has {
+					bar.Step()
 					continue
 				}
 				if err := r.PushFile(ctx, h, c.FilePath(h)); err != nil {
@@ -432,6 +448,7 @@ func (a App) Push(ctx context.Context, name string) error {
 				outMu.Lock()
 				a.say("pushed " + h.String())
 				outMu.Unlock()
+				bar.Step()
 			}
 		}()
 	}

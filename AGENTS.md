@@ -12,6 +12,9 @@ Project direction:
 - Supported remote tools should stay boring and familiar: `rsync`, `ssh`, and `rclone`.
 - Do not add manifests, databases, background services, custom protocols, or hidden metadata.
 - If a feature needs a new internal format, first ask whether Git or the filesystem already provides the needed state.
+- Prefer simple built-in progress output over third-party terminal UI libraries.
+- Prefer `--verbose` and `-j`/`--jobs` style flags for commands that can benefit from them.
+- When concurrency is needed, keep coordination simple and explicit; prefer channels and atomics over mutex-heavy designs where practical.
 
 Core model:
 
