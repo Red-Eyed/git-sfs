@@ -67,13 +67,13 @@ func BindCache(repo string, c cache.Cache) error {
 		return err
 	}
 	link := filepath.Join(repo, ".git-sfs", "cache")
-	target := abs(c.Root)
+	target := canonicalPath(abs(c.Root))
 	existing, err := os.Readlink(link)
 	if err == nil {
 		if !filepath.IsAbs(existing) {
 			existing = filepath.Join(filepath.Dir(link), existing)
 		}
-		if filepath.Clean(existing) == filepath.Clean(target) {
+		if canonicalPath(existing) == target {
 			return nil
 		}
 		return errors.Join(errs.ErrInvalidConfig, fmt.Errorf("cache link %s points to %s, not %s", link, existing, target))
@@ -88,6 +88,14 @@ func abs(path string) string {
 	out, err := filepath.Abs(path)
 	if err != nil {
 		return path
+	}
+	return out
+}
+
+func canonicalPath(path string) string {
+	out, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return filepath.Clean(path)
 	}
 	return out
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"git-sfs/internal/cache"
 )
 
 func TestResolveRepoWalksUp(t *testing.T) {
@@ -80,6 +82,23 @@ func TestResolveCacheMissing(t *testing.T) {
 	t.Setenv("GIT_SFS_CACHE", "")
 	if _, err := ResolveCache(t.TempDir(), ""); err == nil {
 		t.Fatal("expected missing cache error")
+	}
+}
+
+func TestBindCacheAcceptsEquivalentPaths(t *testing.T) {
+	repo := t.TempDir()
+	if err := InitGitSFS(repo); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cacheDir, filepath.Join(repo, ".git-sfs", "cache")); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindCache(repo, cache.Cache{Root: filepath.Clean(cacheDir)}); err != nil {
+		t.Fatal(err)
 	}
 }
 

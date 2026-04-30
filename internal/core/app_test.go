@@ -117,7 +117,7 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
 	writeRcloneDataset(t, repo, "local", remoteDir)
-	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"))
+	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nhost = local\npath = "+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
