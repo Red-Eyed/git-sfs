@@ -21,7 +21,15 @@ Use a local or mounted directory:
 ```toml
 [remotes.default]
 type = "filesystem"
-url = "/mnt/datasets/project"
+path = "/mnt/datasets/project"
+```
+
+Windows drive-letter paths are filesystem paths:
+
+```toml
+[remotes.default]
+type = "filesystem"
+path = "D:/datasets/project"
 ```
 
 Good for:
@@ -38,7 +46,26 @@ Use an rsync-style destination:
 ```toml
 [remotes.default]
 type = "rsync"
-url = "user@host:/mnt/datasets/project"
+host = "user@host"
+path = "/mnt/datasets/project"
+```
+
+Windows paths on an rsync target keep the drive letter after the host:
+
+```toml
+[remotes.default]
+type = "rsync"
+host = "user@host"
+path = "D:/datasets/project"
+```
+
+To use a non-default SSH port without relying on SSH config:
+
+```toml
+[remotes.default]
+type = "rsync"
+host = "user@192.0.2.10:2222"
+path = "D:/datasets/project"
 ```
 
 Good for:
@@ -54,7 +81,17 @@ Use SSH command behavior with the same remote path style:
 ```toml
 [remotes.default]
 type = "ssh"
-url = "user@host:/mnt/datasets/project"
+host = "storage"
+path = "/mnt/datasets/project"
+```
+
+Windows paths on an SSH target use the same host/path split:
+
+```toml
+[remotes.default]
+type = "ssh"
+host = "user@host:2222"
+path = "D:/datasets/project"
 ```
 
 The current implementation delegates file transfer behavior through the command
@@ -67,7 +104,17 @@ Use any remote configured with the installed `rclone` CLI:
 ```toml
 [remotes.default]
 type = "rclone"
-url = "remote-name:datasets/project"
+host = "remote-name"
+path = "datasets/project"
+```
+
+Windows paths inside an rclone remote are passed through unchanged:
+
+```toml
+[remotes.default]
+type = "rclone"
+host = "remote-name"
+path = "D:/datasets/project"
 ```
 
 Rules for rclone support:

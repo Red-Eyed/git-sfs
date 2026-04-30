@@ -133,7 +133,8 @@ version = 1
 
 [remotes.default]
 type = "rsync"
-url = "user@host:/mnt/datasets/project"
+host = "user@host"
+path = "/mnt/datasets/project"
 
 [settings]
 algorithm = "sha256"
@@ -225,7 +226,8 @@ version = 1
 
 [remotes.default]
 type = "rsync"
-url = "user@host:/mnt/datasets/project"
+host = "user@host"
+path = "/mnt/datasets/project"
 
 [settings]
 algorithm = "sha256"

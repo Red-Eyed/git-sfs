@@ -13,6 +13,9 @@ func TestNewRemote(t *testing.T) {
 		{Type: "rsync", URL: t.TempDir()},
 		{Type: "ssh", URL: t.TempDir()},
 		{Type: "rclone", URL: "remote:path"},
+		{Type: "rsync", Host: "host", Path: "/data"},
+		{Type: "ssh", Host: "host:2222", Path: "D:/data"},
+		{Type: "rclone", Host: "remote", Path: "D:/data"},
 	}
 	for _, tc := range cases {
 		if _, err := New(tc); err != nil {

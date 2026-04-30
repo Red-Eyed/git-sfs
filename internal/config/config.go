@@ -19,6 +19,8 @@ type Config struct {
 type RemoteConfig struct {
 	Type string
 	URL  string
+	Host string
+	Path string
 }
 
 type Settings struct {
@@ -33,7 +35,7 @@ func Default() Config {
 	return Config{
 		Version: Version,
 		Remotes: map[string]RemoteConfig{
-			"default": {Type: "rsync", URL: "user@host:/mnt/datasets/project"},
+			"default": {Type: "rsync", Host: "user@host", Path: "/mnt/datasets/project"},
 		},
 		Settings: Settings{Algorithm: "sha256"},
 	}
@@ -54,22 +56,26 @@ version = 1
 # The default remote is used by git-sfs push and git-sfs pull when no remote is named.
 [remotes.default]
 # Supported today: rsync, ssh, rclone, filesystem.
-# Use rsync for a normal host:path destination.
+# Use rsync for a normal SSH destination. The host can be an SSH config alias,
+# user@host, or user@host:port.
 type = "rsync"
-url = "user@host:/mnt/datasets/project"
+host = "user@host"
+path = "/mnt/datasets/project"
 
 # Examples you can copy by removing the leading # characters.
 # [remotes.backup]
 # type = "ssh"
-# url = "user@host:/mnt/datasets/project"
+# host = "storage"
+# path = "/mnt/datasets/project"
 #
 # [remotes.local]
 # type = "filesystem"
-# url = "/mnt/datasets/project"
+# path = "/mnt/datasets/project"
 #
 # [remotes.cloud]
 # type = "rclone"
-# url = "remote-name:datasets/project"
+# host = "remote-name"
+# path = "datasets/project"
 
 [settings]
 # Only sha256 is supported in v1.
@@ -144,6 +150,10 @@ func Load(path string) (Config, error) {
 				rc.Type = val
 			case "url":
 				rc.URL = val
+			case "host":
+				rc.Host = val
+			case "path":
+				rc.Path = val
 			default:
 				return Config{}, fmt.Errorf("unknown remote field %q", key)
 			}
@@ -163,8 +173,11 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("unsupported hash algorithm %q", cfg.Settings.Algorithm)
 	}
 	for name, rc := range cfg.Remotes {
-		if rc.Type == "" || rc.URL == "" {
-			return Config{}, fmt.Errorf("remote %q requires type and url", name)
+		if rc.Type == "" {
+			return Config{}, fmt.Errorf("remote %q requires type", name)
+		}
+		if rc.URL == "" && rc.Path == "" {
+			return Config{}, fmt.Errorf("remote %q requires url or path", name)
 		}
 	}
 	return cfg, nil

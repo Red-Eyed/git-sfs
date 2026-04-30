@@ -193,7 +193,7 @@ Useful for local testing or shared disks:
 ```toml
 [remotes.default]
 type = "filesystem"
-url = "/mnt/datasets/project"
+path = "/mnt/datasets/project"
 ```
 
 Then:
@@ -208,7 +208,8 @@ git-sfs pull
 ```toml
 [remotes.default]
 type = "rsync"
-url = "user@host:/mnt/datasets/project"
+host = "user@host"
+path = "/mnt/datasets/project"
 ```
 
 Then:
@@ -223,7 +224,8 @@ git-sfs pull
 ```toml
 [remotes.default]
 type = "ssh"
-url = "user@host:/mnt/datasets/project"
+host = "storage"
+path = "/mnt/datasets/project"
 ```
 
 Then:
@@ -241,7 +243,8 @@ remote name in `.git-sfs/config.toml`:
 ```toml
 [remotes.default]
 type = "rclone"
-url = "remote-name:datasets/project"
+host = "remote-name"
+path = "datasets/project"
 ```
 
 `git-sfs` should call the installed `rclone` CLI and keep the same plain file

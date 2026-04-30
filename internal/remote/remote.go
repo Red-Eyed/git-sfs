@@ -18,14 +18,30 @@ type Remote interface {
 func New(cfg config.RemoteConfig) (Remote, error) {
 	switch cfg.Type {
 	case "filesystem", "fs":
-		return NewFilesystem(cfg.URL), nil
+		return NewFilesystem(remotePathConfig(cfg)), nil
 	case "rsync":
+		if cfg.Host != "" || cfg.Path != "" {
+			return NewRsyncTarget(cfg.Host, cfg.Path), nil
+		}
 		return NewRsync(cfg.URL), nil
 	case "ssh":
+		if cfg.Host != "" || cfg.Path != "" {
+			return NewSSHTarget(cfg.Host, cfg.Path), nil
+		}
 		return NewSSH(cfg.URL), nil
 	case "rclone":
+		if cfg.Host != "" || cfg.Path != "" {
+			return NewRcloneTarget(cfg.Host, cfg.Path), nil
+		}
 		return NewRclone(cfg.URL), nil
 	default:
 		return nil, fmt.Errorf("unsupported remote type %q", cfg.Type)
 	}
+}
+
+func remotePathConfig(cfg config.RemoteConfig) string {
+	if cfg.Path != "" {
+		return cfg.Path
+	}
+	return cfg.URL
 }
