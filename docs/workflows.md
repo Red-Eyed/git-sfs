@@ -44,7 +44,7 @@ git commit -m "track imported dataset"
 git-sfs push
 ```
 
-The command moves bytes into the cache and leaves symlinks under `data/dataset`. Keep the cache on the same filesystem as the source so the import can use `rename` instead of requiring another full copy.
+The command moves bytes into the cache and leaves symlinks under `data/dataset`. When the source and cache are on the same filesystem this uses `rename`; across filesystems it falls back to copy-verify-remove.
 
 If the source path or files inside the source tree are symlinks, pass `-L` to
 resolve them and import the files they point at:

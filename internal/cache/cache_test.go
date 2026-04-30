@@ -113,6 +113,31 @@ func TestMoveReusesExistingObject(t *testing.T) {
 	}
 }
 
+func TestCopyThenRemoveStagesCrossFilesystemMoveFallback(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "cache", "tmp", "dst")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyThenRemove(src, dst, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source should be removed after fallback copy: %v", err)
+	}
+	if b, err := os.ReadFile(dst); err != nil || string(b) != "payload" {
+		t.Fatalf("fallback copy wrote %q err=%v", b, err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Fatalf("fallback copy should publish read-only staging file, got %v", info.Mode().Perm())
+	}
+}
+
 func TestCacheErrors(t *testing.T) {
 	dir := t.TempDir()
 	fileRoot := filepath.Join(dir, "file")

@@ -73,7 +73,7 @@ Import an external directory recursively:
 git-sfs import /mnt/incoming/dataset data/dataset
 ```
 
-`git-sfs import` is for very large data where making a temporary repository copy is too expensive. It hashes each source file, renames it into the cache, verifies the cached bytes, and creates the destination symlink. The source and cache must be on the same filesystem; cross-filesystem moves fail clearly instead of silently copying a second copy.
+`git-sfs import` is for very large data where making a temporary repository copy is too expensive. It hashes each source file, moves it into the cache, verifies the cached bytes, and creates the destination symlink. When the source and cache are on the same filesystem this uses rename; across filesystems it falls back to copy-verify-remove.
 
 By default, source symlinks are rejected. To follow source symlinks and import
 the files they resolve to:

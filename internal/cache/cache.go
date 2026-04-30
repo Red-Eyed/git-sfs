@@ -1,9 +1,11 @@
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"git-sfs/internal/fsutil"
 	"git-sfs/internal/hash"
@@ -66,7 +68,7 @@ func (c Cache) Store(src string, h hash.Hash) error {
 	return fsutil.MakeReadOnly(dst)
 }
 
-// Move renames src into the cache, verifies it by hash, then publishes the final immutable object.
+// Move moves src into the cache, verifies it by hash, then publishes the final immutable object.
 func (c Cache) Move(src string, h hash.Hash) error {
 	dst := c.FilePath(h)
 	srcAbs, err := filepath.Abs(src)
@@ -98,7 +100,12 @@ func (c Cache) Move(src string, h hash.Hash) error {
 	tmp := filepath.Join(c.TmpDir(), "."+h.String()+".move")
 	_ = os.Remove(tmp)
 	if err := os.Rename(src, tmp); err != nil {
-		return fmt.Errorf("move into cache staging failed; source and cache must be on the same filesystem: %w", err)
+		if !isCrossDeviceRename(err) {
+			return fmt.Errorf("move into cache staging failed: %w", err)
+		}
+		if err := copyThenRemove(src, tmp, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
+			return err
+		}
 	}
 	if err := hash.VerifyFile(tmp, h); err != nil {
 		return err
@@ -108,6 +115,20 @@ func (c Cache) Move(src string, h hash.Hash) error {
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		return fmt.Errorf("publish cached file %s: %w", dst, err)
+	}
+	return nil
+}
+
+func isCrossDeviceRename(err error) bool {
+	return errors.Is(err, syscall.EXDEV)
+}
+
+func copyThenRemove(src, dst string, mode os.FileMode) error {
+	if err := fsutil.AtomicCopy(src, dst, mode); err != nil {
+		return fmt.Errorf("copy into cache staging after cross-filesystem rename failed: %w", err)
+	}
+	if err := os.Remove(src); err != nil {
+		return fmt.Errorf("remove source after cross-filesystem cache copy: %w", err)
 	}
 	return nil
 }
