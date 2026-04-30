@@ -18,16 +18,10 @@ coverage:
 build:
     env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} build ./cmd/git-sfs
 
-smoke:
-    env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash scripts/smoke.sh
-
-e2e:
-    env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash scripts/e2e.sh
-
 workflows:
     env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash test/workflows/run.sh
 
-check: fmt test build smoke e2e workflows
+check: fmt test build workflows
     git --no-pager diff --check
 
 release-snapshot:

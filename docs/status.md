@@ -26,7 +26,7 @@ Implemented:
 - CI
 - Release archives
 - Install script
-- Smoke test
+- Shell workflow suite
 
 Still needs work:
 

@@ -40,7 +40,7 @@ databases, daemons, custom protocols, and hidden metadata.
 - Retry-safe local file writes with temp files and rename
 - Cache locking for mutating operations
 - Unit and integration tests
-- Smoke test
+- Shell workflow suite
 - GitHub CI
 - GitHub release workflow
 - Release archive build script

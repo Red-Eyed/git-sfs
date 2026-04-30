@@ -335,8 +335,8 @@ cleanup policy.
 
 ## Project Status
 
-`git-sfs` is early. The core local workflow, filesystem remote path, tests, smoke
-test, and release automation are in place. The design intentionally favors a
+`git-sfs` is early. The core local workflow, filesystem remote path, tests,
+workflow suite, and release automation are in place. The design intentionally favors a
 small, auditable implementation over a large feature surface.
 
 The goal is not to replace every large-file tool. The goal is to make the common

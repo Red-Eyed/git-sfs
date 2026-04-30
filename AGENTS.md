@@ -61,7 +61,7 @@ Keep all of these healthy:
 
 - Package unit tests under `internal/...`
 - Workflow integration tests in `internal/core/app_test.go`
-- CLI smoke test in `scripts/smoke.sh`
+- Shell workflow suite in `test/workflows/run.sh`
 - GitHub Actions CI in `.github/workflows/ci.yml`
 - GitHub release automation in `.github/workflows/release.yml`
 

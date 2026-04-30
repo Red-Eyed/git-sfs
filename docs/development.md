@@ -6,7 +6,7 @@ Use `just` for common commands:
 just --list
 just fmt
 just test
-just smoke
+just workflows
 just coverage
 just release-snapshot
 just check
@@ -43,10 +43,10 @@ Run all tests:
 just test
 ```
 
-Run smoke test:
+Run workflow suite:
 
 ```sh
-just smoke
+just workflows
 ```
 
 Run coverage:
