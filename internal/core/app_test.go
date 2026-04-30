@@ -249,6 +249,12 @@ func TestGitWorkflowWithLocalRcloneRemote(t *testing.T) {
 		if err := hash.VerifyFile(cacheTwo, h2); err != nil {
 			t.Fatal(err)
 		}
+		if err := a.Verify(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if status := runGit(clone, "status", "--short"); status != "" {
+			t.Fatalf("clone should be clean after setup/pull, got:\n%s", status)
+		}
 	})
 }
 
