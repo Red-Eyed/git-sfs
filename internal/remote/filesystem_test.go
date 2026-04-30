@@ -38,11 +38,29 @@ func TestFilesystemRemotePushPullVerifiesHashes(t *testing.T) {
 	if !has {
 		t.Fatal("remote should have pushed file")
 	}
+	remoteFile := filepath.Join(dir, "remote", "files", hash.Algorithm, h.Prefix(), h.String())
+	info, err := os.Stat(remoteFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Fatalf("remote file should be read-only, got %v", info.Mode().Perm())
+	}
 	dst := filepath.Join(dir, "dst")
 	if err := r.PullFile(ctx, h, dst); err != nil {
 		t.Fatal(err)
 	}
 	if err := hash.VerifyFile(dst, h); err != nil {
+		t.Fatal(err)
+	}
+	info, err = os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Fatalf("pulled file should be read-only, got %v", info.Mode().Perm())
+	}
+	if err := os.Chmod(remoteFile, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "remote", "files", hash.Algorithm, h.Prefix(), h.String()), []byte("bad"), 0o644); err != nil {

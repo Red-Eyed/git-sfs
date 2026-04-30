@@ -44,6 +44,18 @@ func AtomicCopy(src, dst string, mode os.FileMode) error {
 	return os.Rename(tmpName, dst)
 }
 
+func ReadOnlyMode(mode os.FileMode) os.FileMode {
+	return mode &^ 0o222
+}
+
+func MakeReadOnly(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(path, ReadOnlyMode(info.Mode().Perm()))
+}
+
 // RelSymlink creates a symlink whose target is relative to the link location.
 func RelSymlink(target, link string) error {
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {

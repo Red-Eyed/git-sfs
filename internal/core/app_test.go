@@ -154,7 +154,11 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), []byte("corrupt"), 0o644); err != nil {
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := os.Chmod(cacheFile, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(cacheFile, []byte("corrupt"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		stdout.Reset()

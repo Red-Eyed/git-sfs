@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"git-sfs/internal/fsutil"
 	"git-sfs/internal/hash"
 )
 
@@ -79,6 +80,9 @@ func (r rsyncRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) 
 	if err := sshSh(ctx, r.url, "mv \"$1\" \"$2\"", remoteLocalPath(tmp), remoteLocalPath(dst)); err != nil {
 		return fmt.Errorf("publish remote file: %w", err)
 	}
+	if err := sshSh(ctx, r.url, "chmod a-w \"$1\"", remoteLocalPath(dst)); err != nil {
+		return fmt.Errorf("protect remote file: %w", err)
+	}
 	has, err := r.HasFile(ctx, h)
 	if err != nil {
 		return err
@@ -103,7 +107,13 @@ func (r rsyncRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) 
 	if err := hash.VerifyFile(tmp, h); err != nil {
 		return err
 	}
-	return os.Rename(tmp, dstPath)
+	if err := os.Chmod(tmp, fsutil.ReadOnlyMode(0o644)); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dstPath); err != nil {
+		return err
+	}
+	return fsutil.MakeReadOnly(dstPath)
 }
 
 func (r sshRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {

@@ -121,6 +121,9 @@ func (a App) Setup(ctx context.Context) error {
 			return err
 		}
 		if c.HasValid(h) {
+			if err := c.Protect(h); err != nil {
+				return err
+			}
 			if err := materialize.Link(repo, c, h); err != nil {
 				return err
 			}
@@ -177,6 +180,9 @@ func (a App) Add(ctx context.Context, paths []string) error {
 		}
 		if err := c.Store(file, h); err != nil {
 			return fmt.Errorf("store %s: %w", file, err)
+		}
+		if err := c.Protect(h); err != nil {
+			return err
 		}
 		if err := materialize.Link(repo, c, h); err != nil {
 			return err
@@ -249,6 +255,9 @@ func (a App) Materialize(ctx context.Context, path string) error {
 	for _, l := range links {
 		h, _, err := sfspath.ParseGitSymlink(repo, l)
 		if err != nil {
+			return err
+		}
+		if err := c.Protect(h); err != nil {
 			return err
 		}
 		if err := materialize.Link(repo, c, h); err != nil {
@@ -358,6 +367,9 @@ func (a App) Pull(ctx context.Context, path string) error {
 			if err := r.PullFile(ctx, h, dst); err != nil {
 				return fmt.Errorf("pull %s: %w", h, err)
 			}
+		}
+		if err := c.Protect(h); err != nil {
+			return err
 		}
 		if err := materialize.Link(repo, c, h); err != nil {
 			return err

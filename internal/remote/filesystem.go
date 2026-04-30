@@ -40,12 +40,15 @@ func (r filesystemRemote) PushFile(ctx context.Context, h hash.Hash, srcPath str
 	}
 	dst := r.path(h)
 	if hash.VerifyFile(dst, h) == nil {
-		return nil
+		return fsutil.MakeReadOnly(dst)
 	}
-	if err := fsutil.AtomicCopy(srcPath, dst, 0o644); err != nil {
+	if err := fsutil.AtomicCopy(srcPath, dst, fsutil.ReadOnlyMode(0o644)); err != nil {
 		return err
 	}
-	return hash.VerifyFile(dst, h)
+	if err := hash.VerifyFile(dst, h); err != nil {
+		return err
+	}
+	return fsutil.MakeReadOnly(dst)
 }
 
 // PullFile verifies the source before copying and verifies the destination
@@ -62,8 +65,11 @@ func (r filesystemRemote) PullFile(ctx context.Context, h hash.Hash, dstPath str
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}
-	if err := fsutil.AtomicCopy(r.path(h), dstPath, 0o644); err != nil {
+	if err := fsutil.AtomicCopy(r.path(h), dstPath, fsutil.ReadOnlyMode(0o644)); err != nil {
 		return err
 	}
-	return hash.VerifyFile(dstPath, h)
+	if err := hash.VerifyFile(dstPath, h); err != nil {
+		return err
+	}
+	return fsutil.MakeReadOnly(dstPath)
 }

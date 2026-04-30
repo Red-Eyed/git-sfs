@@ -31,6 +31,16 @@ func TestStoreUsesContentAddressedPathAndDetectsCorruption(t *testing.T) {
 	if !c.HasValid(h) {
 		t.Fatal("stored file should be valid")
 	}
+	info, err := os.Stat(c.FilePath(h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Fatalf("stored file should be read-only, got %v", info.Mode().Perm())
+	}
+	if err := os.Chmod(c.FilePath(h), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(c.FilePath(h), []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}

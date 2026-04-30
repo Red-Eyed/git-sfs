@@ -278,6 +278,23 @@ messages, so CI can match clear strings such as `missing cache files: 0`.
 
 Safety details: [docs/safety.md](docs/safety.md)
 
+## Limitations
+
+`git-sfs` treats cached hashed files as immutable. After bytes are accepted into
+the cache, the stored file is marked read-only by removing write bits. This helps
+catch accidental in-place edits through Git symlinks before they corrupt the
+content-addressed cache.
+
+A tracked large file is a symlink into `.git-sfs/cache`. If a program forcibly
+changes the cached file behind that symlink, the path hash no longer matches the
+bytes and `git-sfs verify` reports corruption. To update a large file, replace
+the symlink with a new regular file, run `git-sfs add <path>`, commit the new
+symlink, and push the new cached bytes.
+
+Shared caches are supported, but `git-sfs gc --files` only knows about the
+current repository. Avoid cache GC on shared caches unless you have a cross-repo
+cleanup policy.
+
 ## Project Status
 
 `git-sfs` is early. The core local workflow, filesystem remote path, tests, smoke

@@ -17,7 +17,7 @@ Core model:
 
 - Git tracks `.git-sfs/config.toml` and relative symlinks.
 - Git symlinks point into `.git-sfs/cache/files/sha256/<prefix>/<hash>`.
-- ``.git-sfs/cache` is a symlink to the cache root.
+- `.git-sfs/cache` is a symlink to the cache root.
 - Cache files live at `<cache>/files/sha256/<prefix>/<hash>`.
 - Cache path is local state and must never be committed.
 
@@ -36,6 +36,8 @@ just check
 ```
 
 If `just` is unavailable, run the commands in `Justfile` manually.
+
+Common user request: when asked to commit, push, and update version after changes, stage the finished changes, commit them with a focused message, create the next sequential version tag unless a specific version is named, push `main`, and push the new tag.
 
 ## Style
 
