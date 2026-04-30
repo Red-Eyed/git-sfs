@@ -146,10 +146,10 @@ GIT_SFS_CACHE="$PWD/.git-sfs-cache" git-sfs verify
 
 ```sh
 git-sfs add data/
-git-sfs status
 git add data/
 git commit -m "update dataset"
 git-sfs push
+git-sfs verify data/
 ```
 
 ## Review What Git Will Track

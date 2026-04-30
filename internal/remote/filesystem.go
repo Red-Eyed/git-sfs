@@ -24,8 +24,19 @@ func (r filesystemRemote) path(h hash.Hash) string {
 }
 
 func (r filesystemRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
-	ok, err := r.CheckFile(ctx, h)
-	return ok, err
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+	_, err := os.Stat(r.path(h))
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (r filesystemRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) {

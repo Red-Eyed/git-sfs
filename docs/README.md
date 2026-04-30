@@ -13,4 +13,3 @@ Start here:
 - [Remotes](remotes.md)
 - [Safety](safety.md)
 - [Development](development.md)
-- [Project status](status.md)

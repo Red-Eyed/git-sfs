@@ -35,7 +35,7 @@ Use `git-sfs` when you want:
 - Large files addressed by SHA-256 content hash
 - A cache path that is local to each machine and never committed
 - A remote layout you can inspect with `rclone` or `find`
-- CI checks that fail when referenced files are missing or corrupt
+- CI checks that fail when referenced files are missing, with optional integrity verification
 - Another machine to clone the repo, run `git-sfs setup`, run `git-sfs pull`, and work
 
 `git-sfs` is intentionally not a platform. It is a thin layer over Git symlinks,
@@ -210,13 +210,17 @@ git-sfs setup
 git-sfs add <path>
 git-sfs import <src> <dst>
 git-sfs import -L <src> <dst>
-git-sfs status
 git-sfs verify
+git-sfs verify [path]
 git-sfs push [remote]
 git-sfs pull [path]
 git-sfs gc --dry-run
 git-sfs gc --files
 ```
+
+`git-sfs verify` checks local cache presence and remote availability by default
+so merged symlinks remain pullable on other machines. Add `--with-integrity` to
+recalculate hashes and catch corruption too.
 
 Detailed command reference: [docs/commands.md](docs/commands.md)
 
@@ -284,7 +288,6 @@ remote subprocess commands while debugging rclone behavior.
 - [Remotes](docs/remotes.md)
 - [Safety](docs/safety.md)
 - [Development](docs/development.md)
-- [Project status](docs/status.md)
 
 ## Safety
 
@@ -295,7 +298,7 @@ remote subprocess commands while debugging rclone behavior.
 - Corrupt cache files are detected
 - Local cache paths are never written to Git-tracked config
 - `.git-sfs/` is untracked and gitignored
-- Missing and broken symlinks are reported by `git-sfs status` and `git-sfs verify`
+- Missing and broken symlinks are reported by `git-sfs verify`
 
 For CI, run:
 
@@ -306,8 +309,8 @@ git-sfs verify
 It exits non-zero if referenced files are missing, corrupt, or incorrectly
 bound to the local cache.
 
-`git-sfs status` and `git-sfs verify` print stable category counts before detailed
-messages, so CI can match clear strings such as `missing cache files: 0`.
+`git-sfs verify` prints stable category counts before detailed messages, so CI
+can match clear strings such as `missing cache files: 0`.
 
 Safety details: [docs/safety.md](docs/safety.md)
 

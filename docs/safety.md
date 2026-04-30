@@ -37,7 +37,6 @@ Existing valid remote files are skipped.
 Check for broken or stale symlinks:
 
 ```sh
-git-sfs status
 git-sfs verify
 ```
 
@@ -45,7 +44,7 @@ Repair local cache binding with `git-sfs setup`.
 
 ## Cache Corruption
 
-If a cached file is corrupt, `git-sfs verify` reports it.
+If a cached file is corrupt, `git-sfs verify --with-integrity` reports it.
 
 If the remote still has a valid copy, remove the corrupt cached file and pull:
 

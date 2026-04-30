@@ -55,8 +55,21 @@ func (r rcloneRemote) remotePath(h hash.Hash) string {
 }
 
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
-	ok, err := r.CheckFile(ctx, h)
-	return ok, err
+	tmp, err := os.CreateTemp("", "git-sfs-rclone-has-*")
+	if err != nil {
+		return false, err
+	}
+	name := tmp.Name()
+	tmp.Close()
+	os.Remove(name)
+	defer os.Remove(name)
+	if err := r.run(ctx, "copyto", r.remotePath(h), name); err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) {
@@ -129,28 +142,38 @@ func (r rcloneRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string)
 }
 
 func (r rcloneRemote) run(ctx context.Context, args ...string) error {
+	_, err := r.runOutput(ctx, args...)
+	return err
+}
+
+func (r rcloneRemote) runOutput(ctx context.Context, args ...string) (string, error) {
 	if r.config != "" {
 		args = append([]string{"--config", r.config}, args...)
 	}
-	return run(ctx, r.debug, "rclone", args...)
+	return runOutput(ctx, r.debug, "rclone", args...)
 }
 
 func run(ctx context.Context, debug io.Writer, name string, args ...string) error {
+	_, err := runOutput(ctx, debug, name, args...)
+	return err
+}
+
+func runOutput(ctx context.Context, debug io.Writer, name string, args ...string) (string, error) {
 	if debug != nil {
 		fmt.Fprintln(debug, "run:", shellQuote(append([]string{name}, args...)))
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		return nil
+		return string(out), nil
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return "", ctx.Err()
 	}
 	if len(out) == 0 {
-		return err
+		return "", err
 	}
-	return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 }
 
 func shellQuote(args []string) string {

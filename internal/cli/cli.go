@@ -81,24 +81,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("%s requires source and destination", cmd)
 		}
 		return app.ImportWithOptions(ctx, cmdArgs[0], cmdArgs[1], core.ImportOptions{FollowSymlinks: followSymlinks})
-	case "status":
-		sfs := flag.NewFlagSet("status", flag.ContinueOnError)
-		sfs.SetOutput(stderr)
-		var remote bool
-		sfs.BoolVar(&remote, "remote", false, "check remote files")
-		if err := sfs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		return app.Status(ctx, remote)
 	case "verify":
 		vfs := flag.NewFlagSet("verify", flag.ContinueOnError)
 		vfs.SetOutput(stderr)
 		var remote bool
-		vfs.BoolVar(&remote, "remote", false, "check remote files")
+		var withIntegrity bool
+		vfs.BoolVar(&remote, "remote", true, "check remote files")
+		vfs.BoolVar(&withIntegrity, "with-integrity", false, "recalculate hashes for local cache and remote files")
 		if err := vfs.Parse(cmdArgs); err != nil {
 			return err
 		}
-		return app.Verify(ctx, remote)
+		path := "."
+		if len(vfs.Args()) > 0 {
+			path = vfs.Args()[0]
+		}
+		return app.Verify(ctx, remote, withIntegrity, path)
 	case "push":
 		remote := ""
 		if len(cmdArgs) > 0 {
@@ -145,7 +142,6 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  setup")
 	fmt.Fprintln(w, "  add")
 	fmt.Fprintln(w, "  import")
-	fmt.Fprintln(w, "  status")
 	fmt.Fprintln(w, "  verify")
 	fmt.Fprintln(w, "  push")
 	fmt.Fprintln(w, "  pull")

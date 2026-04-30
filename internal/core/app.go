@@ -302,34 +302,15 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 	return nil
 }
 
-// Status reports user-actionable problems without mutating repository state.
-func (a App) Status(ctx context.Context, checkRemote bool) (err error) {
-	a.debugf("status: start")
-	defer a.debugDone("status", &err)
-	repo, c, cfg, err := a.open()
-	if err != nil {
-		return err
-	}
-	report, err := scan(ctx, repo, c, cfg, checkRemote)
-	if err != nil {
-		return err
-	}
-	printReport(a.Stdout, report)
-	if len(report.Issues) > 0 {
-		return fmt.Errorf("status found %d issue(s)", len(report.Issues))
-	}
-	return nil
-}
-
 // Verify is the CI-oriented strict check; any reported problem is a failure.
-func (a App) Verify(ctx context.Context, checkRemote bool) (err error) {
+func (a App) Verify(ctx context.Context, checkRemote, withIntegrity bool, path string) (err error) {
 	a.debugf("verify: start")
 	defer a.debugDone("verify", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
-	report, err := scan(ctx, repo, c, cfg, checkRemote)
+	report, err := scan(ctx, repo, path, c, cfg, checkRemote, withIntegrity)
 	if err != nil {
 		return err
 	}
@@ -623,10 +604,11 @@ func (a App) open() (string, cache.Cache, config.Config, error) {
 	return repo, c, cfg, nil
 }
 
-func scan(ctx context.Context, repo string, c cache.Cache, cfg config.Config, checkRemote bool) (statusReport, error) {
+func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Config, checkRemote, withIntegrity bool) (statusReport, error) {
 	var report statusReport
 	defaultRemote, hasDefault := cfg.Remotes["default"]
-	err := filepath.WalkDir(repo, func(path string, d os.DirEntry, err error) error {
+	root := absFromRepo(repo, path)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -668,14 +650,16 @@ func scan(ctx context.Context, repo string, c cache.Cache, cfg config.Config, ch
 			})
 			return nil
 		}
-		if err := hash.VerifyFile(cacheFile, h); err != nil {
-			report.Issues = append(report.Issues, issue{
-				Kind:   "corrupt cache file",
-				Path:   rel(repo, path),
-				Hash:   h.String(),
-				Detail: err.Error(),
-			})
-			return nil
+		if withIntegrity {
+			if err := hash.VerifyFile(cacheFile, h); err != nil {
+				report.Issues = append(report.Issues, issue{
+					Kind:   "corrupt cache file",
+					Path:   rel(repo, path),
+					Hash:   h.String(),
+					Detail: err.Error(),
+				})
+				return nil
+			}
 		}
 		if checkRemote {
 			if !hasDefault {
@@ -693,9 +677,14 @@ func scan(ctx context.Context, repo string, c cache.Cache, cfg config.Config, ch
 				})
 				return nil
 			}
-			ok, err := r.CheckFile(ctx, h)
+			var ok bool
+			if withIntegrity {
+				ok, err = r.CheckFile(ctx, h)
+			} else {
+				ok, err = r.HasFile(ctx, h)
+			}
 			if err != nil {
-				if errors.Is(err, errs.ErrCorruptRemoteFile) {
+				if withIntegrity && errors.Is(err, errs.ErrCorruptRemoteFile) {
 					report.Issues = append(report.Issues, issue{
 						Kind:   "corrupt remote file",
 						Path:   rel(repo, path),

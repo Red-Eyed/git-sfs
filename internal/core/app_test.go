@@ -14,7 +14,7 @@ import (
 	"git-sfs/internal/sfspath"
 )
 
-func TestAddVerifyAndStatus(t *testing.T) {
+func TestAddAndVerify(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -28,10 +28,7 @@ func TestAddVerifyAndStatus(t *testing.T) {
 		if err := app.Add(context.Background(), []string{"data"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := app.Verify(context.Background(), false); err != nil {
-			t.Fatal(err)
-		}
-		if err := app.Status(context.Background(), false); err != nil {
+		if err := app.Verify(context.Background(), false, false, "."); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -162,18 +159,16 @@ if [ "${1:-}" = "--config" ]; then
   shift 2
 fi
 cmd="$1"
-src="$2"
-dst="$3"
 map_path() {
   case "$1" in
     testremote:*) printf '%s/%s\n' "$RCLONE_TEST_ROOT" "${1#testremote:}" ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
-src="$(map_path "$src")"
-dst="$(map_path "$dst")"
 case "$cmd" in
   copyto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
     case "$src" in
       "$RCLONE_TEST_ROOT"/*)
       mkdir -p "$(dirname "$dst")"
@@ -188,7 +183,17 @@ case "$cmd" in
         ;;
     esac
     ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi
+    ;;
   moveto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
     mkdir -p "$(dirname "$dst")"
     mv "$src" "$dst"
     ;;
@@ -482,7 +487,7 @@ func TestImportResolvesSourceDirectorySymlink(t *testing.T) {
 	}
 }
 
-func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
+func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -491,12 +496,12 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	inDir(t, repo, func() {
-		if err := app(stdout).Status(context.Background(), true); err == nil {
-			t.Fatal("status should fail for unconverted file")
+		if err := app(stdout).Verify(context.Background(), true, false, "."); err == nil {
+			t.Fatal("verify should fail for unconverted file")
 		}
 		if !strings.Contains(stdout.String(), "unconverted files: 1") ||
 			!strings.Contains(stdout.String(), "unconverted file: data/blob") {
-			t.Fatalf("status did not report unconverted file: %q", stdout.String())
+			t.Fatalf("verify did not report unconverted file: %q", stdout.String())
 		}
 		stdout.Reset()
 		if err := app(stdout).Add(context.Background(), []string{"data/blob"}); err != nil {
@@ -514,7 +519,7 @@ func TestStatusReportsUnconvertedAndCorruptCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		if err := app(stdout).Verify(context.Background(), false); err == nil {
+		if err := app(stdout).Verify(context.Background(), false, true, "."); err == nil {
 			t.Fatal("verify should fail for corrupt cache file")
 		}
 		if !strings.Contains(stdout.String(), "corrupt cache files: 1") ||
@@ -642,7 +647,7 @@ func TestInitSetupAndGitignore(t *testing.T) {
 	})
 }
 
-func TestStatusReportsInvalidConfig(t *testing.T) {
+func TestVerifyReportsInvalidConfig(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
@@ -654,16 +659,16 @@ func TestStatusReportsInvalidConfig(t *testing.T) {
 		}
 		mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte("version = 1\n\n[settings]\nalgorithm = sha256\n"))
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Status(context.Background(), true); err == nil {
-			t.Fatal("expected invalid config status")
+		if err := app(stdout).Verify(context.Background(), true, false, "."); err == nil {
+			t.Fatal("expected invalid config verify")
 		}
 		if !strings.Contains(stdout.String(), "missing default remote") {
-			t.Fatalf("missing status output: %q", stdout.String())
+			t.Fatalf("missing verify output: %q", stdout.String())
 		}
 	})
 }
 
-func TestStatusReportsRemoteProblems(t *testing.T) {
+func TestVerifyReportsRemoteProblems(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
@@ -681,11 +686,11 @@ func TestStatusReportsRemoteProblems(t *testing.T) {
 		}
 		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Status(context.Background(), true); err == nil {
-			t.Fatal("expected remote check to pass when remote file is missing")
+		if err := app(stdout).Verify(context.Background(), true, false, "."); err == nil {
+			t.Fatal("expected remote verify to fail when remote file is missing")
 		}
 		if !strings.Contains(stdout.String(), "missing remote files: 1") {
-			t.Fatalf("missing remote status output: %q", stdout.String())
+			t.Fatalf("missing remote verify output: %q", stdout.String())
 		}
 		if err := a.Push(context.Background(), ""); err != nil {
 			t.Fatal(err)
@@ -697,11 +702,104 @@ func TestStatusReportsRemoteProblems(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		if err := app(stdout).Verify(context.Background(), true); err == nil {
+		if err := app(stdout).Verify(context.Background(), true, true, "."); err == nil {
 			t.Fatal("expected remote verify to fail")
 		}
 		if !strings.Contains(stdout.String(), "corrupt remote files: 1") {
 			t.Fatalf("missing corrupt remote output: %q", stdout.String())
+		}
+	})
+}
+
+func TestVerifyPathScopesChecksToSelectedSubtree(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeDataset(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+
+		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "nested", "two.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String())); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(remoteDir, "files", hash.Algorithm, h2.Prefix(), h2.String())); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := a.Verify(context.Background(), true, false, "data/one.bin"); err != nil {
+			t.Fatalf("verify should ignore unrelated subtree problems: %v", err)
+		}
+		stdout := &bytes.Buffer{}
+		if err := app(stdout).Verify(context.Background(), true, false, "data/nested"); err == nil {
+			t.Fatal("verify should fail for selected subtree with missing cache file")
+		}
+		if !strings.Contains(stdout.String(), "missing cache files: 1") ||
+			!strings.Contains(stdout.String(), "missing cache file: data/nested/two.bin") {
+			t.Fatalf("verify did not scope to nested subtree: %q", stdout.String())
+		}
+		if strings.Contains(stdout.String(), "data/one.bin") {
+			t.Fatalf("verify reported unselected path: %q", stdout.String())
+		}
+	})
+}
+
+func TestVerifyWithoutIntegritySkipsCorruptionChecks(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeDataset(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := os.Chmod(cacheFile, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(cacheFile, []byte("corrupt-cache"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(remoteFile, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(remoteFile, []byte("corrupt-remote"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Verify(context.Background(), true, false, "."); err != nil {
+			t.Fatalf("presence-only verify should ignore corruption: %v", err)
+		}
+		stdout := &bytes.Buffer{}
+		if err := app(stdout).Verify(context.Background(), true, true, "."); err == nil {
+			t.Fatal("integrity verify should fail for corrupt files")
+		}
+		if !strings.Contains(stdout.String(), "corrupt cache files: 1") {
+			t.Fatalf("integrity verify did not report corrupt cache: %q", stdout.String())
 		}
 	})
 }

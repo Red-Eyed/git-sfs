@@ -50,22 +50,30 @@ if [ "${1:-}" = "--config" ]; then
   shift 2
 fi
 cmd="$1"
-src="$2"
-dst="$3"
 map_path() {
   case "$1" in
     testremote:*) printf '%s/%s\n' "$RCLONE_TEST_ROOT" "${1#testremote:}" ;;
     *) printf '%s\n' "$1" ;;
   esac
 }
-src="$(map_path "$src")"
-dst="$(map_path "$dst")"
 case "$cmd" in
   copyto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
     mkdir -p "$(dirname "$dst")"
     cp "$src" "$dst"
     ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi
+    ;;
   moveto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
     mkdir -p "$(dirname "$dst")"
     mv "$src" "$dst"
     ;;

@@ -23,7 +23,6 @@ func TestHelp(t *testing.T) {
 		"  setup",
 		"  add",
 		"  import",
-		"  status",
 		"  verify",
 		"  push",
 		"  pull",
@@ -96,9 +95,9 @@ func TestCommandDispatch(t *testing.T) {
 		for _, args := range [][]string{
 			{"setup"},
 			{"add", "data/blob"},
-			{"status"},
-			{"verify"},
 			{"push"},
+			{"verify"},
+			{"verify", "data/blob"},
 			{"pull", "data/blob"},
 			{"gc", "--dry-run"},
 		} {

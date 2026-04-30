@@ -3,8 +3,6 @@
 seed_filesystem_repo() {
   local repo="$1"
   local remote="$2"
-  local status_out
-
   mkdir -p "$remote"
   init_repo "$repo" "$3"
   write_filesystem_config "$repo" "$remote"
@@ -17,8 +15,6 @@ seed_filesystem_repo() {
     mkdir -p data
     printf "train shard\n" > data/train-000.tar.zst
     git_sfs add data/train-000.tar.zst >/dev/null
-    status_out="$(git_sfs status)"
-    assert_contains "$status_out" "tracked symlinks: 1" "single-file status"
     git add data/train-000.tar.zst
     git commit -qm "track train shard"
     git_sfs push >/dev/null
@@ -31,8 +27,6 @@ seed_filesystem_repo() {
     git commit -qm "track validation shards"
     git_sfs push >/dev/null
 
-    status_out="$(git_sfs status)"
-    assert_contains "$status_out" "tracked symlinks: 3" "directory status"
     git diff --cached --stat >/dev/null
   )
 }
@@ -221,6 +215,21 @@ scenario_filesystem_workflows() {
   # the remote without disturbing the rest of the cache.
   restore_selected_file "$repo_b" "$shared_cache" "$hash_train" "data/train-000.tar.zst"
 
+  # Default verify is presence-only: if the files still exist in cache and on
+  # remote, it should pass without recalculating hashes. Integrity mode should
+  # then catch the same corruption explicitly.
+  chmod u+w "$(cache_file_for "$shared_cache" "$hash_train")" "$remote/files/sha256/${hash_train:0:2}/$hash_train"
+  printf "corrupt cache bytes\n" > "$(cache_file_for "$shared_cache" "$hash_train")"
+  printf "corrupt remote bytes\n" > "$remote/files/sha256/${hash_train:0:2}/$hash_train"
+  (
+    cd "$repo_b"
+    git_sfs verify data/train-000.tar.zst >/dev/null
+    if integrity_out="$(git_sfs verify --with-integrity data/train-000.tar.zst 2>&1)"; then
+      fail "verify --with-integrity should fail for corrupt cache and remote files"
+    fi
+    assert_contains "$integrity_out" "corrupt cache files: 1" "integrity verify cache corruption"
+  )
+
   # GC only reasons about Git-visible references, so an unreferenced cache file
   # created by hand should be reported and then deleted.
   assert_gc_removes_orphan "$repo_b" "$shared_cache"
@@ -320,7 +329,7 @@ EOF
     git_sfs --cache "$clone_cache" setup >/dev/null
     git_sfs pull data/ >/dev/null
     git_sfs verify >/dev/null
-    git_sfs status --remote >/dev/null
+    git_sfs verify >/dev/null
   )
   assert_eq "$(cat "$clone/data/one.bin")" "one" "rclone roundtrip file one"
   assert_eq "$(cat "$clone/data/nested/two.bin")" "two" "rclone roundtrip file two"

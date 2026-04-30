@@ -94,52 +94,32 @@ the files they resolve to:
 git-sfs import -L /mnt/incoming/dataset data/dataset
 ```
 
-## git-sfs status
-
-Report repository state:
-
-```sh
-git-sfs status
-```
-
-Reports problems such as:
-
-- unconverted regular files
-- broken Git symlinks
-- missing cached files
-- corrupt cached files
-- invalid config
-
-Output starts with stable category counts:
-
-```text
-tracked symlinks: 2
-unconverted files: 0
-broken git symlinks: 0
-missing cache files: 0
-corrupt cache files: 0
-invalid config: 0
-```
-
-When issues exist, a `details:` section follows:
-
-```text
-details:
-missing cache file: data/train-000.tar.zst: <hash>
-```
-
 ## git-sfs verify
 
 Strict CI-oriented verification:
 
 ```sh
 git-sfs verify
+git-sfs verify data/train-000.tar.zst
+git-sfs verify data/validation/
+git-sfs verify --with-integrity data/validation/
 ```
 
 Returns non-zero on failure.
 
-On failure, `git-sfs verify` prints the same category-count report as
-`git-sfs status`.
+By default, `git-sfs verify` checks that tracked cache entries are present
+locally and that tracked hashes are present on the configured default remote, so
+another machine can pull and materialize the same symlinks.
+
+`--with-integrity` additionally recalculates hashes for local cache files and
+remote files. This is slower, but it catches corruption instead of checking only
+presence.
+
+On failure, `git-sfs verify` prints stable category counts followed by a
+`details:` section for each problem.
+
+When a path is provided, only files and symlinks below that path are checked.
+This keeps verification practical for partial-download workflows.
 
 ## git-sfs push
 
