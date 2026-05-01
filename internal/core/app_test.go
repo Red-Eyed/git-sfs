@@ -878,7 +878,6 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	})
 }
 
-
 func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
