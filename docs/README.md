@@ -13,3 +13,4 @@ Start here:
 - [Remotes](remotes.md)
 - [Safety](safety.md)
 - [Development](development.md)
+- [Architecture](architecture.md)
