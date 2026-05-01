@@ -159,10 +159,7 @@ func (a App) Setup(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	hashes, err := uniqueHashesFromLinks(repo, links)
-	if err != nil {
-		return err
-	}
+	hashes := uniqueHashesFromTracked(links)
 	bar := progress.New(a.Stderr, "setup", len(hashes), a.Quiet)
 	defer bar.Close()
 	for _, h := range hashes {
@@ -344,10 +341,7 @@ func (a App) Materialize(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	hashes, err := uniqueHashesFromLinks(repo, links)
-	if err != nil {
-		return err
-	}
+	hashes := uniqueHashesFromTracked(links)
 	bar := progress.New(a.Stderr, "pull", len(hashes), a.Quiet)
 	defer bar.Close()
 	for _, h := range hashes {
@@ -372,11 +366,7 @@ func (a App) Dematerialize(ctx context.Context, path string) error {
 		return err
 	}
 	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return err
-		}
-		if err := materialize.Unlink(repo, h); err != nil {
+		if err := materialize.Unlink(repo, l.Hash); err != nil {
 			return err
 		}
 	}
@@ -404,10 +394,7 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	if err != nil {
 		return err
 	}
-	hashes, err := uniquePushHashes(repo, links)
-	if err != nil {
-		return err
-	}
+	hashes := uniqueHashesFromTracked(links)
 	bar := progress.New(a.Stderr, "push", len(hashes), a.Quiet)
 	defer bar.Close()
 	workers := a.jobs(cfg, len(hashes))
@@ -433,7 +420,7 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 					})
 					return
 				}
-				has, err := r.CheckFile(ctx, h)
+				has, err := r.HasFile(ctx, h)
 				if err != nil {
 					once.Do(func() {
 						errCh <- err
@@ -478,21 +465,17 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	}
 }
 
-func uniquePushHashes(repo string, links []string) ([]hash.Hash, error) {
+func uniqueHashesFromTracked(links []trackedLink) []hash.Hash {
 	seen := map[hash.Hash]bool{}
 	hashes := make([]hash.Hash, 0, len(links))
 	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return nil, err
-		}
-		if seen[h] {
+		if seen[l.Hash] {
 			continue
 		}
-		seen[h] = true
-		hashes = append(hashes, h)
+		seen[l.Hash] = true
+		hashes = append(hashes, l.Hash)
 	}
-	return hashes, nil
+	return hashes
 }
 
 // Pull downloads missing files for the selected symlinks.
@@ -519,10 +502,7 @@ func (a App) Pull(ctx context.Context, path string) (err error) {
 	if err != nil {
 		return err
 	}
-	hashes, err := uniqueHashesFromLinks(repo, links)
-	if err != nil {
-		return err
-	}
+	hashes := uniqueHashesFromTracked(links)
 	if err := pullMissingFiles(ctx, c, r, hashes, a.jobs(cfg, len(hashes))); err != nil {
 		return err
 	}
@@ -559,11 +539,7 @@ func (a App) GC(ctx context.Context, opts GCOptions) (err error) {
 	}
 	live := map[string]bool{}
 	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return err
-		}
-		live[h.String()] = true
+		live[l.Hash.String()] = true
 	}
 	if opts.Files {
 		root := filepath.Join(c.Root, "files", hash.Algorithm)
@@ -612,12 +588,8 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 			}
 			return nil
 		}
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			if info.Mode().IsRegular() {
+		if d.Type()&os.ModeSymlink == 0 {
+			if d.Type().IsRegular() {
 				report.Issues = append(report.Issues, issue{
 					Kind: "unconverted file",
 					Path: rel(repo, path),
@@ -759,9 +731,9 @@ func pluralKind(kind string) string {
 	}
 }
 
-func collectGitSFSSymlinks(repo, path string) ([]string, error) {
+func collectGitSFSSymlinks(repo, path string) ([]trackedLink, error) {
 	root := absFromRepo(repo, path)
-	var out []string
+	var out []trackedLink
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -772,34 +744,18 @@ func collectGitSFSSymlinks(repo, path string) ([]string, error) {
 			}
 			return nil
 		}
-		info, err := os.Lstat(path)
+		if d.Type()&os.ModeSymlink == 0 {
+			return nil
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, path)
 		if err != nil {
-			return err
+			return nil
 		}
-		if info.Mode()&os.ModeSymlink != 0 && sfspath.IsSFSSymlink(repo, path) {
-			out = append(out, path)
-		}
+		out = append(out, trackedLink{Path: path, Hash: h})
 		return nil
 	})
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, err
-}
-
-func uniqueHashesFromLinks(repo string, links []string) ([]hash.Hash, error) {
-	seen := map[hash.Hash]bool{}
-	hashes := make([]hash.Hash, 0, len(links))
-	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return nil, err
-		}
-		if seen[h] {
-			continue
-		}
-		seen[h] = true
-		hashes = append(hashes, h)
-	}
-	return hashes, nil
 }
 
 func jobsFromSettings(configured, n int) int {

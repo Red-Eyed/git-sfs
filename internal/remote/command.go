@@ -62,7 +62,7 @@ func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		return false, err
+		return false, nil
 	}
 	return parseLSJSONExists(out)
 }
@@ -91,11 +91,6 @@ func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) 
 func (r rcloneRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
 	if err := hash.VerifyFile(srcPath, h); err != nil {
 		return err
-	}
-	if has, err := r.HasFile(ctx, h); err != nil {
-		return err
-	} else if has {
-		return nil
 	}
 	dst := r.remotePath(h)
 	tmp := dst + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -130,10 +125,7 @@ func (r rcloneRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string)
 	if err := os.Chmod(tmp, fsutil.ReadOnlyMode(0o644)); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, dstPath); err != nil {
-		return err
-	}
-	return fsutil.MakeReadOnly(dstPath)
+	return os.Rename(tmp, dstPath)
 }
 
 func (r rcloneRemote) run(ctx context.Context, args ...string) error {

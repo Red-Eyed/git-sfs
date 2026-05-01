@@ -26,7 +26,8 @@ func AtomicCopy(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	defer in.Close()
-	if _, err := io.Copy(tmp, in); err != nil {
+	buf := make([]byte, 4<<20)
+	if _, err := io.CopyBuffer(tmp, in, buf); err != nil {
 		tmp.Close()
 		return err
 	}

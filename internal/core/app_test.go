@@ -1084,6 +1084,17 @@ case "$cmd" in
         ;;
     esac
     ;;
+  lsjson)
+    src="$(map_path "$2")"
+    printf 'start %s\n' "$src" >> "$RCLONE_TEST_LOG"
+    sleep 1
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi
+    printf 'end %s\n' "$src" >> "$RCLONE_TEST_LOG"
+    ;;
   moveto)
     src="$(map_path "$2")"
     dst="$(map_path "$3")"

@@ -21,7 +21,8 @@ func File(path string) (Hash, error) {
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	buf := make([]byte, 4<<20)
+	if _, err := io.CopyBuffer(h, f, buf); err != nil {
 		return "", err
 	}
 	return Hash(hex.EncodeToString(h.Sum(nil))), nil
