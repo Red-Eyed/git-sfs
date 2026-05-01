@@ -81,7 +81,29 @@ func TestCommandDispatch(t *testing.T) {
 			t.Fatal(err)
 		}
 		remoteDir := filepath.Join(t.TempDir(), "remote")
-		dataset := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = " + remoteDir + "\n\n[settings]\nalgorithm = sha256\n"
+		bin := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "rclone"), []byte(`#!/bin/sh
+set -eu
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto) src="$(map_path "$2")"; dst="$(map_path "$3")"; mkdir -p "$(dirname "$dst")"; cp "$src" "$dst" ;;
+  lsjson) src="$(map_path "$2")"; if [ -e "$src" ]; then printf '[{"Path":"%s"}]\n' "$(basename "$src")"; else printf '[]\n'; fi ;;
+  moveto) src="$(map_path "$2")"; dst="$(map_path "$3")"; mkdir -p "$(dirname "$dst")"; mv "$src" "$dst" ;;
+  *) exit 2 ;;
+esac
+`), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		t.Setenv("RCLONE_TEST_ROOT", remoteDir)
+		dataset := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
 		if err := os.WriteFile(filepath.Join(repo, ".git-sfs/config.toml"), []byte(dataset), 0o644); err != nil {
 			t.Fatal(err)
 		}

@@ -28,7 +28,7 @@ func TestAddAndVerify(t *testing.T) {
 		if err := app.Add(context.Background(), []string{"data"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := app.Verify(context.Background(), false, false, "."); err != nil {
+		if err := app.Verify(context.Background(), "", false, false, "."); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -74,7 +74,7 @@ func TestVerboseAddOutputsDebug(t *testing.T) {
 	}
 }
 
-func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
+func TestPushPullRoundTrip(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
@@ -97,7 +97,7 @@ func TestPushPullRoundTripWithFilesystemRemote(t *testing.T) {
 		if err := os.Remove(cacheFile); err != nil {
 			t.Fatal(err)
 		}
-		if err := app(&bytes.Buffer{}).Pull(context.Background(), "data/blob"); err != nil {
+		if err := app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"); err != nil {
 			t.Fatal(err)
 		}
 		if err := hash.VerifyFile(cacheFile, h); err != nil {
@@ -113,7 +113,7 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\ntype = rclone\nurl = local:"+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
+	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\nbackend = local\npath = "+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
@@ -133,7 +133,7 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 		if err := os.Remove(cacheFile); err != nil {
 			t.Fatal(err)
 		}
-		if err := app(&bytes.Buffer{}).Pull(context.Background(), "data/blob"); err != nil {
+		if err := app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"); err != nil {
 			t.Fatal(err)
 		}
 		if err := hash.VerifyFile(cacheFile, h); err != nil {
@@ -272,7 +272,7 @@ func TestPullUsesParallelRcloneDownloads(t *testing.T) {
 			}
 		}
 		start := time.Now()
-		if err := a.Pull(context.Background(), "data"); err != nil {
+		if err := a.Pull(context.Background(), "", "data"); err != nil {
 			t.Fatal(err)
 		}
 		if time.Since(start) > 3200*time.Millisecond {
@@ -316,7 +316,7 @@ func TestVerifyUsesParallelRemoteChecks(t *testing.T) {
 			mustCopy(t, src, dst)
 		}
 		start := time.Now()
-		if err := a.Verify(context.Background(), true, false, "data"); err != nil {
+		if err := a.Verify(context.Background(), "", true, false, "data"); err != nil {
 			t.Fatal(err)
 		}
 		if time.Since(start) > 3200*time.Millisecond {
@@ -360,7 +360,7 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 		if err := os.Remove(cacheTwo); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Pull(context.Background(), "data/one.bin"); err != nil {
+		if err := a.Pull(context.Background(), "", "data/one.bin"); err != nil {
 			t.Fatal(err)
 		}
 		if err := hash.VerifyFile(cacheOne, h1); err != nil {
@@ -402,7 +402,7 @@ func TestPullWithMixedPresentAndMissingCacheFiles(t *testing.T) {
 		if err := os.Remove(cacheTwo); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Pull(context.Background(), "data/"); err != nil {
+		if err := a.Pull(context.Background(), "", "data/"); err != nil {
 			t.Fatal(err)
 		}
 		if err := hash.VerifyFile(cacheOne, h1); err != nil {
@@ -411,7 +411,7 @@ func TestPullWithMixedPresentAndMissingCacheFiles(t *testing.T) {
 		if err := hash.VerifyFile(cacheTwo, h2); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Pull(context.Background(), "data/one.bin"); err != nil {
+		if err := a.Pull(context.Background(), "", "data/one.bin"); err != nil {
 			t.Fatal(err)
 		}
 		if err := hash.VerifyFile(cacheOne, h1); err != nil {
@@ -587,7 +587,7 @@ func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	inDir(t, repo, func() {
-		if err := app(stdout).Verify(context.Background(), true, false, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", true, false, "."); err == nil {
 			t.Fatal("verify should fail for unconverted file")
 		}
 		if !strings.Contains(stdout.String(), "unconverted files: 1") ||
@@ -610,7 +610,7 @@ func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		if err := app(stdout).Verify(context.Background(), false, true, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", false, true, "."); err == nil {
 			t.Fatal("verify should fail for corrupt cache file")
 		}
 		if !strings.Contains(stdout.String(), "corrupt cache files: 1") ||
@@ -692,7 +692,7 @@ func TestVerifyReportsInvalidConfig(t *testing.T) {
 		}
 		mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte("version = 1\n\n[settings]\nalgorithm = sha256\n"))
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Verify(context.Background(), true, false, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", true, false, "."); err == nil {
 			t.Fatal("expected invalid config verify")
 		}
 		if !strings.Contains(stdout.String(), "missing default remote") {
@@ -719,7 +719,7 @@ func TestVerifyReportsRemoteProblems(t *testing.T) {
 		}
 		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Verify(context.Background(), true, false, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", true, false, "."); err == nil {
 			t.Fatal("expected remote verify to fail when remote file is missing")
 		}
 		if !strings.Contains(stdout.String(), "missing remote files: 1") {
@@ -735,7 +735,7 @@ func TestVerifyReportsRemoteProblems(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		if err := app(stdout).Verify(context.Background(), true, true, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", true, true, "."); err == nil {
 			t.Fatal("expected remote verify to fail")
 		}
 		if !strings.Contains(stdout.String(), "corrupt remote files: 1") {
@@ -773,11 +773,11 @@ func TestVerifyPathScopesChecksToSelectedSubtree(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := a.Verify(context.Background(), true, false, "data/one.bin"); err != nil {
+		if err := a.Verify(context.Background(), "", true, false, "data/one.bin"); err != nil {
 			t.Fatalf("verify should ignore unrelated subtree problems: %v", err)
 		}
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Verify(context.Background(), true, false, "data/nested"); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", true, false, "data/nested"); err == nil {
 			t.Fatal("verify should fail for selected subtree with missing cache file")
 		}
 		if !strings.Contains(stdout.String(), "missing cache files: 1") ||
@@ -824,11 +824,11 @@ func TestVerifyWithoutIntegritySkipsCorruptionChecks(t *testing.T) {
 		if err := os.WriteFile(remoteFile, []byte("corrupt-remote"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Verify(context.Background(), true, false, "."); err != nil {
+		if err := a.Verify(context.Background(), "", true, false, "."); err != nil {
 			t.Fatalf("presence-only verify should ignore corruption: %v", err)
 		}
 		stdout := &bytes.Buffer{}
-		if err := app(stdout).Verify(context.Background(), true, true, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", true, true, "."); err == nil {
 			t.Fatal("integrity verify should fail for corrupt files")
 		}
 		if !strings.Contains(stdout.String(), "corrupt cache files: 1") {
@@ -855,7 +855,7 @@ func TestPullFailsForMissingRemoteFile(t *testing.T) {
 		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Pull(context.Background(), "data/blob"); err == nil {
+		if err := a.Pull(context.Background(), "", "data/blob"); err == nil {
 			t.Fatal("expected missing remote file error")
 		}
 	})
@@ -919,7 +919,7 @@ func TestPullSkipsExistingValidCacheFile(t *testing.T) {
 		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := a.Pull(context.Background(), "data/blob"); err != nil {
+		if err := a.Pull(context.Background(), "", "data/blob"); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -942,15 +942,51 @@ func newRepo(t *testing.T) string {
 	return repo
 }
 
-func writeDataset(t *testing.T, repo, remote string) {
+// writeDataset sets up a fake rclone binary that maps "localtest:" to remoteDir
+// and writes a config.toml pointing at it.  Tests that inspect remoteDir/files/...
+// directly still work because the fake rclone stores files there.
+func writeDataset(t *testing.T, repo, remoteDir string) {
 	t.Helper()
-	content := "version = 1\n\n[remotes.default]\ntype = filesystem\nurl = " + remote + "\n\n[settings]\nalgorithm = sha256\n"
+	bin := t.TempDir()
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst" ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi ;;
+  moveto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst" ;;
+  *) exit 2 ;;
+esac
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
+	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
 	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
 }
 
-func writeRcloneDataset(t *testing.T, repo, host, path string) {
+func writeRcloneDataset(t *testing.T, repo, remote, path string) {
 	t.Helper()
-	content := "version = 1\n\n[remotes.default]\ntype = rclone\nhost = " + host + "\npath = " + path + "\n\n[settings]\nalgorithm = sha256\n"
+	content := "version = 1\n\n[remotes.default]\nbackend = " + remote + "\npath = " + path + "\n\n[settings]\nalgorithm = sha256\n"
 	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
 }
 
