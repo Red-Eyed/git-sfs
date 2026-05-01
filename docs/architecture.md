@@ -18,7 +18,7 @@ internal/
   localstate/      repo root detection; cache symlink resolution and binding
   lock/            directory-based process lock with 100ms poll
   progress/        stderr progress bar driven by a goroutine
-  remote/          Remote interface; rclone and filesystem backends
+  remote/          Remote interface; rclone backend
   errs/            sentinel errors
   version/         version string embedded at build time
 ```
@@ -116,11 +116,11 @@ type Remote interface {
 }
 ```
 
-Two backends: `rcloneRemote` (subprocess per call) and `filesystemRemote` (direct `os` calls). The rclone backend issues one subprocess per operation; there is no persistent rclone process.
+One backend: `rcloneRemote` (subprocess per call). Each operation issues one rclone subprocess; there is no persistent rclone process.
 
 ## What Deliberately Does Not Exist
 
 - No manifest file or database — the Git tree is the file list.
 - No background service — every operation is a one-shot CLI invocation.
-- No custom protocol — remotes use rclone, rsync, or the local filesystem.
+- No custom protocol — remotes use rclone.
 - No distributed lock — the directory lock is single-machine only.

@@ -109,6 +109,7 @@ git-sfs verify
 git-sfs verify data/train-000.tar.zst
 git-sfs verify data/validation/
 git-sfs verify --with-integrity data/validation/
+git-sfs verify -r backup
 ```
 
 Returns non-zero on failure.
@@ -116,6 +117,8 @@ Returns non-zero on failure.
 By default, `git-sfs verify` checks that tracked cache entries are present
 locally and that tracked hashes are present on the configured default remote, so
 another machine can pull and materialize the same symlinks.
+
+`-r remote` checks against a named remote instead of `default`.
 
 Remote checks use `[settings].n_jobs` when it is set. `0` means auto.
 
@@ -135,8 +138,10 @@ Upload referenced cached files to the remote:
 
 ```sh
 git-sfs push
-git-sfs push backup
+git-sfs push -r backup
 ```
+
+`-r remote` pushes to a named remote instead of `default`.
 
 `git-sfs push` skips files that already exist remotely and verify correctly.
 It uses `[settings].n_jobs` worker slots when configured.
@@ -149,7 +154,10 @@ Download missing files required by symlinks:
 git-sfs pull
 git-sfs pull data/train-000.tar.zst
 git-sfs pull data/
+git-sfs pull -r backup data/
 ```
+
+`-r remote` pulls from a named remote instead of `default`.
 
 Downloaded bytes are hash-verified before being accepted.
 Missing hashes are downloaded with `[settings].n_jobs` worker slots when configured.

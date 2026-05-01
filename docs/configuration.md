@@ -10,8 +10,7 @@
 version = 1
 
 [remotes.default]
-type = "rclone"
-host = "remote-name"
+backend = "remote-name"
 path = "datasets/project"
 config = "rclone.conf"
 
@@ -23,15 +22,8 @@ n_jobs = 0
 Allowed here:
 
 - project config version
-- remote names
-- remote types
-- remote URLs
-- remote hosts
-- remote paths
-- rclone config paths
+- remote names and rclone target (backend, path, config)
 - shared settings
-
-Supported remote types are `filesystem` and `rclone`.
 
 `[settings]` currently supports:
 

@@ -184,37 +184,36 @@ Then remove unreferenced cached files:
 git-sfs gc --files
 ```
 
-## Work With A Filesystem Remote
-
-Useful for local testing or shared disks:
-
-```toml
-[remotes.default]
-type = "filesystem"
-path = "/mnt/datasets/project"
-```
-
-Then:
-
-```sh
-git-sfs push
-git-sfs pull
-```
-
 ## Work With An rclone Remote
 
-Use a configured rclone remote name in `.git-sfs/config.toml`:
+Define the remote in rclone's config, then reference it by name in
+`.git-sfs/config.toml`. The backend type, credentials, and connection settings
+live entirely in rclone — git-sfs only needs the remote name and the path within
+it.
+
+Example rclone config (`.git-sfs/rclone.conf`):
+
+```ini
+[myremote]
+type = s3
+provider = AWS
+region = us-east-1
+```
+
+Corresponding git-sfs config:
 
 ```toml
 [remotes.default]
-type = "rclone"
-host = "remote-name"
+backend = "myremote"
 path = "datasets/project"
 config = "rclone.conf"
 ```
 
 Relative `config` paths are resolved from `.git-sfs`. Commit the rclone config
-only when it contains no secrets or tokens.
+only when it contains no secrets or tokens. Machine-local credentials stay in
+each user's own rclone config.
 
-`git-sfs` should call the installed `rclone` CLI and keep the same plain file
-layout. It does not implement cloud-provider APIs directly.
+```sh
+git-sfs push
+git-sfs pull
+```

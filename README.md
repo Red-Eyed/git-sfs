@@ -9,7 +9,7 @@ and understandable.
 
 It is like Git LFS in spirit, but Git tracks normal symlinks instead of pointer
 files. The large file bytes live in a local content-addressed cache and can be
-synced to a remote with `rclone` or a plain filesystem path.
+synced to a remote with `rclone`.
 
 ```text
 Git tracks symlinks.
@@ -135,8 +135,7 @@ Edit `.git-sfs/config.toml` and set your remote:
 version = 1
 
 [remotes.default]
-type = "rclone"
-host = "remote-name"
+backend = "remote-name"
 path = "datasets/project"
 config = "rclone.conf"
 
@@ -213,8 +212,8 @@ git-sfs import <src> <dst>
 git-sfs import -L <src> <dst>
 git-sfs verify
 git-sfs verify [path]
-git-sfs push [remote]
-git-sfs pull [path]
+git-sfs push [-r remote]
+git-sfs pull [-r remote] [path]
 git-sfs gc --dry-run
 git-sfs gc --files
 ```
@@ -237,8 +236,7 @@ Detailed command reference: [docs/commands.md](docs/commands.md)
 version = 1
 
 [remotes.default]
-type = "rclone"
-host = "remote-name"
+backend = "remote-name"
 path = "datasets/project"
 config = "rclone.conf"
 
@@ -269,15 +267,11 @@ Remote storage uses the same content-addressed file layout as the local cache:
 files/sha256/ab/<full_hash>
 ```
 
-The first supported remote styles are:
-
-```text
-rclone
-filesystem
-```
+Remotes are backed by `rclone`, which supports S3, GCS, Azure Blob, SFTP, local
+mounts, and more without git-sfs needing any backend-specific code.
 
 This keeps the remote easy to inspect, back up, mirror, or repair with ordinary
-Unix tools.
+tools.
 
 Remote details: [docs/remotes.md](docs/remotes.md)
 
@@ -344,7 +338,7 @@ cleanup policy.
 
 ## Project Status
 
-`git-sfs` is early. The core local workflow, filesystem remote path, tests,
+`git-sfs` is early. The core local workflow, rclone remote, tests,
 workflow suite, and release automation are in place. The design intentionally favors a
 small, auditable implementation over a large feature surface.
 
