@@ -10,33 +10,6 @@ import (
 	"git-sfs/internal/hash"
 )
 
-func BenchmarkFilesystemPull8MiB(b *testing.B) {
-	ctx := context.Background()
-	dir := b.TempDir()
-	src := filepath.Join(dir, "src.bin")
-	payload := benchPayload(8 << 20)
-	if err := os.WriteFile(src, payload, 0o644); err != nil {
-		b.Fatal(err)
-	}
-	h, err := hash.File(src)
-	if err != nil {
-		b.Fatal(err)
-	}
-	r := NewFilesystem(filepath.Join(dir, "remote"))
-	if err := r.PushFile(ctx, h, src); err != nil {
-		b.Fatal(err)
-	}
-	dst := filepath.Join(dir, "dst.bin")
-	b.SetBytes(int64(len(payload)))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = os.Remove(dst)
-		if err := r.PullFile(ctx, h, dst); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func BenchmarkRcloneHasFile8MiB(b *testing.B) {
 	benchmarkRcloneCheck(b, false)
 }

@@ -19,7 +19,7 @@ func TestDatasetRejectsCachePath(t *testing.T) {
 
 func TestLoadDataset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	content := "version = 1\n\n[remotes.default]\ntype = filesystem\npath = /tmp/remote\n\n[remotes.backup]\ntype = rclone\nhost = remote\npath = dataset\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\nn_jobs = 3\n"
+	content := "version = 1\n\n[remotes.default]\nbackend = primary\npath = datasets/project\n\n[remotes.backup]\nbackend = backup\npath = dataset\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\nn_jobs = 3\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestLoadDataset(t *testing.T) {
 	if cfg.Version != Version {
 		t.Fatalf("version = %d", cfg.Version)
 	}
-	if cfg.Remotes["default"].Type != "filesystem" || cfg.Remotes["backup"].Host != "remote" || cfg.Remotes["backup"].Path != "dataset" || cfg.Remotes["backup"].Config != "rclone.conf" {
+	if cfg.Remotes["default"].Backend != "primary" || cfg.Remotes["backup"].Backend != "backup" || cfg.Remotes["backup"].Path != "dataset" || cfg.Remotes["backup"].Config != "rclone.conf" {
 		t.Fatalf("unexpected remotes: %#v", cfg.Remotes)
 	}
 	if cfg.Settings.Algorithm != "sha256" {
@@ -43,7 +43,7 @@ func TestLoadDataset(t *testing.T) {
 
 func TestDefault(t *testing.T) {
 	cfg := Default()
-	if cfg.Version != Version || cfg.Settings.Algorithm != "sha256" || cfg.Remotes["default"].Type == "" {
+	if cfg.Version != Version || cfg.Settings.Algorithm != "sha256" || cfg.Remotes["default"].Backend == "" {
 		t.Fatalf("bad default config: %#v", cfg)
 	}
 	if cfg.Settings.Jobs != 0 {
@@ -60,8 +60,8 @@ func TestLoadDatasetErrors(t *testing.T) {
 		"negative n_jobs":        "version = 1\n[settings]\nalgorithm = sha256\nn_jobs = -1\n",
 		"unknown root":           "version = 1\nwat = true\n",
 		"unknown settings field": "version = 1\n[settings]\nother = x\n",
-		"remote missing path":    "version = 1\n[remotes.default]\ntype = filesystem\n[settings]\nalgorithm = sha256\n",
-		"unknown remote field":   "version = 1\n[remotes.default]\ntype = rclone\nhost = h\npath = p\nshell = sh\n[settings]\nalgorithm = sha256\n",
+		"backend missing":        "version = 1\n[remotes.default]\npath = p\n[settings]\nalgorithm = sha256\n",
+		"unknown remote field":   "version = 1\n[remotes.default]\nbackend = r\npath = p\nshell = sh\n[settings]\nalgorithm = sha256\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -88,11 +88,9 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 	text := string(content)
 	for _, want := range []string{
 		"# git-sfs project config",
-		"type = \"rclone\"",
-		"host = \"remote-name\"",
+		"backend = \"myremote\"",
 		"path = \"datasets/project\"",
 		"config = \"rclone.conf\"",
-		"# type = \"filesystem\"",
 		"algorithm = \"sha256\"",
 		"n_jobs = 0",
 	} {

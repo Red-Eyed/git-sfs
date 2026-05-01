@@ -21,11 +21,9 @@ type Config struct {
 }
 
 type RemoteConfig struct {
-	Type   string
-	URL    string
-	Host   string
-	Path   string
-	Config string
+	Backend string // rclone remote name as defined in rclone's config
+	Path    string // path within that backend
+	Config  string // path to rclone config file
 }
 
 type Settings struct {
@@ -41,7 +39,7 @@ func Default() Config {
 	return Config{
 		Version: Version,
 		Remotes: map[string]RemoteConfig{
-			"default": {Type: "rclone", Host: "remote-name", Path: "datasets/project", Config: "rclone.conf"},
+			"default": {Backend: "myremote", Path: "datasets/project", Config: "rclone.conf"},
 		},
 		Settings: Settings{Algorithm: "sha256", Jobs: 0},
 	}
@@ -60,19 +58,13 @@ const defaultTOML = `# git-sfs project config. Commit this file to Git.
 version = 1
 
 # The default remote is used by git-sfs push and git-sfs pull when no remote is named.
+# "backend" must match a remote name defined in your rclone config.
 [remotes.default]
-# Supported today: rclone and filesystem.
-type = "rclone"
-host = "remote-name"
+backend = "myremote"
 path = "datasets/project"
 # Relative paths are resolved from .git-sfs.
 # Do not commit rclone configs that contain secrets or tokens.
 config = "rclone.conf"
-
-# Examples you can copy by removing the leading # characters.
-# [remotes.local]
-# type = "filesystem"
-# path = "/mnt/datasets/project"
 
 [settings]
 # Only sha256 is supported in v1.
@@ -154,12 +146,8 @@ func Load(path string) (Config, error) {
 			}
 			rc := cfg.Remotes[remote]
 			switch key {
-			case "type":
-				rc.Type = val
-			case "url":
-				rc.URL = val
-			case "host":
-				rc.Host = val
+			case "backend":
+				rc.Backend = val
 			case "path":
 				rc.Path = val
 			case "config":
@@ -186,11 +174,8 @@ func Load(path string) (Config, error) {
 		return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("settings n_jobs must be >= 0"))
 	}
 	for name, rc := range cfg.Remotes {
-		if rc.Type == "" {
-			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote %q requires type", name))
-		}
-		if rc.URL == "" && rc.Path == "" {
-			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote %q requires url or path", name))
+		if rc.Backend == "" {
+			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote %q requires backend", name))
 		}
 	}
 	return cfg, nil

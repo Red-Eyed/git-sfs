@@ -2,13 +2,10 @@ package remote
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"path/filepath"
 
 	"git-sfs/internal/config"
-	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
 )
 
@@ -31,18 +28,8 @@ func New(cfg config.RemoteConfig) (Remote, error) {
 }
 
 func NewWithOptions(cfg config.RemoteConfig, opts Options) (Remote, error) {
-	switch cfg.Type {
-	case "filesystem", "fs":
-		return NewFilesystem(remotePathConfig(cfg)), nil
-	case "rclone":
-		opts.RcloneConfig = rcloneConfigPath(opts.ConfigDir, cfg.Config)
-		if cfg.Host != "" || cfg.Path != "" {
-			return NewRcloneTargetWithOptions(cfg.Host, cfg.Path, opts), nil
-		}
-		return NewRcloneWithOptions(cfg.URL, opts), nil
-	default:
-		return nil, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unsupported remote type %q", cfg.Type))
-	}
+	opts.RcloneConfig = rcloneConfigPath(opts.ConfigDir, cfg.Config)
+	return NewRcloneTargetWithOptions(cfg.Backend, cfg.Path, opts), nil
 }
 
 func rcloneConfigPath(configDir, config string) string {
@@ -50,11 +37,4 @@ func rcloneConfigPath(configDir, config string) string {
 		return config
 	}
 	return filepath.Join(configDir, config)
-}
-
-func remotePathConfig(cfg config.RemoteConfig) string {
-	if cfg.Path != "" {
-		return cfg.Path
-	}
-	return cfg.URL
 }

@@ -4,8 +4,10 @@ seed_filesystem_repo() {
   local repo="$1"
   local remote="$2"
   mkdir -p "$remote"
+  export RCLONE_TEST_ROOT="$remote"
+  install_fake_rclone
   init_repo "$repo" "$3"
-  write_filesystem_config "$repo" "$remote"
+  write_filesystem_config "$repo"
   (
     cd "$repo"
     # Start from a normal repo state so later clones exercise the same tracked
@@ -225,8 +227,10 @@ scenario_import_workflows() {
   local src_hash
 
   mkdir -p "$remote" "$outside"
+  export RCLONE_TEST_ROOT="$remote"
+  install_fake_rclone
   init_repo "$repo" "$cache"
-  write_filesystem_config "$repo" "$remote"
+  write_filesystem_config "$repo"
   (
     cd "$repo"
     git add .git-sfs/config.toml .gitignore

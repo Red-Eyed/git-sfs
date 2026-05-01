@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 
 write_filesystem_config() {
+  # Callers must set RCLONE_TEST_ROOT to the remote directory and install the
+  # fake rclone binary before calling this.  Files land at
+  # $RCLONE_TEST_ROOT/files/sha256/...
   local repo="$1"
-  local remote="$2"
-  cat > "$repo/.git-sfs/config.toml" <<EOF
+  cat > "$repo/.git-sfs/config.toml" <<'EOF'
 version = 1
 
 [remotes.default]
-type = "filesystem"
-url = "$remote"
+backend = "testremote"
 
 [settings]
 algorithm = "sha256"
@@ -18,15 +19,14 @@ EOF
 
 write_rclone_config() {
   local repo="$1"
-  local host="$2"
+  local remote="$2"
   local path="$3"
   local config="$4"
   cat > "$repo/.git-sfs/config.toml" <<EOF
 version = 1
 
 [remotes.default]
-type = "rclone"
-host = "$host"
+backend = "$remote"
 path = "$path"
 config = "$config"
 
