@@ -1,7 +1,9 @@
 package remote
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,21 +57,14 @@ func (r rcloneRemote) remotePath(h hash.Hash) string {
 }
 
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
-	tmp, err := os.CreateTemp("", "git-sfs-rclone-has-*")
+	out, err := r.runOutput(ctx, "lsjson", r.remotePath(h))
 	if err != nil {
-		return false, err
-	}
-	name := tmp.Name()
-	tmp.Close()
-	os.Remove(name)
-	defer os.Remove(name)
-	if err := r.run(ctx, "copyto", r.remotePath(h), name); err != nil {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		return false, nil
+		return false, err
 	}
-	return true, nil
+	return parseLSJSONExists(out)
 }
 
 func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) {
@@ -186,4 +181,16 @@ func shellQuote(args []string) string {
 		parts = append(parts, arg)
 	}
 	return strings.Join(parts, " ")
+}
+
+func parseLSJSONExists(out string) (bool, error) {
+	trimmed := bytes.TrimSpace([]byte(out))
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("[]")) {
+		return false, nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		return false, fmt.Errorf("parse rclone lsjson output: %w", err)
+	}
+	return len(items) > 0, nil
 }

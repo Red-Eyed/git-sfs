@@ -73,6 +73,14 @@ case "$cmd" in
     mkdir -p "$(dirname "$dst")"
     cp "$src" "$dst"
     ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi
+    ;;
   moveto)
     src="$(map_path "$2")"
     dst="$(map_path "$3")"

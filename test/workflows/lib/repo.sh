@@ -84,6 +84,13 @@ case "$cmd" in
     mkdir -p "$(dirname "$dst")"
     cp "$src" "$dst"
     ;;
+  lsjson)
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi
+    ;;
   moveto)
     mkdir -p "$(dirname "$dst")"
     mv "$src" "$dst"
