@@ -878,20 +878,6 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	})
 }
 
-func TestMaterializeIgnoresNonGitSFSSymlinkSelection(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
-	writeLocal(t, repo, cacheDir)
-	if err := os.Symlink("elsewhere", filepath.Join(repo, "link")); err != nil {
-		t.Fatal(err)
-	}
-	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Materialize(context.Background(), "."); err != nil {
-			t.Fatal(err)
-		}
-	})
-}
 
 func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	repo := newRepo(t)

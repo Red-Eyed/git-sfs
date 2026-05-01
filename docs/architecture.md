@@ -71,7 +71,7 @@ sequential (per hash)
 
 ## Worker Pool
 
-All parallel work goes through `runIndexed` in `core/app.go`:
+All parallel work goes through `runIndexed` in `core/run.go`:
 
 ```text
 jobs chan int  (unbuffered)
