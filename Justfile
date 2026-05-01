@@ -15,6 +15,9 @@ coverage:
     env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} test -covermode=atomic -coverprofile=coverage.out ./...
     env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} tool cover -func=coverage.out
 
+bench:
+    env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} test -run '^$' -bench . -benchmem ./...
+
 build:
     env GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} {{go}} build ./cmd/git-sfs
 

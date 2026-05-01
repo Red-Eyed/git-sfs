@@ -8,6 +8,7 @@ just fmt
 just test
 just workflows
 just coverage
+just bench
 just release-snapshot
 just check
 ```
@@ -53,6 +54,12 @@ Run coverage:
 
 ```sh
 just coverage
+```
+
+Run benchmarks:
+
+```sh
+just bench
 ```
 
 Coverage is reported for visibility. Do not add tests only to raise the number.
