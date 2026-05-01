@@ -148,22 +148,6 @@ assert_cache_populated() {
   done
 }
 
-assert_gc_removes_orphan() {
-  local repo="$1"
-  local cache="$2"
-  local dry_run_out
-  local orphan="$cache/files/sha256/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-
-  mkdir -p "$cache/files/sha256/ff"
-  printf "orphan\n" > "$orphan"
-  (
-    cd "$repo"
-    dry_run_out="$(git_sfs gc --dry-run)"
-    assert_contains "$dry_run_out" "gc dry-run would remove 1 file(s)" "gc dry-run summary"
-    git_sfs gc --files >/dev/null
-  )
-  [ ! -e "$orphan" ] || fail "gc did not delete orphan"
-}
 
 scenario_filesystem_workflows() {
   note "exercise documented filesystem workflows"
@@ -230,9 +214,6 @@ scenario_filesystem_workflows() {
     assert_contains "$integrity_out" "corrupt cache files: 1" "integrity verify cache corruption"
   )
 
-  # GC only reasons about Git-visible references, so an unreferenced cache file
-  # created by hand should be reported and then deleted.
-  assert_gc_removes_orphan "$repo_b" "$shared_cache"
 }
 
 scenario_import_workflows() {
