@@ -15,11 +15,11 @@ databases, daemons, custom protocols, and hidden metadata.
   - `git-sfs init`
   - `git-sfs setup`
   - `git-sfs add`
-  - `git-sfs status`
+  - ~~`git-sfs status`~~ (deferred post-v1)
   - `git-sfs verify`
   - `git-sfs push`
   - `git-sfs pull`
-  - `git-sfs gc`
+  - ~~`git-sfs gc`~~ (deferred post-v1)
 - Cache layout:
   - content files keyed by SHA-256
   - `tmp`
@@ -51,29 +51,18 @@ databases, daemons, custom protocols, and hidden metadata.
 
 ## Partial
 
-- `status` and `verify`
-  - Current implementation detects key problems and prints stable category counts.
-  - Still needs optional remote checks and refined exit-code documentation.
+- `verify`
+  - Detects key problems and prints stable category counts.
+  - Optional remote checks and refined exit-code documentation still pending.
 - rclone remote
   - Thin wrapper around the `rclone` CLI, not a custom cloud API.
   - Has local-backend integration coverage; cloud remotes still need validation.
 - Concurrency
   - Cache-level lock exists.
   - Needs broader concurrent command tests.
-- Garbage collection
-  - Protects currently referenced files.
-  - Needs more careful dry-run output and safety tests.
-- Error handling
-  - Errors are clear enough for early use.
-  - Needs typed errors for important failure classes.
 
 ## Remaining v1 Tasks
 
-- Improve `git-sfs status`
-  - Separate tracked symlinks, missing cached files, corrupt cached files,
-    missing remote files, broken Git symlinks, and unconverted files.
-  - Make output stable enough for CI parsing.
-  - Define exit codes.
 - Improve `git-sfs verify`
   - Verify all required invariants with precise messages.
   - Add optional remote existence verification.
@@ -86,10 +75,6 @@ databases, daemons, custom protocols, and hidden metadata.
   - `git-sfs pull <file>` must download only files needed for that path.
   - `git-sfs pull <directory>` must download only files needed below that directory.
   - Add coverage for mixed present/missing cache files.
-- Improve `gc`
-  - Better dry-run report.
-  - Cached-file cleanup only; no per-file local link layer.
-  - Tests for keeping all referenced files.
 - Add typed errors
   - Missing cache config
   - Invalid config
