@@ -46,14 +46,30 @@ var issueKinds = []string{
 }
 
 // Verify is the CI-oriented strict check; any reported problem is a failure.
-func (a App) Verify(ctx context.Context, checkRemote, withIntegrity bool, path string) (err error) {
+func (a App) Verify(ctx context.Context, remoteName string, checkRemote, withIntegrity bool, path string) (err error) {
 	a.debugf("verify: start")
 	defer a.debugDone("verify", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
-	report, err := scan(ctx, repo, path, c, cfg, checkRemote, withIntegrity)
+
+	var r remote.Remote
+	if checkRemote {
+		if _, ok := cfg.Remotes[nameOrDefault(remoteName)]; !ok {
+			report := statusReport{Issues: []issue{{Kind: "invalid config", Detail: "missing default remote"}}}
+			printReport(a.Stdout, report)
+			return fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
+		}
+		r, err = a.selectRemote(repo, cfg, remoteName)
+		if err != nil {
+			report := statusReport{Issues: []issue{{Kind: "invalid config", Detail: err.Error()}}}
+			printReport(a.Stdout, report)
+			return fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
+		}
+	}
+
+	report, err := scan(ctx, repo, path, c, cfg, r, checkRemote, withIntegrity)
 	if err != nil {
 		return err
 	}
@@ -65,9 +81,15 @@ func (a App) Verify(ctx context.Context, checkRemote, withIntegrity bool, path s
 	return nil
 }
 
-func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Config, checkRemote, withIntegrity bool) (statusReport, error) {
+func nameOrDefault(name string) string {
+	if name == "" {
+		return "default"
+	}
+	return name
+}
+
+func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Config, r remote.Remote, checkRemote, withIntegrity bool) (statusReport, error) {
 	var report statusReport
-	defaultRemote, hasDefault := cfg.Remotes["default"]
 	root := absFromRepo(repo, path)
 	var tracked []trackedLink
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -125,21 +147,6 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 		}
 	}
 	if !checkRemote {
-		return report, nil
-	}
-	if !hasDefault {
-		report.Issues = append(report.Issues, issue{
-			Kind:   "invalid config",
-			Detail: "missing default remote",
-		})
-		return report, nil
-	}
-	r, err := remote.NewWithOptions(defaultRemote, remote.Options{})
-	if err != nil {
-		report.Issues = append(report.Issues, issue{
-			Kind:   "invalid config",
-			Detail: err.Error(),
-		})
 		return report, nil
 	}
 	remStatus, err := checkRemoteFiles(ctx, r, tracked, withIntegrity, jobsFromSettings(cfg.Settings.Jobs, len(tracked)))

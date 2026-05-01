@@ -84,9 +84,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "verify":
 		vfs := flag.NewFlagSet("verify", flag.ContinueOnError)
 		vfs.SetOutput(stderr)
-		var remote bool
+		var remoteName string
+		var checkRemote bool
 		var withIntegrity bool
-		vfs.BoolVar(&remote, "remote", true, "check remote files")
+		vfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
+		vfs.BoolVar(&checkRemote, "remote", true, "check remote files")
 		vfs.BoolVar(&withIntegrity, "with-integrity", false, "recalculate hashes for local cache and remote files")
 		if err := vfs.Parse(cmdArgs); err != nil {
 			return err
@@ -95,19 +97,29 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if len(vfs.Args()) > 0 {
 			path = vfs.Args()[0]
 		}
-		return app.Verify(ctx, remote, withIntegrity, path)
+		return app.Verify(ctx, remoteName, checkRemote, withIntegrity, path)
 	case "push":
-		remote := ""
-		if len(cmdArgs) > 0 {
-			remote = cmdArgs[0]
+		pfs := flag.NewFlagSet("push", flag.ContinueOnError)
+		pfs.SetOutput(stderr)
+		var remoteName string
+		pfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
+		if err := pfs.Parse(cmdArgs); err != nil {
+			return err
 		}
-		return app.Push(ctx, remote)
+		return app.Push(ctx, remoteName)
 	case "pull":
-		path := "."
-		if len(cmdArgs) > 0 {
-			path = cmdArgs[0]
+		pfs := flag.NewFlagSet("pull", flag.ContinueOnError)
+		pfs.SetOutput(stderr)
+		var remoteName string
+		pfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
+		if err := pfs.Parse(cmdArgs); err != nil {
+			return err
 		}
-		return app.Pull(ctx, path)
+		path := "."
+		if len(pfs.Args()) > 0 {
+			path = pfs.Args()[0]
+		}
+		return app.Pull(ctx, remoteName, path)
 	case "help", "-h", "--help":
 		usage(stdout)
 		return nil
@@ -132,8 +144,8 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  setup")
 	fmt.Fprintln(w, "  add")
 	fmt.Fprintln(w, "  import")
-	fmt.Fprintln(w, "  verify")
-	fmt.Fprintln(w, "  push")
-	fmt.Fprintln(w, "  pull")
+	fmt.Fprintln(w, "  verify  [-r remote] [--remote] [--with-integrity] [path]")
+	fmt.Fprintln(w, "  push    [-r remote]")
+	fmt.Fprintln(w, "  pull    [-r remote] [path]")
 	fmt.Fprintln(w, "  help")
 }

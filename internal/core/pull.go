@@ -13,8 +13,8 @@ import (
 )
 
 // Pull downloads missing files for the selected symlinks.
-func (a App) Pull(ctx context.Context, path string) (err error) {
-	a.debugf("pull: start path=%s", path)
+func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
+	a.debugf("pull: start remote=%s path=%s", remoteName, path)
 	defer a.debugDone("pull", &err)
 	repo, c, cfg, err := a.open()
 	if err != nil {
@@ -28,7 +28,7 @@ func (a App) Pull(ctx context.Context, path string) (err error) {
 		return err
 	}
 	defer l.Release()
-	r, err := a.selectRemote(repo, cfg, "")
+	r, err := a.selectRemote(repo, cfg, remoteName)
 	if err != nil {
 		return err
 	}
