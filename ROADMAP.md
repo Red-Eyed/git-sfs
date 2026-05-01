@@ -113,6 +113,27 @@ databases, daemons, custom protocols, and hidden metadata.
   - Gate behind environment variables.
   - Test upload, skip existing, pull, interruption retry, and permission errors.
 
+## Production Readiness
+
+- Declare and enforce minimum external tool versions
+  - Add `min_rclone_version` field to `.git-sfs/config.toml` (optional, respected at runtime).
+  - On each remote operation, parse `rclone version` output and fail with a clear message if below the declared minimum.
+  - Ship a sensible default minimum version for rclone in the init template.
+- Add `git-sfs version` command
+  - Print the embedded git-sfs version.
+  - Detect and print the rclone version found on `$PATH`.
+- Add `--dry-run` flag to `push` and `pull`
+  - Print what would be transferred without touching the remote or cache.
+- Stabilize and document exit codes
+  - Define a stable exit-code contract (0 = success, 1 = usage/config error, 2 = I/O or remote error, 3 = hash/integrity failure).
+  - Cover exit codes in README for scripting use.
+- Add config schema version field
+  - Add `schema_version` to `config.toml` so future breaking changes can be detected and rejected with a migration hint rather than a silent misparse.
+- Add shell completions
+  - Bash, Zsh, and Fish completion scripts generated and shipped in the release archive.
+- Platform smoke tests
+  - Add CI matrix jobs that run the shell workflow suite on macOS and Linux (amd64 and arm64).
+
 ## Non-goals for v1
 
 - Manifest files
