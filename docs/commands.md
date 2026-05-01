@@ -71,6 +71,9 @@ For each regular file, `git-sfs`:
 - stores bytes in the cache
 - replaces the file with a relative symlink
 
+When `.git-sfs/config.toml` sets `[settings].n_jobs`, `git-sfs add` hashes and
+stores files with that worker limit before rewriting the repo paths.
+
 ## git-sfs import
 
 Import an external file into the cache and create a symlink inside the repository:
@@ -86,6 +89,9 @@ git-sfs import /mnt/incoming/dataset data/dataset
 ```
 
 `git-sfs import` is for very large data where making a temporary repository copy is too expensive. It hashes each source file, moves it into the cache, verifies the cached bytes, and creates the destination symlink. When the source and cache are on the same filesystem this uses rename; across filesystems it falls back to copy-verify-remove.
+
+When `.git-sfs/config.toml` sets `[settings].n_jobs`, unique source files are
+prepared with that worker limit before destination symlinks are written.
 
 By default, source symlinks are rejected. To follow source symlinks and import
 the files they resolve to:
@@ -111,6 +117,8 @@ By default, `git-sfs verify` checks that tracked cache entries are present
 locally and that tracked hashes are present on the configured default remote, so
 another machine can pull and materialize the same symlinks.
 
+Remote checks use `[settings].n_jobs` when it is set. `0` means auto.
+
 `--with-integrity` additionally recalculates hashes for local cache files and
 remote files. This is slower, but it catches corruption instead of checking only
 presence.
@@ -131,6 +139,7 @@ git-sfs push backup
 ```
 
 `git-sfs push` skips files that already exist remotely and verify correctly.
+It uses `[settings].n_jobs` worker slots when configured.
 
 ## git-sfs pull
 
@@ -143,6 +152,7 @@ git-sfs pull data/
 ```
 
 Downloaded bytes are hash-verified before being accepted.
+Missing hashes are downloaded with `[settings].n_jobs` worker slots when configured.
 
 When a path is provided, only symlinks below that path are considered. This is
 the intended way to partially pull a dataset from the remote.

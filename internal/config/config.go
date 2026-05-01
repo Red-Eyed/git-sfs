@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"git-sfs/internal/errs"
@@ -29,6 +30,7 @@ type RemoteConfig struct {
 
 type Settings struct {
 	Algorithm string
+	Jobs      int
 }
 
 type Local struct {
@@ -41,7 +43,7 @@ func Default() Config {
 		Remotes: map[string]RemoteConfig{
 			"default": {Type: "rclone", Host: "remote-name", Path: "datasets/project", Config: "rclone.conf"},
 		},
-		Settings: Settings{Algorithm: "sha256"},
+		Settings: Settings{Algorithm: "sha256", Jobs: 0},
 	}
 }
 
@@ -75,6 +77,9 @@ config = "rclone.conf"
 [settings]
 # Only sha256 is supported in v1.
 algorithm = "sha256"
+# Optional: cap parallel work for push, pull, verify, add, and import.
+# 0 means auto.
+n_jobs = 0
 `
 
 func Load(path string) (Config, error) {
@@ -131,10 +136,18 @@ func Load(path string) (Config, error) {
 			}
 			return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown .git-sfs/config.toml field %q", key))
 		case "settings":
-			if key != "algorithm" {
+			switch key {
+			case "algorithm":
+				cfg.Settings.Algorithm = val
+			case "n_jobs":
+				n, err := strconv.Atoi(val)
+				if err != nil {
+					return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("invalid settings n_jobs %q", val))
+				}
+				cfg.Settings.Jobs = n
+			default:
 				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown settings field %q", key))
 			}
-			cfg.Settings.Algorithm = val
 		case "remotes":
 			if remote == "" {
 				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("remote field %q appears before remote name", key))
@@ -168,6 +181,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Settings.Algorithm != "sha256" {
 		return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unsupported hash algorithm %q", cfg.Settings.Algorithm))
+	}
+	if cfg.Settings.Jobs < 0 {
+		return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("settings n_jobs must be >= 0"))
 	}
 	for name, rc := range cfg.Remotes {
 		if rc.Type == "" {

@@ -12,6 +12,7 @@ url = "$remote"
 
 [settings]
 algorithm = "sha256"
+n_jobs = 0
 EOF
 }
 
@@ -31,6 +32,7 @@ config = "$config"
 
 [settings]
 algorithm = "sha256"
+n_jobs = 0
 EOF
 }
 

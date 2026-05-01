@@ -29,6 +29,7 @@ type App struct {
 	Stderr     io.Writer
 	CacheFlag  string
 	ConfigPath string
+	Jobs       int
 	Quiet      bool
 	Verbose    bool
 }
@@ -58,6 +59,27 @@ type issue struct {
 type statusReport struct {
 	TrackedSymlinks int
 	Issues          []issue
+}
+
+type addPrepared struct {
+	Hash hash.Hash
+	Err  error
+}
+
+type importPrepared struct {
+	Key  string
+	Hash hash.Hash
+	Err  error
+}
+
+type trackedLink struct {
+	Path string
+	Hash hash.Hash
+}
+
+type remoteStatus struct {
+	OK  bool
+	Err error
 }
 
 var issueKinds = []string{
@@ -137,13 +159,13 @@ func (a App) Setup(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	bar := progress.New(a.Stderr, "setup", len(links), a.Quiet)
+	hashes, err := uniqueHashesFromLinks(repo, links)
+	if err != nil {
+		return err
+	}
+	bar := progress.New(a.Stderr, "setup", len(hashes), a.Quiet)
 	defer bar.Close()
-	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return err
-		}
+	for _, h := range hashes {
 		if c.HasValid(h) {
 			if err := c.Protect(h); err != nil {
 				return err
@@ -163,7 +185,7 @@ func (a App) Setup(ctx context.Context) (err error) {
 func (a App) Add(ctx context.Context, paths []string) (err error) {
 	a.debugf("add: start paths=%d", len(paths))
 	defer a.debugDone("add", &err)
-	repo, c, _, err := a.open()
+	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
@@ -202,17 +224,12 @@ func (a App) Add(ctx context.Context, paths []string) (err error) {
 	sort.Strings(files)
 	bar := progress.New(a.Stderr, "add", len(files), a.Quiet)
 	defer bar.Close()
-	for _, file := range files {
-		h, err := hash.File(file)
-		if err != nil {
-			return err
+	prepared := prepareAddFiles(ctx, c, files, a.jobs(cfg, len(files)))
+	for i, file := range files {
+		if prepared[i].Err != nil {
+			return prepared[i].Err
 		}
-		if err := c.Store(file, h); err != nil {
-			return fmt.Errorf("store %s: %w", file, err)
-		}
-		if err := c.Protect(h); err != nil {
-			return err
-		}
+		h := prepared[i].Hash
 		if err := materialize.Link(repo, c, h); err != nil {
 			return err
 		}
@@ -243,7 +260,7 @@ func (a App) Import(ctx context.Context, srcPath, dstPath string) error {
 func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opts ImportOptions) (err error) {
 	a.debugf("import: start src=%s dst=%s follow_symlinks=%t", srcPath, dstPath, opts.FollowSymlinks)
 	defer a.debugDone("import", &err)
-	repo, c, _, err := a.open()
+	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
@@ -264,25 +281,21 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 	}
 	bar := progress.New(a.Stderr, "import", len(pairs), a.Quiet)
 	defer bar.Close()
+	prepared := prepareImportFiles(ctx, c, pairs, a.jobs(cfg, len(pairs)))
 	imported := map[string]hash.Hash{}
+	for _, item := range prepared {
+		if item.Err != nil {
+			return item.Err
+		}
+		imported[item.Key] = item.Hash
+	}
 	for _, pair := range pairs {
 		h, ok := imported[pair.Key]
 		if !ok {
-			var err error
-			h, err = hash.File(pair.Src)
-			if err != nil {
-				return err
-			}
-			if err := c.Move(pair.Src, h); err != nil {
-				return fmt.Errorf("import %s: %w", pair.Src, err)
-			}
-			if err := c.Protect(h); err != nil {
-				return err
-			}
-			if err := materialize.Link(repo, c, h); err != nil {
-				return err
-			}
-			imported[pair.Key] = h
+			return fmt.Errorf("missing prepared import for %s", pair.Src)
+		}
+		if err := materialize.Link(repo, c, h); err != nil {
+			return err
 		}
 		target, err := sfspath.GitLinkTarget(repo, pair.Dst, h)
 		if err != nil {
@@ -331,13 +344,13 @@ func (a App) Materialize(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	bar := progress.New(a.Stderr, "pull", len(links), a.Quiet)
+	hashes, err := uniqueHashesFromLinks(repo, links)
+	if err != nil {
+		return err
+	}
+	bar := progress.New(a.Stderr, "pull", len(hashes), a.Quiet)
 	defer bar.Close()
-	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return err
-		}
+	for _, h := range hashes {
 		if err := c.Protect(h); err != nil {
 			return err
 		}
@@ -397,7 +410,7 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	}
 	bar := progress.New(a.Stderr, "push", len(hashes), a.Quiet)
 	defer bar.Close()
-	workers := pushWorkerCount(len(hashes))
+	workers := a.jobs(cfg, len(hashes))
 	jobs := make(chan hash.Hash)
 	errCh := make(chan error, 1)
 	ctx, cancel := context.WithCancel(ctx)
@@ -482,23 +495,6 @@ func uniquePushHashes(repo string, links []string) ([]hash.Hash, error) {
 	return hashes, nil
 }
 
-func pushWorkerCount(n int) int {
-	if n < 1 {
-		return 1
-	}
-	workers := runtime.GOMAXPROCS(0)
-	if workers > 4 {
-		workers = 4
-	}
-	if workers > n {
-		workers = n
-	}
-	if workers < 1 {
-		return 1
-	}
-	return workers
-}
-
 // Pull downloads missing files for the selected symlinks.
 func (a App) Pull(ctx context.Context, path string) (err error) {
 	a.debugf("pull: start path=%s", path)
@@ -523,17 +519,14 @@ func (a App) Pull(ctx context.Context, path string) (err error) {
 	if err != nil {
 		return err
 	}
-	for _, l := range links {
-		h, _, err := sfspath.ParseGitSymlink(repo, l)
-		if err != nil {
-			return err
-		}
-		if !c.HasValid(h) {
-			dst := c.FilePath(h)
-			if err := r.PullFile(ctx, h, dst); err != nil {
-				return fmt.Errorf("pull %s: %w", h, err)
-			}
-		}
+	hashes, err := uniqueHashesFromLinks(repo, links)
+	if err != nil {
+		return err
+	}
+	if err := pullMissingFiles(ctx, c, r, hashes, a.jobs(cfg, len(hashes))); err != nil {
+		return err
+	}
+	for _, h := range hashes {
 		if err := c.Protect(h); err != nil {
 			return err
 		}
@@ -608,6 +601,7 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 	var report statusReport
 	defaultRemote, hasDefault := cfg.Remotes["default"]
 	root := absFromRepo(repo, path)
+	var tracked []trackedLink
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -641,71 +635,74 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 			return nil
 		}
 		report.TrackedSymlinks++
-		cacheFile := c.FilePath(h)
-		if _, err := os.Stat(cacheFile); err != nil {
-			report.Issues = append(report.Issues, issue{
-				Kind: "missing cache file",
-				Path: rel(repo, path),
-				Hash: h.String(),
-			})
-			return nil
-		}
-		if withIntegrity {
-			if err := hash.VerifyFile(cacheFile, h); err != nil {
-				report.Issues = append(report.Issues, issue{
-					Kind:   "corrupt cache file",
-					Path:   rel(repo, path),
-					Hash:   h.String(),
-					Detail: err.Error(),
-				})
-				return nil
-			}
-		}
-		if checkRemote {
-			if !hasDefault {
-				report.Issues = append(report.Issues, issue{
-					Kind:   "invalid config",
-					Detail: "missing default remote",
-				})
-				return nil
-			}
-			r, err := remote.NewWithOptions(defaultRemote, remote.Options{})
-			if err != nil {
-				report.Issues = append(report.Issues, issue{
-					Kind:   "invalid config",
-					Detail: err.Error(),
-				})
-				return nil
-			}
-			var ok bool
-			if withIntegrity {
-				ok, err = r.CheckFile(ctx, h)
-			} else {
-				ok, err = r.HasFile(ctx, h)
-			}
-			if err != nil {
-				if withIntegrity && errors.Is(err, errs.ErrCorruptRemoteFile) {
-					report.Issues = append(report.Issues, issue{
-						Kind:   "corrupt remote file",
-						Path:   rel(repo, path),
-						Hash:   h.String(),
-						Detail: err.Error(),
-					})
-					return nil
-				}
-				return err
-			}
-			if !ok {
-				report.Issues = append(report.Issues, issue{
-					Kind: "missing remote file",
-					Path: rel(repo, path),
-					Hash: h.String(),
-				})
-			}
-		}
+		tracked = append(tracked, trackedLink{Path: rel(repo, path), Hash: h})
 		return nil
 	})
-	return report, err
+	if err != nil {
+		return report, err
+	}
+	cacheStatus := checkCacheFiles(ctx, c, tracked, withIntegrity, jobsFromSettings(cfg.Settings.Jobs, len(tracked)))
+	for _, item := range tracked {
+		status := cacheStatus[item.Hash]
+		switch {
+		case errors.Is(status.Err, os.ErrNotExist):
+			report.Issues = append(report.Issues, issue{
+				Kind: "missing cache file",
+				Path: item.Path,
+				Hash: item.Hash.String(),
+			})
+		case status.Err != nil:
+			report.Issues = append(report.Issues, issue{
+				Kind:   "corrupt cache file",
+				Path:   item.Path,
+				Hash:   item.Hash.String(),
+				Detail: status.Err.Error(),
+			})
+		}
+	}
+	if !checkRemote {
+		return report, nil
+	}
+	if !hasDefault {
+		report.Issues = append(report.Issues, issue{
+			Kind:   "invalid config",
+			Detail: "missing default remote",
+		})
+		return report, nil
+	}
+	r, err := remote.NewWithOptions(defaultRemote, remote.Options{})
+	if err != nil {
+		report.Issues = append(report.Issues, issue{
+			Kind:   "invalid config",
+			Detail: err.Error(),
+		})
+		return report, nil
+	}
+	remoteStatus, err := checkRemoteFiles(ctx, r, tracked, withIntegrity, jobsFromSettings(cfg.Settings.Jobs, len(tracked)))
+	if err != nil {
+		return report, err
+	}
+	for _, item := range tracked {
+		status := remoteStatus[item.Hash]
+		switch {
+		case withIntegrity && errors.Is(status.Err, errs.ErrCorruptRemoteFile):
+			report.Issues = append(report.Issues, issue{
+				Kind:   "corrupt remote file",
+				Path:   item.Path,
+				Hash:   item.Hash.String(),
+				Detail: status.Err.Error(),
+			})
+		case status.Err != nil:
+			return report, status.Err
+		case !status.OK:
+			report.Issues = append(report.Issues, issue{
+				Kind: "missing remote file",
+				Path: item.Path,
+				Hash: item.Hash.String(),
+			})
+		}
+	}
+	return report, nil
 }
 
 func printReport(w io.Writer, report statusReport) {
@@ -786,6 +783,242 @@ func collectGitSFSSymlinks(repo, path string) ([]string, error) {
 	})
 	sort.Strings(out)
 	return out, err
+}
+
+func uniqueHashesFromLinks(repo string, links []string) ([]hash.Hash, error) {
+	seen := map[hash.Hash]bool{}
+	hashes := make([]hash.Hash, 0, len(links))
+	for _, l := range links {
+		h, _, err := sfspath.ParseGitSymlink(repo, l)
+		if err != nil {
+			return nil, err
+		}
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		hashes = append(hashes, h)
+	}
+	return hashes, nil
+}
+
+func jobsFromSettings(configured, n int) int {
+	if n < 1 {
+		return 1
+	}
+	if configured <= 0 {
+		configured = runtime.GOMAXPROCS(0)
+		if configured > 4 {
+			configured = 4
+		}
+	}
+	if configured > n {
+		configured = n
+	}
+	if configured < 1 {
+		return 1
+	}
+	return configured
+}
+
+func (a App) jobs(cfg config.Config, n int) int {
+	if a.Jobs > 0 {
+		return jobsFromSettings(a.Jobs, n)
+	}
+	return jobsFromSettings(cfg.Settings.Jobs, n)
+}
+
+func prepareAddFiles(ctx context.Context, c cache.Cache, files []string, workers int) []addPrepared {
+	out := make([]addPrepared, len(files))
+	runIndexed(ctx, len(files), workers, func(i int) error {
+		h, err := hash.File(files[i])
+		if err != nil {
+			return err
+		}
+		if err := c.Store(files[i], h); err != nil {
+			return fmt.Errorf("store %s: %w", files[i], err)
+		}
+		out[i].Hash = h
+		return nil
+	}, func(i int, err error) {
+		out[i].Err = err
+	})
+	return out
+}
+
+func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, workers int) []importPrepared {
+	seen := map[string]movePair{}
+	var unique []movePair
+	for _, pair := range pairs {
+		if _, ok := seen[pair.Key]; ok {
+			continue
+		}
+		seen[pair.Key] = pair
+		unique = append(unique, pair)
+	}
+	out := make([]importPrepared, len(unique))
+	runIndexed(ctx, len(unique), workers, func(i int) error {
+		pair := unique[i]
+		h, err := hash.File(pair.Src)
+		if err != nil {
+			return err
+		}
+		if err := c.Move(pair.Src, h); err != nil {
+			return fmt.Errorf("import %s: %w", pair.Src, err)
+		}
+		out[i] = importPrepared{Key: pair.Key, Hash: h}
+		return nil
+	}, func(i int, err error) {
+		out[i] = importPrepared{Key: unique[i].Key, Err: err}
+	})
+	return out
+}
+
+func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int) error {
+	errsByIndex := make([]error, len(hashes))
+	runIndexed(ctx, len(hashes), workers, func(i int) error {
+		h := hashes[i]
+		if c.HasValid(h) {
+			return nil
+		}
+		if err := r.PullFile(ctx, h, c.FilePath(h)); err != nil {
+			return fmt.Errorf("pull %s: %w", h, err)
+		}
+		return nil
+	}, func(i int, err error) {
+		errsByIndex[i] = err
+	})
+	for _, err := range errsByIndex {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, withIntegrity bool, workers int) map[hash.Hash]remoteStatus {
+	hashes := uniqueTrackedHashes(tracked)
+	out := make(map[hash.Hash]remoteStatus, len(hashes))
+	var mu sync.Mutex
+	runHashes(ctx, hashes, workers, func(h hash.Hash) remoteStatus {
+		select {
+		case <-ctx.Done():
+			return remoteStatus{Err: ctx.Err()}
+		default:
+		}
+		cacheFile := c.FilePath(h)
+		if _, err := os.Stat(cacheFile); err != nil {
+			return remoteStatus{Err: err}
+		}
+		if withIntegrity {
+			if err := hash.VerifyFile(cacheFile, h); err != nil {
+				return remoteStatus{Err: err}
+			}
+		}
+		return remoteStatus{OK: true}
+	}, func(error) bool {
+		return false
+	}, func(h hash.Hash, status remoteStatus) {
+		mu.Lock()
+		out[h] = status
+		mu.Unlock()
+	})
+	return out
+}
+
+func checkRemoteFiles(ctx context.Context, r remote.Remote, tracked []trackedLink, withIntegrity bool, workers int) (map[hash.Hash]remoteStatus, error) {
+	hashes := uniqueTrackedHashes(tracked)
+	out := make(map[hash.Hash]remoteStatus, len(hashes))
+	var mu sync.Mutex
+	var firstErr error
+	var once sync.Once
+	runHashes(ctx, hashes, workers, func(h hash.Hash) remoteStatus {
+		var (
+			ok  bool
+			err error
+		)
+		if withIntegrity {
+			ok, err = r.CheckFile(ctx, h)
+		} else {
+			ok, err = r.HasFile(ctx, h)
+		}
+		return remoteStatus{OK: ok, Err: err}
+	}, func(err error) bool {
+		return !(withIntegrity && errors.Is(err, errs.ErrCorruptRemoteFile))
+	}, func(h hash.Hash, status remoteStatus) {
+		mu.Lock()
+		out[h] = status
+		mu.Unlock()
+		if status.Err != nil && !(withIntegrity && errors.Is(status.Err, errs.ErrCorruptRemoteFile)) {
+			once.Do(func() {
+				firstErr = status.Err
+			})
+		}
+	})
+	return out, firstErr
+}
+
+func uniqueTrackedHashes(tracked []trackedLink) []hash.Hash {
+	seen := map[hash.Hash]bool{}
+	hashes := make([]hash.Hash, 0, len(tracked))
+	for _, item := range tracked {
+		if seen[item.Hash] {
+			continue
+		}
+		seen[item.Hash] = true
+		hashes = append(hashes, item.Hash)
+	}
+	return hashes
+}
+
+func runIndexed(ctx context.Context, count, workers int, work func(int) error, fail func(int, error)) {
+	if count == 0 {
+		return
+	}
+	workers = jobsFromSettings(workers, count)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan int)
+	var once sync.Once
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				if err := work(idx); err != nil {
+					fail(idx, err)
+					once.Do(cancel)
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < count; i++ {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		case jobs <- i:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
+func runHashes(ctx context.Context, hashes []hash.Hash, workers int, work func(hash.Hash) remoteStatus, stopOn func(error) bool, store func(hash.Hash, remoteStatus)) {
+	runIndexed(ctx, len(hashes), workers, func(i int) error {
+		status := work(hashes[i])
+		store(hashes[i], status)
+		if status.Err != nil && stopOn(status.Err) {
+			return status.Err
+		}
+		return nil
+	}, func(i int, err error) {})
 }
 
 func (a App) selectRemote(repo string, cfg config.Config, name string) (remote.Remote, error) {

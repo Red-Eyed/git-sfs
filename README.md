@@ -142,6 +142,7 @@ config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
+n_jobs = 0
 ```
 
 Initialize local state:
@@ -222,6 +223,10 @@ git-sfs gc --files
 so merged symlinks remain pullable on other machines. Add `--with-integrity` to
 recalculate hashes and catch corruption too.
 
+Set `[settings].n_jobs` in `.git-sfs/config.toml` to control bounded parallel
+work for `add`, `import`, `push`, `pull`, and remote-heavy `verify`. `0` means
+auto.
+
 Detailed command reference: [docs/commands.md](docs/commands.md)
 
 ## Configuration
@@ -239,6 +244,7 @@ config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
+n_jobs = 0
 ```
 
 It must not contain cache paths, secrets, tokens, or machine-local state.

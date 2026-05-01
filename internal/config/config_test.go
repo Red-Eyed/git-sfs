@@ -19,7 +19,7 @@ func TestDatasetRejectsCachePath(t *testing.T) {
 
 func TestLoadDataset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	content := "version = 1\n\n[remotes.default]\ntype = filesystem\npath = /tmp/remote\n\n[remotes.backup]\ntype = rclone\nhost = remote\npath = dataset\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\n"
+	content := "version = 1\n\n[remotes.default]\ntype = filesystem\npath = /tmp/remote\n\n[remotes.backup]\ntype = rclone\nhost = remote\npath = dataset\nconfig = rclone.conf\n\n[settings]\nalgorithm = sha256\nn_jobs = 3\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -36,12 +36,18 @@ func TestLoadDataset(t *testing.T) {
 	if cfg.Settings.Algorithm != "sha256" {
 		t.Fatalf("algorithm = %q", cfg.Settings.Algorithm)
 	}
+	if cfg.Settings.Jobs != 3 {
+		t.Fatalf("n_jobs = %d", cfg.Settings.Jobs)
+	}
 }
 
 func TestDefault(t *testing.T) {
 	cfg := Default()
 	if cfg.Version != Version || cfg.Settings.Algorithm != "sha256" || cfg.Remotes["default"].Type == "" {
 		t.Fatalf("bad default config: %#v", cfg)
+	}
+	if cfg.Settings.Jobs != 0 {
+		t.Fatalf("default n_jobs = %d", cfg.Settings.Jobs)
 	}
 }
 
@@ -50,6 +56,8 @@ func TestLoadDatasetErrors(t *testing.T) {
 		"missing version":        "[settings]\nalgorithm = sha256\n",
 		"bad version":            "version = 2\n[settings]\nalgorithm = sha256\n",
 		"bad algorithm":          "version = 1\n[settings]\nalgorithm = md5\n",
+		"bad n_jobs":             "version = 1\n[settings]\nalgorithm = sha256\nn_jobs = nope\n",
+		"negative n_jobs":        "version = 1\n[settings]\nalgorithm = sha256\nn_jobs = -1\n",
 		"unknown root":           "version = 1\nwat = true\n",
 		"unknown settings field": "version = 1\n[settings]\nother = x\n",
 		"remote missing path":    "version = 1\n[remotes.default]\ntype = filesystem\n[settings]\nalgorithm = sha256\n",
@@ -86,6 +94,7 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 		"config = \"rclone.conf\"",
 		"# type = \"filesystem\"",
 		"algorithm = \"sha256\"",
+		"n_jobs = 0",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default config missing %q:\n%s", want, text)

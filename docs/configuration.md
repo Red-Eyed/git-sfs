@@ -17,6 +17,7 @@ config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
+n_jobs = 0
 ```
 
 Allowed here:
@@ -31,6 +32,14 @@ Allowed here:
 - shared settings
 
 Supported remote types are `filesystem` and `rclone`.
+
+`[settings]` currently supports:
+
+- `algorithm = "sha256"`
+- `n_jobs = 0`
+
+`n_jobs` controls bounded parallel work for `add`, `import`, `push`, `pull`,
+and remote-heavy `verify` checks. `0` means auto.
 
 Forbidden here:
 

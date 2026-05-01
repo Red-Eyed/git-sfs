@@ -236,6 +236,97 @@ esac
 	}
 }
 
+func TestPullUsesParallelRcloneDownloads(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteRoot := filepath.Join(t.TempDir(), "remote")
+	logPath := filepath.Join(t.TempDir(), "rclone.log")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTimedRcloneTool(t, filepath.Join(bin, "rclone"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteRoot)
+	t.Setenv("RCLONE_TEST_LOG", logPath)
+	writeRcloneDataset(t, repo, "testremote", "dataset")
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range []string{"data/one.bin", "data/two.bin"} {
+			h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, rel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			src := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+			dst := filepath.Join(remoteRoot, "dataset", "files", hash.Algorithm, h.Prefix(), h.String())
+			mustCopy(t, src, dst)
+			if err := os.Remove(src); err != nil {
+				t.Fatal(err)
+			}
+		}
+		start := time.Now()
+		if err := a.Pull(context.Background(), "data"); err != nil {
+			t.Fatal(err)
+		}
+		if time.Since(start) > 3200*time.Millisecond {
+			t.Fatalf("pull took too long to be parallel: %s", time.Since(start))
+		}
+	})
+
+	assertParallelStarts(t, logPath, "downloads")
+}
+
+func TestVerifyUsesParallelRemoteChecks(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteRoot := filepath.Join(t.TempDir(), "remote")
+	logPath := filepath.Join(t.TempDir(), "rclone.log")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTimedRcloneTool(t, filepath.Join(bin, "rclone"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteRoot)
+	t.Setenv("RCLONE_TEST_LOG", logPath)
+	writeRcloneDataset(t, repo, "testremote", "dataset")
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
+	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range []string{"data/one.bin", "data/two.bin"} {
+			h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, rel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			src := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+			dst := filepath.Join(remoteRoot, "dataset", "files", hash.Algorithm, h.Prefix(), h.String())
+			mustCopy(t, src, dst)
+		}
+		start := time.Now()
+		if err := a.Verify(context.Background(), true, false, "data"); err != nil {
+			t.Fatal(err)
+		}
+		if time.Since(start) > 3200*time.Millisecond {
+			t.Fatalf("verify took too long to be parallel: %s", time.Since(start))
+		}
+	})
+
+	assertParallelStarts(t, logPath, "remote checks")
+}
+
 func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
@@ -959,6 +1050,78 @@ func mustWrite(t *testing.T, path string, content []byte) {
 func writeTool(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeTimedRcloneTool(t *testing.T, path string) {
+	t.Helper()
+	writeTool(t, path, `set -eu
+if [ "${1:-}" = "--config" ]; then
+  shift 2
+fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    testremote:*) printf '%s/%s\n' "$RCLONE_TEST_ROOT" "${1#testremote:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    case "$src" in
+      "$RCLONE_TEST_ROOT"/*)
+        printf 'start %s\n' "$src" >> "$RCLONE_TEST_LOG"
+        sleep 1
+        cp "$src" "$dst"
+        printf 'end %s\n' "$src" >> "$RCLONE_TEST_LOG"
+        ;;
+      *)
+        cp "$src" "$dst"
+        ;;
+    esac
+    ;;
+  moveto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+`)
+}
+
+func assertParallelStarts(t *testing.T, logPath, label string) {
+	t.Helper()
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("unexpected %s log:\n%s", label, log)
+	}
+	if !strings.HasPrefix(lines[0], "start ") || !strings.HasPrefix(lines[1], "start ") {
+		t.Fatalf("%s did not start in parallel:\n%s", label, log)
+	}
+}
+
+func mustCopy(t *testing.T, src, dst string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
