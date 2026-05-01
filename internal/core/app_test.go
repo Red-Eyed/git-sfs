@@ -620,87 +620,29 @@ func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 	})
 }
 
-func TestGCDoesNotDeleteReferencedFiles(t *testing.T) {
+func TestAddWithCancelledContextLeavesFilesIntact(t *testing.T) {
 	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("live"))
+	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
+	mustWrite(t, filepath.Join(repo, "data", "a.bin"), []byte("aaa"))
+	mustWrite(t, filepath.Join(repo, "data", "b.bin"), []byte("bbb"))
 
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := app(&bytes.Buffer{}).Add(ctx, []string{"data"})
+		if err == nil {
+			t.Fatal("expected error with cancelled context")
 		}
-		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		dead := filepath.Join(cacheDir, "files", hash.Algorithm, "ff", strings.Repeat("f", 64))
-		if err := os.MkdirAll(filepath.Dir(dead), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(dead, []byte("dead"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := app(&bytes.Buffer{}).GC(context.Background(), GCOptions{Files: true}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(dead); !os.IsNotExist(err) {
-			t.Fatalf("unreferenced file was not removed: %v", err)
-		}
-		live := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if err := hash.VerifyFile(live, h); err != nil {
-			t.Fatal(err)
-		}
-	})
-}
-
-func TestGCDryRunReportsUnreferencedFilesWithoutDeletingLiveFiles(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
-	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
-
-	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data"}); err != nil {
-			t.Fatal(err)
-		}
-		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "two.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		live := filepath.Join(cacheDir, "files", hash.Algorithm, h1.Prefix(), h1.String())
-		dead := filepath.Join(cacheDir, "files", hash.Algorithm, "ff", strings.Repeat("f", 64))
-		if err := os.MkdirAll(filepath.Dir(dead), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(dead, []byte("dead"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		stdout := &bytes.Buffer{}
-		if err := app(stdout).GC(context.Background(), GCOptions{DryRun: true, Files: true}); err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(stdout.String(), "would remove "+dead) {
-			t.Fatalf("dry-run output missing dead file: %q", stdout.String())
-		}
-		if !strings.Contains(stdout.String(), "gc dry-run would remove 1 file(s)") {
-			t.Fatalf("dry-run summary missing or wrong: %q", stdout.String())
-		}
-		if err := hash.VerifyFile(live, h1); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String()), h2); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(dead); err != nil {
-			t.Fatalf("dry-run should not delete dead file: %v", err)
+		// Both original files must still exist as regular files.
+		for _, name := range []string{"data/a.bin", "data/b.bin"} {
+			info, err := os.Lstat(filepath.Join(repo, name))
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				t.Fatalf("%s was converted despite cancelled context", name)
+			}
 		}
 	})
 }

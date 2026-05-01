@@ -26,7 +26,6 @@ func TestHelp(t *testing.T) {
 		"  verify",
 		"  push",
 		"  pull",
-		"  gc",
 		"  help",
 	} {
 		if !strings.Contains(got, want) {
@@ -99,7 +98,6 @@ func TestCommandDispatch(t *testing.T) {
 			{"verify"},
 			{"verify", "data/blob"},
 			{"pull", "data/blob"},
-			{"gc", "--dry-run"},
 		} {
 			stderr.Reset()
 			verboseArgs := append([]string{"--verbose"}, args...)

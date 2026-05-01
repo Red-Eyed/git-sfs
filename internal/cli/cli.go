@@ -108,16 +108,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			path = cmdArgs[0]
 		}
 		return app.Pull(ctx, path)
-	case "gc":
-		gfs := flag.NewFlagSet("gc", flag.ContinueOnError)
-		gfs.SetOutput(stderr)
-		var dryRun, files bool
-		gfs.BoolVar(&dryRun, "dry-run", false, "show what would be deleted")
-		gfs.BoolVar(&files, "files", false, "remove unreferenced cache files")
-		if err := gfs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		return app.GC(ctx, core.GCOptions{DryRun: dryRun, Files: files})
 	case "help", "-h", "--help":
 		usage(stdout)
 		return nil
@@ -145,6 +135,5 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  verify")
 	fmt.Fprintln(w, "  push")
 	fmt.Fprintln(w, "  pull")
-	fmt.Fprintln(w, "  gc")
 	fmt.Fprintln(w, "  help")
 }

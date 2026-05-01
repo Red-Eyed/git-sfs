@@ -34,11 +34,6 @@ type App struct {
 	Verbose    bool
 }
 
-type GCOptions struct {
-	DryRun bool
-	Files  bool
-}
-
 type ImportOptions struct {
 	FollowSymlinks bool
 }
@@ -231,6 +226,9 @@ func (a App) Add(ctx context.Context, paths []string) (err error) {
 	defer bar.Close()
 	prepared := prepareAddFiles(ctx, c, files, a.jobs(cfg, len(files)))
 	for i, file := range files {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if prepared[i].Err != nil {
 			return prepared[i].Err
 		}
@@ -295,6 +293,9 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 		imported[item.Key] = item.Hash
 	}
 	for _, pair := range pairs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		h, ok := imported[pair.Key]
 		if !ok {
 			return fmt.Errorf("missing prepared import for %s", pair.Src)
@@ -532,42 +533,6 @@ func (a App) Pull(ctx context.Context, path string) (err error) {
 	return errors.Join(pullErrs...)
 }
 
-// GC removes only data that is not referenced by the current Git symlink tree.
-func (a App) GC(ctx context.Context, opts GCOptions) (err error) {
-	a.debugf("gc: start dry_run=%t files=%t", opts.DryRun, opts.Files)
-	defer a.debugDone("gc", &err)
-	repo, c, _, err := a.open()
-	if err != nil {
-		return err
-	}
-	l, err := lock.Acquire(ctx, c.LocksDir(), "gc")
-	if err != nil {
-		return err
-	}
-	defer l.Release()
-	if !opts.Files {
-		opts.Files = true
-	}
-	links, err := collectGitSFSSymlinks(repo, ".")
-	if err != nil {
-		return err
-	}
-	live := map[string]bool{}
-	for _, l := range links {
-		live[l.Hash.String()] = true
-	}
-	if opts.Files {
-		root := filepath.Join(c.Root, "files", hash.Algorithm)
-		removed, err := removeUnreferenced(root, live, opts.DryRun, a.Stdout)
-		if err != nil {
-			return err
-		}
-		if opts.DryRun {
-			fmt.Fprintf(a.Stdout, "gc dry-run would remove %d file(s)\n", removed)
-		}
-	}
-	return nil
-}
 
 func (a App) open() (string, cache.Cache, config.Config, error) {
 	repo, err := localstate.ResolveRepo()
@@ -1037,31 +1002,6 @@ func ensureGitignore(repo string) error {
 	return err
 }
 
-func removeUnreferenced(root string, live map[string]bool, dry bool, w io.Writer) (int, error) {
-	var removed int
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if live[filepath.Base(path)] {
-			return nil
-		}
-		if dry {
-			fmt.Fprintln(w, "would remove "+path)
-			removed++
-			return nil
-		}
-		removed++
-		return os.Remove(path)
-	})
-	return removed, err
-}
 
 func shouldSkip(repo, path string) bool {
 	base := filepath.Base(path)
