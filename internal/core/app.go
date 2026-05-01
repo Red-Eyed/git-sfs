@@ -140,7 +140,7 @@ func (a App) Init(ctx context.Context, force bool) (err error) {
 func (a App) Setup(ctx context.Context) (err error) {
 	a.debugf("setup: start")
 	defer a.debugDone("setup", &err)
-	repo, c, _, err := a.open()
+	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,9 @@ func (a App) Setup(ctx context.Context) (err error) {
 	hashes := uniqueHashesFromTracked(links)
 	bar := progress.New(a.Stderr, "setup", len(hashes), a.Quiet)
 	defer bar.Close()
-	for _, h := range hashes {
+	setupErrs := make([]error, len(hashes))
+	runIndexed(ctx, len(hashes), a.jobs(cfg, len(hashes)), func(i int) error {
+		h := hashes[i]
 		if c.HasValid(h) {
 			if err := c.Protect(h); err != nil {
 				return err
@@ -172,6 +174,12 @@ func (a App) Setup(ctx context.Context) (err error) {
 			}
 		}
 		bar.Step()
+		return nil
+	}, func(i int, err error) {
+		setupErrs[i] = err
+	})
+	if err := errors.Join(setupErrs...); err != nil {
+		return err
 	}
 	a.say("setup complete")
 	return nil
@@ -333,7 +341,7 @@ func (a App) Verify(ctx context.Context, checkRemote, withIntegrity bool, path s
 }
 
 func (a App) Materialize(ctx context.Context, path string) error {
-	repo, c, _, err := a.open()
+	repo, c, cfg, err := a.open()
 	if err != nil {
 		return err
 	}
@@ -344,7 +352,9 @@ func (a App) Materialize(ctx context.Context, path string) error {
 	hashes := uniqueHashesFromTracked(links)
 	bar := progress.New(a.Stderr, "pull", len(hashes), a.Quiet)
 	defer bar.Close()
-	for _, h := range hashes {
+	matErrs := make([]error, len(hashes))
+	runIndexed(ctx, len(hashes), a.jobs(cfg, len(hashes)), func(i int) error {
+		h := hashes[i]
 		if err := c.Protect(h); err != nil {
 			return err
 		}
@@ -352,8 +362,11 @@ func (a App) Materialize(ctx context.Context, path string) error {
 			return err
 		}
 		bar.Step()
-	}
-	return nil
+		return nil
+	}, func(i int, err error) {
+		matErrs[i] = err
+	})
+	return errors.Join(matErrs...)
 }
 
 func (a App) Dematerialize(ctx context.Context, path string) error {
@@ -506,15 +519,17 @@ func (a App) Pull(ctx context.Context, path string) (err error) {
 	if err := pullMissingFiles(ctx, c, r, hashes, a.jobs(cfg, len(hashes))); err != nil {
 		return err
 	}
-	for _, h := range hashes {
+	pullErrs := make([]error, len(hashes))
+	runIndexed(ctx, len(hashes), a.jobs(cfg, len(hashes)), func(i int) error {
+		h := hashes[i]
 		if err := c.Protect(h); err != nil {
 			return err
 		}
-		if err := materialize.Link(repo, c, h); err != nil {
-			return err
-		}
-	}
-	return nil
+		return materialize.Link(repo, c, h)
+	}, func(i int, err error) {
+		pullErrs[i] = err
+	})
+	return errors.Join(pullErrs...)
 }
 
 // GC removes only data that is not referenced by the current Git symlink tree.
