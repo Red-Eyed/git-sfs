@@ -71,8 +71,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "import":
 		ifs := flag.NewFlagSet("import", flag.ContinueOnError)
 		ifs.SetOutput(stderr)
-		var followSymlinks bool
+		var followSymlinks, move bool
 		ifs.BoolVar(&followSymlinks, "L", false, "follow source symlinks")
+		ifs.BoolVar(&move, "move", false, "delete source files after caching (default: copy, leave source intact)")
 		if err := ifs.Parse(cmdArgs); err != nil {
 			return err
 		}
@@ -80,7 +81,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if len(cmdArgs) != 2 {
 			return fmt.Errorf("%s requires source and destination", cmd)
 		}
-		return app.ImportWithOptions(ctx, cmdArgs[0], cmdArgs[1], core.ImportOptions{FollowSymlinks: followSymlinks})
+		return app.ImportWithOptions(ctx, cmdArgs[0], cmdArgs[1], core.ImportOptions{FollowSymlinks: followSymlinks, Move: move})
 	case "verify":
 		vfs := flag.NewFlagSet("verify", flag.ContinueOnError)
 		vfs.SetOutput(stderr)
@@ -143,7 +144,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  init")
 	fmt.Fprintln(w, "  setup")
 	fmt.Fprintln(w, "  add")
-	fmt.Fprintln(w, "  import")
+	fmt.Fprintln(w, "  import  [--move] [-L] <src> <dst>")
 	fmt.Fprintln(w, "  verify  [-r remote] [--remote] [--with-integrity] [path]")
 	fmt.Fprintln(w, "  push    [-r remote]")
 	fmt.Fprintln(w, "  pull    [-r remote] [path]")

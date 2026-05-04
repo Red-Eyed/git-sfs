@@ -241,9 +241,7 @@ scenario_import_workflows() {
   printf "large payload\n" > "$outside/dataset/sub/blob.bin"
   (
     cd "$repo"
-    # Import should consume the source tree rather than duplicate it inside the
-    # repository when a rename is possible.
-    git_sfs import "$outside/dataset" data/dataset >/dev/null
+    git_sfs import --move "$outside/dataset" data/dataset >/dev/null
     git add data/dataset
     git commit -qm "track imported dataset"
     git_sfs push >/dev/null
@@ -256,9 +254,7 @@ scenario_import_workflows() {
   ln -s "$outside/source.bin" "$outside/follow/source-link.bin"
   (
     cd "$repo"
-    # With -L, the imported bytes should come from the symlink target while the
-    # source-side entry is still consumed as part of the move/import workflow.
-    git_sfs import -L "$outside/follow" data/followed >/dev/null
+    git_sfs import --move -L "$outside/follow" data/followed >/dev/null
     git add data/followed
     git commit -qm "track followed imports"
     git_sfs push >/dev/null

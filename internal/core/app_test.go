@@ -296,7 +296,7 @@ func TestMoveFileIntoCacheWithoutCopyingToRepo(t *testing.T) {
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, src, []byte("large payload"))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Import(context.Background(), src, "data/blob.bin"); err != nil {
+		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), src, "data/blob.bin", ImportOptions{Move: true}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -336,7 +336,7 @@ func TestImportResolvesSourceFileSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/blob.bin", ImportOptions{FollowSymlinks: true}); err != nil {
+		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/blob.bin", ImportOptions{FollowSymlinks: true, Move: true}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -397,7 +397,7 @@ func TestMoveDirectoryIntoCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), srcDir, "data/imported", ImportOptions{FollowSymlinks: true}); err != nil {
+		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), srcDir, "data/imported", ImportOptions{FollowSymlinks: true, Move: true}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -428,7 +428,7 @@ func TestImportResolvesSourceDirectorySymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/imported", ImportOptions{FollowSymlinks: true}); err != nil {
+		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/imported", ImportOptions{FollowSymlinks: true, Move: true}); err != nil {
 			t.Fatal(err)
 		}
 	})

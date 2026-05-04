@@ -19,6 +19,7 @@ import (
 
 type ImportOptions struct {
 	FollowSymlinks bool
+	Move           bool // delete source after caching; default is copy (leave source intact)
 }
 
 type movePair struct {
@@ -65,7 +66,7 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 	}
 	bar := progress.New(a.Stderr, "import", len(pairs), a.Quiet)
 	defer bar.Close()
-	prepared := prepareImportFiles(ctx, c, pairs, a.jobs(cfg, len(pairs)))
+	prepared := prepareImportFiles(ctx, c, pairs, opts, a.jobs(cfg, len(pairs)))
 	imported := map[string]hash.Hash{}
 	for _, item := range prepared {
 		if item.Err != nil {
@@ -97,12 +98,14 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 		a.say("imported " + pair.Src + " -> " + rel(repo, pair.Dst) + " -> " + h.String())
 		bar.Step()
 	}
-	removeSourceLinks(links)
-	removeEmptyDirs(dirs)
+	if opts.Move {
+		removeSourceLinks(links)
+		removeEmptyDirs(dirs)
+	}
 	return nil
 }
 
-func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, workers int) []importPrepared {
+func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, opts ImportOptions, workers int) []importPrepared {
 	seen := map[string]movePair{}
 	var unique []movePair
 	for _, pair := range pairs {
@@ -119,8 +122,14 @@ func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, wo
 		if err != nil {
 			return err
 		}
-		if err := c.Move(pair.Src, h); err != nil {
-			return fmt.Errorf("import %s: %w", pair.Src, err)
+		var cacheErr error
+		if opts.Move {
+			cacheErr = c.Move(pair.Src, h)
+		} else {
+			cacheErr = c.Store(pair.Src, h)
+		}
+		if cacheErr != nil {
+			return fmt.Errorf("import %s: %w", pair.Src, cacheErr)
 		}
 		out[i] = importPrepared{Key: pair.Key, Hash: h}
 		return nil

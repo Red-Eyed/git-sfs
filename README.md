@@ -162,7 +162,7 @@ Import a huge external file or directory into the cache without first copying it
 git-sfs import /mnt/incoming/data data/
 ```
 
-`git-sfs import` hashes the source, moves the bytes into the cache, and creates repo symlinks at the destination. When the source and cache are on the same filesystem this uses rename; across filesystems it falls back to copy-verify-remove.
+`git-sfs import` hashes the source, copies the bytes into the cache, verifies them, and creates repo symlinks at the destination. The source is left intact. Add `--move` to consume the source instead (rename on the same filesystem, copy-verify-remove across filesystems).
 
 Source symlinks are rejected unless you pass `-L`:
 
@@ -209,6 +209,7 @@ git-sfs --version
 git-sfs setup
 git-sfs add <path>
 git-sfs import <src> <dst>
+git-sfs import --move <src> <dst>
 git-sfs import -L <src> <dst>
 git-sfs verify
 git-sfs verify [path]
@@ -328,9 +329,9 @@ the symlink with a new regular file, run `git-sfs add <path>`, commit the new
 symlink, and push the new cached bytes.
 
 `git-sfs import <src> <dst>` is for importing very large external files or
-directories without making a second repository copy. It prefers filesystem
-rename semantics, and falls back to copy-verify-remove when the source and cache
-are on different filesystems.
+directories. By default the source is left intact. Pass `--move` to consume
+the source: on the same filesystem this uses rename; across filesystems it
+falls back to copy-verify-remove.
 
 Shared caches are supported, but `git-sfs gc --files` only knows about the
 current repository. Avoid cache GC on shared caches unless you have a cross-repo
