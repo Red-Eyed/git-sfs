@@ -11,11 +11,8 @@ import (
 
 // Remote hides backend details from push and pull workflow code.
 type Remote interface {
-	// Ping does a lightweight check that the remote is reachable.
-	// A missing remote path is treated as success.
-	Ping(ctx context.Context) error
-	// RequireExists checks that the remote root path exists.
-	// Unlike Ping, a missing path is an error.
+	// RequireExists checks that the remote root path exists and is reachable.
+	// Returns an error if the path is missing or the backend is unreachable.
 	RequireExists(ctx context.Context) error
 	HasFile(ctx context.Context, h hash.Hash) (bool, error)
 	CheckFile(ctx context.Context, h hash.Hash) (bool, error)

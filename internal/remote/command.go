@@ -65,24 +65,6 @@ func CheckRcloneOnPath() error {
 	return nil
 }
 
-// Ping checks that the remote is reachable with a lightweight lsjson call.
-// A missing path is treated as success: the backend is reachable, the directory
-// just hasn't been created yet (normal before first push).
-func (r rcloneRemote) Ping(ctx context.Context) error {
-	_, err := r.runOutput(ctx, "lsjson", r.url)
-	if err == nil {
-		return nil
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
-		return nil
-	}
-	return fmt.Errorf("remote unreachable (%s): %w", r.url, err)
-}
-
 // RequireExists checks that the remote root exists. Unlike Ping, a missing
 // path is an error — use this before push to prevent accidental creation of
 // files at a wrong path.

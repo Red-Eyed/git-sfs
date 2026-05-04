@@ -96,13 +96,13 @@ func (a App) debugf(format string, args ...any) {
 	fmt.Fprintf(a.Stderr, "debug: "+format+"\n", args...)
 }
 
-// preflight checks that rclone is on PATH and the remote is reachable.
+// preflight checks that rclone is on PATH and that the remote root exists.
 // Call this after selectRemote, before starting any transfer.
 func (a App) preflight(ctx context.Context, r remote.Remote) error {
 	if err := remote.CheckRcloneOnPath(); err != nil {
 		return err
 	}
-	return r.Ping(ctx)
+	return r.RequireExists(ctx)
 }
 
 func (a App) debugDone(name string, err *error) {

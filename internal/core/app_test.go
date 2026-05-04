@@ -1109,6 +1109,27 @@ func TestPullSkipsExistingValidCacheFile(t *testing.T) {
 	})
 }
 
+func TestPullFailsForMissingRemotePath(t *testing.T) {
+	repo := newRepo(t)
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("RCLONE_TEST_ROOT", filepath.Join(t.TempDir(), "nonexistent"))
+		err := a.Pull(context.Background(), "", ".")
+		if err == nil {
+			t.Fatal("expected error when remote root does not exist")
+		}
+		if !strings.Contains(err.Error(), "does not exist") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestPullRejectsHashMismatch(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
