@@ -620,6 +620,68 @@ func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 	})
 }
 
+func TestVerifyDetectsWrongCachePermissions(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	stdout := &bytes.Buffer{}
+	inDir(t, repo, func() {
+		a := app(stdout)
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		// Make writable without changing content, so hash still matches.
+		if err := os.Chmod(cacheFile, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		if err := app(stdout).Verify(context.Background(), "", false, true, "."); err == nil {
+			t.Fatal("verify should fail for writable cache file")
+		}
+		if !strings.Contains(stdout.String(), "wrong cache permissions: 1") {
+			t.Fatalf("verify did not report wrong permissions: %q", stdout.String())
+		}
+	})
+}
+
+func TestVerifyOrphanHint(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	stdout := &bytes.Buffer{}
+	inDir(t, repo, func() {
+		a := app(stdout)
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		// Write a fake cache file that no symlink references.
+		orphanDir := filepath.Join(cacheDir, "files", hash.Algorithm, "ab")
+		if err := os.MkdirAll(orphanDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		orphanFile := filepath.Join(orphanDir, "ab"+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		if err := os.WriteFile(orphanFile, []byte("orphan"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		if err := app(stdout).Verify(context.Background(), "", false, false, "."); err != nil {
+			t.Fatalf("verify should pass (no issues): %v", err)
+		}
+		if !strings.Contains(stdout.String(), "orphaned cache object") {
+			t.Fatalf("verify did not hint at orphans: %q", stdout.String())
+		}
+	})
+}
+
 func TestAddWithCancelledContextLeavesFilesIntact(t *testing.T) {
 	repo := newRepo(t)
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))

@@ -27,6 +27,8 @@ type issue struct {
 
 type statusReport struct {
 	TrackedSymlinks int
+	OrphanCount     int
+	TrackedHashes   map[string]struct{}
 	Issues          []issue
 }
 
@@ -77,12 +79,32 @@ func (a App) Verify(ctx context.Context, remoteName string, checkRemote, withInt
 	if err != nil {
 		return err
 	}
+	orphans, err := countOrphans(c, report)
+	if err != nil {
+		return err
+	}
+	report.OrphanCount = orphans
+	printReport(a.Stdout, report)
 	if len(report.Issues) > 0 {
-		printReport(a.Stdout, report)
-		return fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
+		return verifyError(report)
 	}
 	a.say("verify ok")
 	return nil
+}
+
+// verifyError returns a typed error whose sentinel reflects the most severe issue kind,
+// so the process exits with the right code (3 for integrity failures, 2 otherwise).
+func verifyError(report statusReport) error {
+	base := fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
+	for _, item := range report.Issues {
+		switch item.Kind {
+		case "corrupt cache file", "wrong cache permissions":
+			return fmt.Errorf("%w: %w", errs.ErrCorruptCachedFile, base)
+		case "corrupt remote file":
+			return fmt.Errorf("%w: %w", errs.ErrCorruptRemoteFile, base)
+		}
+	}
+	return base
 }
 
 func nameOrDefault(name string) string {
@@ -130,6 +152,10 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 	})
 	if err != nil {
 		return report, err
+	}
+	report.TrackedHashes = make(map[string]struct{}, len(tracked))
+	for _, item := range tracked {
+		report.TrackedHashes[item.Hash.String()] = struct{}{}
 	}
 	cacheStatus := checkCacheFiles(ctx, c, tracked, withIntegrity, jobsFromSettings(cfg.Settings.Jobs, len(tracked)))
 	for _, item := range tracked {
@@ -264,6 +290,25 @@ func runHashes(ctx context.Context, hashes []hash.Hash, workers int, work func(h
 	}, func(i int, err error) {})
 }
 
+// countOrphans counts cache files that are not referenced by any tracked symlink.
+func countOrphans(c cache.Cache, report statusReport) (int, error) {
+	root := filepath.Join(c.Root, "files", hash.Algorithm)
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return 0, nil
+	}
+	orphans := 0
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if _, ok := report.TrackedHashes[d.Name()]; !ok {
+			orphans++
+		}
+		return nil
+	})
+	return orphans, err
+}
+
 func printReport(w io.Writer, report statusReport) {
 	counts := map[string]int{}
 	for _, item := range report.Issues {
@@ -272,6 +317,9 @@ func printReport(w io.Writer, report statusReport) {
 	fmt.Fprintf(w, "tracked symlinks: %d\n", report.TrackedSymlinks)
 	for _, kind := range issueKinds {
 		fmt.Fprintf(w, "%s: %d\n", pluralKind(kind), counts[kind])
+	}
+	if report.OrphanCount > 0 {
+		fmt.Fprintf(w, "# %d orphaned cache object(s) (run git-sfs gc to reclaim)\n", report.OrphanCount)
 	}
 	if len(report.Issues) == 0 {
 		return
