@@ -211,17 +211,21 @@ func runOutput(ctx context.Context, debug io.Writer, name string, args ...string
 		fmt.Fprintln(debug, "run:", shellQuote(append([]string{name}, args...)))
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	if err == nil {
-		return string(out), nil
+		return stdout.String(), nil
 	}
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
-	if len(out) == 0 {
+	msg := strings.TrimSpace(stderr.String())
+	if msg == "" {
 		return "", err
 	}
-	return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	return "", fmt.Errorf("%w: %s", err, msg)
 }
 
 func shellQuote(args []string) string {
