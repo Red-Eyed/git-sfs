@@ -1,62 +1,74 @@
 # Installation
 
-Install the latest release:
+## Standard install
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
-By default this installs to:
+## Behind a proxy that blocks raw.githubusercontent.com
 
-```text
-$HOME/.local/bin/git-sfs
-```
-
-The installer also installs the latest stable `rclone` into the same directory
-by default. To skip this:
+Download the install script from the release assets instead — served from `github.com/releases/download`, a different host:
 
 ```sh
-GIT_SFS_INSTALL_RCLONE=0 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
+curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/latest/download/install.sh | sh
 ```
 
-Override the install directory:
+Or download a specific version:
 
 ```sh
-GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
+curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/download/v1.6.0/install.sh | sh
+```
+
+## Build from source
+
+Requires only `git` access to `github.com` and a Go toolchain:
+
+```sh
+git clone https://github.com/Red-Eyed/git-sfs
+cd git-sfs
+go build -o ~/.local/bin/git-sfs ./cmd/git-sfs
+```
+
+---
+
+## Installer options
+
+By default installs to `$HOME/.local/bin`. Override:
+
+```sh
+GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf .../install.sh | sh
+```
+
+The installer also installs the latest stable `rclone` if not already on `PATH`. To skip:
+
+```sh
+GIT_SFS_INSTALL_RCLONE=0 curl -LsSf .../install.sh | sh
 ```
 
 Install a specific version:
 
 ```sh
-GIT_SFS_VERSION=v0.1.0 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
+GIT_SFS_VERSION=v1.6.0 curl -LsSf .../install.sh | sh
 ```
 
-Corporate networks that intercept TLS with a private certificate authority can
-point curl and the installer at that CA bundle:
+Corporate CA bundle:
 
 ```sh
-SSL_CERT_FILE=/path/to/corporate-ca.pem curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | SSL_CERT_FILE=/path/to/corporate-ca.pem sh
+SSL_CERT_FILE=/path/to/corporate-ca.pem curl -LsSf .../install.sh | SSL_CERT_FILE=/path/to/corporate-ca.pem sh
 ```
 
-The installer respects `GIT_SFS_SSL_CERT_FILE`, `SSL_CERT_FILE`, and
-`CURL_CA_BUNDLE` for its GitHub and rclone downloads. If a trusted CA bundle is
-not available, it can opt into insecure download TLS:
+Skip TLS verification entirely (last resort):
 
 ```sh
-curl -kLsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | GIT_SFS_INSECURE_TLS=1 sh
+curl -kLsSf .../install.sh | GIT_SFS_INSECURE_TLS=1 sh
 ```
 
-Supported release targets:
+## Supported targets
 
 ```text
 darwin/amd64
 darwin/arm64
 linux/amd64
 linux/arm64
-```
-
-Build from source:
-
-```sh
-go build ./cmd/git-sfs
 ```

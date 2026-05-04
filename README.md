@@ -25,7 +25,14 @@ loudly when referenced files are missing.
 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```
 
+If `raw.githubusercontent.com` is blocked (corporate proxy), use the release asset URL instead:
+
+```sh
+curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/latest/download/install.sh | sh
+```
+
 Prebuilt binaries for macOS and Linux (arm64 and x86_64). Installs `rclone` too if not already on `PATH`.
+See [docs/installation.md](docs/installation.md) for proxy, CA bundle, and source-build options.
 
 Build from source:
 
