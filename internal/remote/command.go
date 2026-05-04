@@ -158,10 +158,21 @@ func (r rcloneRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string)
 	if err := r.run(ctx, "copyto", srcPath, tmp); err != nil {
 		return err
 	}
+	// Re-check existence after upload: another push may have landed the file
+	// while we were uploading. Remote files are immutable — never overwrite.
+	has, err := r.HasFile(ctx, h)
+	if err != nil {
+		_ = r.run(ctx, "deletefile", tmp)
+		return err
+	}
+	if has {
+		_ = r.run(ctx, "deletefile", tmp)
+		return nil
+	}
 	if err := r.run(ctx, "moveto", tmp, dst); err != nil {
 		return fmt.Errorf("publish remote file: %w", err)
 	}
-	has, err := r.HasFile(ctx, h)
+	has, err = r.HasFile(ctx, h)
 	if err != nil {
 		return err
 	}
