@@ -137,3 +137,67 @@ func TestLoadLocalMissingIsEmpty(t *testing.T) {
 		t.Fatalf("unexpected cache path %q", local.CachePath)
 	}
 }
+
+func TestParseSemver(t *testing.T) {
+	cases := []struct {
+		in   string
+		want [3]int
+		fail bool
+	}{
+		{"1.67.0", [3]int{1, 67, 0}, false},
+		{"v1.67.0", [3]int{1, 67, 0}, false},
+		{"0.0.1", [3]int{0, 0, 1}, false},
+		{"1.60", [3]int{}, true},
+		{"nope", [3]int{}, true},
+		{"a.b.c", [3]int{}, true},
+	}
+	for _, tc := range cases {
+		got, err := ParseSemver(tc.in)
+		if tc.fail {
+			if err == nil {
+				t.Errorf("ParseSemver(%q): expected error", tc.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseSemver(%q): unexpected error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("ParseSemver(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCheckRcloneVersion(t *testing.T) {
+	if err := CheckRcloneVersion("1.67.0", "1.60.0"); err != nil {
+		t.Errorf("1.67.0 >= 1.60.0 should pass: %v", err)
+	}
+	if err := CheckRcloneVersion("1.60.0", "1.60.0"); err != nil {
+		t.Errorf("equal versions should pass: %v", err)
+	}
+	if err := CheckRcloneVersion("1.59.9", "1.60.0"); err == nil {
+		t.Error("1.59.9 < 1.60.0 should fail")
+	}
+	if err := CheckRcloneVersion("2.0.0", "1.99.9"); err != nil {
+		t.Errorf("major version bump should pass: %v", err)
+	}
+	if err := CheckRcloneVersion("1.60.0", "nope"); err == nil {
+		t.Error("malformed minimum should fail")
+	}
+}
+
+func TestLoadMinRcloneVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := "version = 1\n\n[remotes.default]\nbackend = r\npath = p\n\n[settings]\nalgorithm = sha256\nmin_rclone_version = \"1.67.0\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Settings.MinRcloneVersion != "1.67.0" {
+		t.Fatalf("min_rclone_version = %q", cfg.Settings.MinRcloneVersion)
+	}
+}

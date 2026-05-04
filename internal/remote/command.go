@@ -175,6 +175,29 @@ func shellQuote(args []string) string {
 	return strings.Join(parts, " ")
 }
 
+// DetectRcloneVersion runs "rclone version" and extracts the version string (e.g. "1.67.0").
+// rcloneConfig is passed via --config if non-empty.
+func DetectRcloneVersion(ctx context.Context, rcloneConfig string) (string, error) {
+	args := []string{"version"}
+	if rcloneConfig != "" {
+		args = append([]string{"--config", rcloneConfig}, args...)
+	}
+	out, err := runOutput(ctx, nil, "rclone", args...)
+	if err != nil {
+		return "", fmt.Errorf("detect rclone version: %w", err)
+	}
+	for _, line := range strings.SplitAfter(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "rclone v") {
+			// line looks like "rclone v1.67.0"
+			ver := strings.TrimPrefix(line, "rclone v")
+			ver = strings.Fields(ver)[0] // strip any trailing text
+			return ver, nil
+		}
+	}
+	return "", fmt.Errorf("could not parse rclone version from output: %q", out)
+}
+
 func parseLSJSONExists(out string) (bool, error) {
 	trimmed := bytes.TrimSpace([]byte(out))
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("[]")) {

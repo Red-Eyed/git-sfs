@@ -12,6 +12,46 @@ import (
 	"git-sfs/internal/errs"
 )
 
+// ParseSemver parses a version string like "1.67.0" or "v1.67.0" into [major, minor, patch].
+func ParseSemver(s string) ([3]int, error) {
+	s = strings.TrimPrefix(s, "v")
+	parts := strings.SplitN(s, ".", 3)
+	if len(parts) != 3 {
+		return [3]int{}, fmt.Errorf("invalid semver %q: expected major.minor.patch", s)
+	}
+	var out [3]int
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return [3]int{}, fmt.Errorf("invalid semver %q: %w", s, err)
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
+// CheckRcloneVersion returns an error if detected is below minimum.
+// Both strings should be in "X.Y.Z" or "vX.Y.Z" form.
+func CheckRcloneVersion(detected, minimum string) error {
+	got, err := ParseSemver(detected)
+	if err != nil {
+		return fmt.Errorf("parse detected rclone version: %w", err)
+	}
+	min, err := ParseSemver(minimum)
+	if err != nil {
+		return errors.Join(errs.ErrInvalidConfig, fmt.Errorf("parse min_rclone_version: %w", err))
+	}
+	for i := range got {
+		if got[i] > min[i] {
+			return nil
+		}
+		if got[i] < min[i] {
+			return fmt.Errorf("rclone %s is below required %s", detected, minimum)
+		}
+	}
+	return nil
+}
+
 const Version = 1
 
 type Config struct {
@@ -27,8 +67,9 @@ type RemoteConfig struct {
 }
 
 type Settings struct {
-	Algorithm string
-	Jobs      int
+	Algorithm        string
+	Jobs             int
+	MinRcloneVersion string
 }
 
 type Local struct {
@@ -72,6 +113,8 @@ algorithm = "sha256"
 # Optional: cap parallel work for push, pull, verify, add, and import.
 # 0 means auto.
 n_jobs = 0
+# Optional: fail fast if the installed rclone is older than this version.
+# min_rclone_version = "1.67.0"
 `
 
 func Load(path string) (Config, error) {
@@ -137,6 +180,8 @@ func Load(path string) (Config, error) {
 					return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("invalid settings n_jobs %q", val))
 				}
 				cfg.Settings.Jobs = n
+			case "min_rclone_version":
+				cfg.Settings.MinRcloneVersion = val
 			default:
 				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown settings field %q", key))
 			}
