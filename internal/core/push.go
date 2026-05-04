@@ -9,6 +9,7 @@ import (
 	"git-sfs/internal/hash"
 	"git-sfs/internal/lock"
 	"git-sfs/internal/progress"
+	"git-sfs/internal/remote"
 )
 
 // Push uploads each referenced cache file at most once per invocation.
@@ -28,7 +29,10 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := a.preflight(ctx, r); err != nil {
+	if err := remote.CheckRcloneOnPath(); err != nil {
+		return err
+	}
+	if err := r.RequireExists(ctx); err != nil {
 		return err
 	}
 	links, err := collectGitSFSSymlinks(repo, ".")

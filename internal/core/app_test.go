@@ -113,6 +113,9 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\nbackend = local\npath = "+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
@@ -1033,6 +1036,30 @@ func TestPushFailsWhenRcloneNotOnPath(t *testing.T) {
 	})
 }
 
+func TestPushFailsForMissingRemotePath(t *testing.T) {
+	repo := newRepo(t)
+	// Set up with a valid remote so that Add works, then switch RCLONE_TEST_ROOT
+	// to a non-existent path before Push to exercise the RequireExists guard.
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		// Point RCLONE_TEST_ROOT at a path that does not exist.
+		t.Setenv("RCLONE_TEST_ROOT", filepath.Join(t.TempDir(), "nonexistent"))
+		err := a.Push(context.Background(), "")
+		if err == nil {
+			t.Fatal("expected error when remote root does not exist")
+		}
+		if !strings.Contains(err.Error(), "does not exist") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
@@ -1102,6 +1129,9 @@ func newRepo(t *testing.T) string {
 // directly still work because the fake rclone stores files there.
 func writeDataset(t *testing.T, repo, remoteDir string) {
 	t.Helper()
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	bin := t.TempDir()
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
 if [ "${1:-}" = "--config" ]; then shift 2; fi
@@ -1126,7 +1156,7 @@ case "$cmd" in
     elif [ -e "$src" ]; then
       printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
     else
-      printf '[]\n'
+      printf 'directory not found: %s\n' "$src" >&2; exit 1
     fi ;;
   moveto)
     src="$(map_path "$2")"

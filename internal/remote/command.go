@@ -83,6 +83,26 @@ func (r rcloneRemote) Ping(ctx context.Context) error {
 	return fmt.Errorf("remote unreachable (%s): %w", r.url, err)
 }
 
+// RequireExists checks that the remote root exists. Unlike Ping, a missing
+// path is an error — use this before push to prevent accidental creation of
+// files at a wrong path.
+func (r rcloneRemote) RequireExists(ctx context.Context) error {
+	out, err := r.runOutput(ctx, "lsjson", r.url)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
+			return fmt.Errorf("remote path does not exist: %s (create it before pushing)", r.url)
+		}
+		return fmt.Errorf("remote unreachable (%s): %w", r.url, err)
+	}
+	// An empty listing is fine — the remote directory exists but has no files yet.
+	_ = out
+	return nil
+}
+
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 	out, err := r.runOutput(ctx, "lsjson", r.remotePath(h))
 	if err != nil {
