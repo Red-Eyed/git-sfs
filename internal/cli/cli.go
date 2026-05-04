@@ -68,6 +68,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("add requires at least one path")
 		}
 		return app.Add(ctx, cmdArgs)
+	case "mv":
+		if len(cmdArgs) != 2 {
+			return fmt.Errorf("mv requires source and destination")
+		}
+		return app.Mv(cmdArgs[0], cmdArgs[1])
 	case "import":
 		ifs := flag.NewFlagSet("import", flag.ContinueOnError)
 		ifs.SetOutput(stderr)
@@ -144,6 +149,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  init")
 	fmt.Fprintln(w, "  setup")
 	fmt.Fprintln(w, "  add")
+	fmt.Fprintln(w, "  mv      <src> <dst>")
 	fmt.Fprintln(w, "  import  [--move] [-L] <src> <dst>")
 	fmt.Fprintln(w, "  verify  [-r remote] [--remote] [--with-integrity] [path]")
 	fmt.Fprintln(w, "  push    [-r remote]")

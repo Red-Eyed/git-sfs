@@ -106,6 +106,17 @@ the files they resolve to:
 git-sfs import -L /mnt/incoming/dataset data/dataset
 ```
 
+## git-sfs mv
+
+Move a git-sfs symlink to a new location inside the repository:
+
+```sh
+git-sfs mv data/old/blob.bin data/new/blob.bin
+git-sfs mv data/blob.bin datasets/      # places blob.bin inside datasets/
+```
+
+`git-sfs mv` rewrites the relative symlink target for the new path. The cache is not touched. Use this instead of `git mv` whenever the source and destination are at different directory depths — `git mv` preserves the old relative target verbatim, breaking the symlink.
+
 ## git-sfs verify
 
 Strict CI-oriented verification:

@@ -208,6 +208,7 @@ git-sfs init
 git-sfs --version
 git-sfs setup
 git-sfs add <path>
+git-sfs mv <src> <dst>
 git-sfs import <src> <dst>
 git-sfs import --move <src> <dst>
 git-sfs import -L <src> <dst>
