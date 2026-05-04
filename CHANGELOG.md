@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3
+
+### Added
+- Backend connectivity check before every push and pull: git-sfs now probes the backend root (e.g. `smb:`, `sftp:`, `s3:bucket`) with a lightweight call before checking the configured path. A broken rclone config or unreachable network produces a clear `"cannot connect to remote (check rclone config)"` error instead of a misleading `"path does not exist"` message.
+
+---
+
 ## v1.2
 
 ### Added
