@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.2
+
+### Fixed
+- `--verbose` progress bar now renders correctly. Previously rclone received an `io.Writer` pipe instead of the real file descriptor, so it could not detect a TTY and suppressed the animated `--progress` display.
+
+---
+
 ## v1.6.1
 
 ### Fixed
