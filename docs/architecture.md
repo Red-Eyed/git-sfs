@@ -48,11 +48,10 @@ sequential (per file)
 ```text
 collectGitSFSSymlinks(repo)   WalkDir; parse hash from each symlink in one pass
 uniqueHashesFromTracked       deduplicate by hash
+cache.HasValid(hash)          fail early if any cache file is missing
 
-parallel worker pool (per unique hash)
-  ├─ cache.HasValid(hash)     os.Stat check
-  ├─ remote.HasFile(hash)     rclone lsjson — skip if already present
-  └─ remote.PushFile(hash)    verify local bytes → rclone copyto tmp → rclone moveto dst → lsjson confirm
+remote.CopyToRemote           single rclone copy --ignore-existing --files-from <list>
+                              rclone's internal --transfers handles parallelism
 ```
 
 ### pull
@@ -60,18 +59,20 @@ parallel worker pool (per unique hash)
 ```text
 collectGitSFSSymlinks(repo, path)
 uniqueHashesFromTracked
+checkDiskSpace                parallel lsjson per missing hash; fail if < 110% free
 
-parallel worker pool (per unique hash)
-  └─ remote.PullFile(hash)    rclone copyto → verify hash → chmod read-only → rename
+remote.CopyFromRemote         single rclone copy --ignore-existing --files-from <list>
+                              corrupt/partial local files are removed first so
+                              --ignore-existing does not skip re-downloads
 
 sequential (per hash)
-  ├─ cache.Protect            make cache file read-only
+  ├─ cache.Protect            make cache file read-only; fails on hash mismatch
   └─ materialize.Link         bind .git-sfs/cache/<hash> → cache/<hash>
 ```
 
 ## Worker Pool
 
-All parallel work goes through `runIndexed` in `core/run.go`:
+Verify and the pull disk-space check use `runIndexed` in `core/run.go` for parallel remote queries:
 
 ```text
 jobs chan int  (unbuffered)
@@ -109,14 +110,16 @@ Files are written via temp-file + rename (`fsutil.AtomicCopy`). After a pull or 
 
 ```go
 type Remote interface {
-    HasFile(ctx, hash)            bool   // lsjson — cheap existence check
-    CheckFile(ctx, hash)          bool   // download + hash verify — use only for integrity checks
-    PushFile(ctx, hash, srcPath)  error  // verify local → upload to tmp → publish
-    PullFile(ctx, hash, dstPath)  error  // download to tmp → verify → rename
+    RequireExists(ctx, hash)                          error  // lsjson root — fail if path missing
+    HasFile(ctx, hash)                                bool   // lsjson — cheap existence check
+    CheckFile(ctx, hash)                              bool   // download + hash verify — integrity only
+    FileSize(ctx, hash)                               int64  // lsjson size — used for disk-space guard
+    CopyToRemote(ctx, cacheFilesDir, relPaths)        error  // single rclone copy upload
+    CopyFromRemote(ctx, cacheFilesDir, relPaths)      error  // single rclone copy download
 }
 ```
 
-One backend: `rcloneRemote` (subprocess per call). Each operation issues one rclone subprocess; there is no persistent rclone process.
+One backend: `rcloneRemote`. Push and pull each issue one rclone subprocess for the entire batch using `--files-from`. Verify and disk-space checks issue one `lsjson` subprocess per file in parallel. There is no persistent rclone process.
 
 ## What Deliberately Does Not Exist
 

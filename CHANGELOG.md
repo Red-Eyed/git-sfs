@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5
+
+### Changed
+- Push and pull now issue a single `rclone copy --ignore-existing --files-from <list>` call instead of one subprocess per file. All files are transferred in one rclone invocation; rclone's internal `--transfers` parallelism handles concurrency. This eliminates per-file connection overhead and reduces the number of rclone processes from O(N) to one.
+
+---
+
 ## v1.4
 
 ### Fixed
