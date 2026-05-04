@@ -90,13 +90,13 @@ When changing storage, symlink, cache, or remote behavior, add or update tests f
 
 ## Documentation
 
-`README.md` should stay user-focused:
+`README.md` must stay brief — it is a demonstration of usefulness, not a manual:
 
-- What the project does
-- Why users should care
+- What the project does (2–3 sentences)
 - Install command
-- Supported platforms
-- Quick start
-- Config and command examples
+- Minimal quick-start showing the core workflow
+- Links to `docs/` for everything else
+
+Do not duplicate `docs/commands.md`, `docs/configuration.md`, or any other reference doc in `README.md`. If you find yourself adding flag descriptions, full command lists, or detailed explanations to `README.md`, put them in the appropriate `docs/` file and add or update the link instead.
 
 Do not put secrets, local absolute cache paths, or temporary state in committed config examples except as clearly illustrative placeholders.

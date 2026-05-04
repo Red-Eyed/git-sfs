@@ -3,13 +3,8 @@
 [![CI](https://github.com/Red-Eyed/git-sfs/actions/workflows/ci.yml/badge.svg)](https://github.com/Red-Eyed/git-sfs/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Red-Eyed/git-sfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Red-Eyed/git-sfs)
 
-`git-sfs` stands for **Git Symbolic File Storage**. It is a small CLI for
-keeping large files out of Git while keeping your repository simple, cloneable,
-and understandable.
-
-It is like Git LFS in spirit, but Git tracks normal symlinks instead of pointer
-files. The large file bytes live in a local content-addressed cache and can be
-synced to a remote with `rclone`.
+`git-sfs` keeps large files — datasets, model checkpoints, media archives — out of
+Git while Git tracks exactly where they belong.
 
 ```text
 Git tracks symlinks.
@@ -17,339 +12,56 @@ git-sfs stores file bytes.
 rclone moves files.
 ```
 
-No LFS server. No database. No hidden manifest branch. No custom Git protocol.
-`git-sfs` is meant to stay a thin layer over Git, the filesystem, and tools people
-already know.
+No LFS server. No database. No pointer files. Git commits normal symlinks;
+the bytes live in a local content-addressed cache and sync to any rclone remote.
 
-## Why git-sfs?
-
-Git is excellent at source code and metadata. It is not excellent at multi-GB
-datasets, model checkpoints, media dumps, build artifacts, or experiment blobs.
-
-`git-sfs` gives you a boring, explicit way to keep those bytes outside Git while
-still letting the Git tree describe exactly which files belong in the project.
-
-Use `git-sfs` when you want:
-
-- A repo that stays small and fast
-- Large files addressed by SHA-256 content hash
-- A cache path that is local to each machine and never committed
-- A remote layout you can inspect with `rclone` or `find`
-- CI checks that fail when referenced files are missing, with optional integrity verification
-- Another machine to clone the repo, run `git-sfs setup`, run `git-sfs pull`, and work
-
-`git-sfs` is intentionally not a platform. It is a thin layer over Git symlinks,
-plain files, local directories, and well-known file transfer tools.
-
-## How It Works
-
-Suppose you add a large file:
-
-```text
-data/train-000.tar.zst
-```
-
-`git-sfs add data/train-000.tar.zst` hashes the file, stores the bytes in your
-local cache, and replaces the file with a Git-tracked symlink:
-
-```text
-data/train-000.tar.zst -> ../.git-sfs/cache/files/sha256/ab/<hash>
-```
-
-The local `.git-sfs/cache` symlink is untracked and points to the real cache root:
-
-```text
-.git-sfs/cache/files/sha256/ab/<hash> -> <cache>/files/sha256/ab/<hash>
-```
-
-Opening `data/train-000.tar.zst` follows `.git-sfs/cache` and reads the cached
-file bytes.
-
-Git stores the file list as ordinary directories and symlinks. The cache stores
-the bytes. The remote stores the same SHA-256 file layout.
+Use it when you want a repo that stays fast and cloneable, large files addressed
+by SHA-256 hash, a remote you can inspect with `rclone ls`, and CI that fails
+loudly when referenced files are missing.
 
 ## Install
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
-
 ```
 
-The installer prints the `git-sfs` and `rclone` versions it installs.
+Prebuilt binaries for macOS and Linux (arm64 and x86_64). Installs `rclone` too if not already on `PATH`.
 
-Prebuilt release binaries are published for:
-
-```text
-macOS arm64
-macOS x86_64
-Linux arm64
-Linux x86_64
-```
-
-By default this installs `git-sfs` into:
-
-```text
-$HOME/.local/bin
-```
-
-If `rclone` is not already on `PATH`, the installer also installs the `rclone`
-CLI into the same directory. Set `GIT_SFS_INSTALL_RCLONE=0` to skip that step.
-
-You can override the install location:
-
-```sh
-GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
-```
-
-On corporate networks with TLS interception, set `SSL_CERT_FILE` or
-`CURL_CA_BUNDLE` to your corporate CA bundle for both the bootstrap `curl` and
-the installer. If you cannot install the corporate CA, use
-`curl -kLsSf ... | GIT_SFS_INSECURE_TLS=1 sh` to make both the bootstrap
-download and installer downloads skip certificate verification.
-
-Or build from source:
+Build from source:
 
 ```sh
 go build ./cmd/git-sfs
 ```
 
-The installer detects macOS/Linux and arm64/x86_64 automatically.
-
-## Quick Start
-
-Create project metadata. This creates a commented `.git-sfs/config.toml` starter file you can edit in place:
+## Quick start
 
 ```sh
-git-sfs init
-```
-
-`git-sfs init` creates `.git-sfs/.cache` and `.git-sfs/cache` by default. To bind an external cache instead, pass a cache path:
-
-```sh
-git-sfs --cache /mnt/shared/git-sfs-cache init
-```
-
-Edit `.git-sfs/config.toml` and set your remote:
-
-```toml
-version = 1
-
-[remotes.default]
-backend = "remote-name"
-path = "datasets/project"
-config = "rclone.conf"
-
-[settings]
-algorithm = "sha256"
-n_jobs = 0
-```
-
-Initialize local state:
-
-```sh
-git-sfs setup
-```
-
-Add large files:
-
-```sh
-git-sfs add data/
-```
-
-Import a huge external file or directory into the cache without first copying it into the repository:
-
-```sh
-git-sfs import /mnt/incoming/data data/
-```
-
-`git-sfs import` hashes the source, copies the bytes into the cache, verifies them, and creates repo symlinks at the destination. The source is left intact. Add `--move` to consume the source instead (rename on the same filesystem, copy-verify-remove across filesystems).
-
-Source symlinks are rejected unless you pass `-L`:
-
-```sh
-git-sfs import -L /mnt/incoming/data data/
-```
-
-Commit the metadata:
-
-```sh
-git add .git-sfs/config.toml .gitignore data/
-git commit -m "track dataset files with git-sfs"
-```
-
-Upload files:
-
-```sh
-git-sfs push
+git-sfs init                    # create .git-sfs/config.toml
+# edit config.toml: set remote backend, path, rclone config
+git-sfs setup                   # bind local cache
+git-sfs add data/               # hash files, replace with symlinks
+git add .git-sfs/config.toml data/
+git commit -m "track datasets"
+git-sfs push                    # upload to remote
 ```
 
 On another machine:
 
 ```sh
-git clone <repo>
-cd <repo>
-git-sfs --cache /mnt/shared/git-sfs-cache setup
-git-sfs pull
-```
-
-The files under `data/` now open normally through symlinks.
-
-You can also pull only the files you need:
-
-```sh
-git-sfs pull data/train-000.tar.zst
-git-sfs pull data/validation/
-```
-
-## Commands
-
-```sh
-git-sfs init
-git-sfs --version
+git clone <repo> && cd <repo>
 git-sfs setup
-git-sfs add <path>
-git-sfs mv <src> <dst>
-git-sfs import <src> <dst>
-git-sfs import --move <src> <dst>
-git-sfs import -L <src> <dst>
-git-sfs verify
-git-sfs verify [path]
-git-sfs push [-r remote]
-git-sfs pull [-r remote] [path]
-git-sfs gc --dry-run
-git-sfs gc --files
+git-sfs pull                    # download from remote
 ```
 
-`git-sfs verify` checks local cache presence and remote availability by default
-so merged symlinks remain pullable on other machines. Add `--with-integrity` to
-recalculate hashes and catch corruption too.
-
-Set `[settings].n_jobs` in `.git-sfs/config.toml` to control bounded parallel
-work for `add`, `import`, `push`, `pull`, and remote-heavy `verify`. `0` means
-auto.
-
-Detailed command reference: [docs/commands.md](docs/commands.md)
-
-## Configuration
-
-`.git-sfs/config.toml` is committed to Git:
-
-```toml
-version = 1
-
-[remotes.default]
-backend = "remote-name"
-path = "datasets/project"
-config = "rclone.conf"
-
-[settings]
-algorithm = "sha256"
-n_jobs = 0
-```
-
-It must not contain cache paths, secrets, tokens, or machine-local state.
-
-`.git-sfs/cache` is a Git-ignored symlink to the real local cache. By default, `git-sfs init` creates `.git-sfs/.cache` and points `.git-sfs/cache` at it.
-
-Cache resolution order:
-
-```text
---cache
-GIT_SFS_CACHE
-.git-sfs/cache
-```
-
-Detailed configuration reference: [docs/configuration.md](docs/configuration.md)
-
-## Remote Storage
-
-Remote storage uses the same content-addressed file layout as the local cache:
-
-```text
-files/sha256/ab/<full_hash>
-```
-
-Remotes are backed by `rclone`, which supports S3, GCS, Azure Blob, SFTP, local
-mounts, and more without git-sfs needing any backend-specific code.
-
-This keeps the remote easy to inspect, back up, mirror, or repair with ordinary
-tools.
-
-Remote details: [docs/remotes.md](docs/remotes.md)
-
-Use `git-sfs --verbose ...` to print command debug output to stderr, including
-remote subprocess commands while debugging rclone behavior.
+Files under `data/` open normally through symlinks.
 
 ## Documentation
 
 - [Concepts](docs/concepts.md)
 - [Installation](docs/installation.md)
-- [Configuration](docs/configuration.md)
 - [Commands](docs/commands.md)
-- [Workflows](docs/workflows.md)
+- [Configuration](docs/configuration.md)
 - [Remotes](docs/remotes.md)
+- [Workflows](docs/workflows.md)
 - [Safety](docs/safety.md)
 - [Development](docs/development.md)
-
-## Safety
-
-`git-sfs` is designed around retry-safe operations:
-
-- Files are addressed by SHA-256
-- Downloads are hash-verified before being accepted
-- Corrupt cache files are detected
-- Local cache paths are never written to Git-tracked config
-- `.git-sfs/` is untracked and gitignored
-- Missing and broken symlinks are reported by `git-sfs verify`
-
-For CI, run:
-
-```sh
-git-sfs verify
-```
-
-It exits non-zero if referenced files are missing, corrupt, or incorrectly
-bound to the local cache.
-
-`git-sfs verify` prints stable category counts before detailed messages, so CI
-can match clear strings such as `missing cache files: 0`.
-
-Safety details: [docs/safety.md](docs/safety.md)
-
-## Limitations
-
-`git-sfs` treats cached hashed files as immutable. After bytes are accepted into
-the cache, the stored file is marked read-only by removing write bits. This helps
-catch accidental in-place edits through Git symlinks before they corrupt the
-content-addressed cache.
-
-A tracked large file is a symlink into `.git-sfs/cache`. If a program forcibly
-changes the cached file behind that symlink, the path hash no longer matches the
-bytes and `git-sfs verify` reports corruption. To update a large file, replace
-the symlink with a new regular file, run `git-sfs add <path>`, commit the new
-symlink, and push the new cached bytes.
-
-`git-sfs import <src> <dst>` is for importing very large external files or
-directories. By default the source is left intact. Pass `--move` to consume
-the source: on the same filesystem this uses rename; across filesystems it
-falls back to copy-verify-remove.
-
-Shared caches are supported, but `git-sfs gc --files` only knows about the
-current repository. Avoid cache GC on shared caches unless you have a cross-repo
-cleanup policy.
-
-## Project Status
-
-`git-sfs` is early. The core local workflow, rclone remote, tests,
-workflow suite, and release automation are in place. The design intentionally favors a
-small, auditable implementation over a large feature surface.
-
-The goal is not to replace every large-file tool. The goal is to make the common
-case boring:
-
-```text
-clone repo
-configure cache
-pull files
-use files
-```
