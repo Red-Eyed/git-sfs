@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
 	"git-sfs/internal/sfspath"
 )
@@ -1103,6 +1105,263 @@ func TestPullSkipsExistingValidCacheFile(t *testing.T) {
 		}
 		if err := a.Pull(context.Background(), "", "data/blob"); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func TestPullRejectsHashMismatch(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Fake rclone that copies a wrong-content file on copyto.
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto)
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    printf 'wrong content\n' > "$dst" ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -f "$src" ]; then
+      size=$(wc -c < "$src" | tr -d ' \t')
+      printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
+    elif [ -e "$src" ]; then
+      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+    else
+      printf 'directory not found: %s\n' "$src" >&2; exit 1
+    fi ;;
+  moveto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst" ;;
+  *) exit 2 ;;
+esac
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := os.Remove(cacheFile); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Pull(context.Background(), "", "data/blob"); err == nil {
+			t.Fatal("expected error on hash mismatch")
+		}
+		if _, statErr := os.Stat(cacheFile); statErr == nil {
+			t.Fatal("corrupt file must not remain in cache after failed pull")
+		}
+	})
+}
+
+func TestPullInterruptedLeavesNoPartialFile(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Fake rclone that writes partial bytes then exits non-zero on copyto.
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto)
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    printf 'partial' > "$dst"
+    exit 1 ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -f "$src" ]; then
+      size=$(wc -c < "$src" | tr -d ' \t')
+      printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
+    elif [ -e "$src" ]; then
+      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+    else
+      printf 'directory not found: %s\n' "$src" >&2; exit 1
+    fi ;;
+  *) exit 2 ;;
+esac
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if err := os.Remove(cacheFile); err != nil {
+			t.Fatal(err)
+		}
+		_ = a.Pull(context.Background(), "", "data/blob")
+		// No .tmp-* file must remain in the cache directory.
+		entries, _ := os.ReadDir(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix()))
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".tmp-") || strings.Contains(e.Name(), ".tmp-") {
+				t.Fatalf("partial temp file left in cache: %s", e.Name())
+			}
+		}
+	})
+}
+
+func TestPushFailsForMissingCacheFile(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
+			t.Fatal(err)
+		}
+		err = a.Push(context.Background(), "")
+		if !errors.Is(err, errs.ErrMissingCachedFile) {
+			t.Fatalf("expected ErrMissingCachedFile, got: %v", err)
+		}
+	})
+}
+
+func TestPushInterruptedUploadLeavesNoCorruptFinalFile(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Fake rclone: copyto succeeds (creates .tmp- file), moveto fails.
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst" ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -f "$src" ]; then
+      size=$(wc -c < "$src" | tr -d ' \t')
+      printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
+    elif [ -e "$src" ]; then
+      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+    else
+      printf 'directory not found: %s\n' "$src" >&2; exit 1
+    fi ;;
+  moveto) exit 1 ;;
+  *) exit 2 ;;
+esac
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
+	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = a.Push(context.Background(), "")
+		// The final hash-named file must not exist in the remote files/ dir.
+		finalPath := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		if _, statErr := os.Stat(finalPath); statErr == nil {
+			t.Fatal("final remote file must not exist after interrupted moveto")
+		}
+	})
+}
+
+func TestAddWithCacheDirReadOnly(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, cacheDir)
+	filesDir := filepath.Join(cacheDir, "files")
+	if err := os.MkdirAll(filesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filesDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(filesDir, 0o755) })
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+	inDir(t, repo, func() {
+		err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"})
+		if err == nil {
+			t.Fatal("expected error when cache files dir is read-only")
+		}
+		if _, statErr := os.Lstat(filepath.Join(repo, "data", "blob")); statErr != nil {
+			t.Fatal("source file must still exist after failed Add")
 		}
 	})
 }
