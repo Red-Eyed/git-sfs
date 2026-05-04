@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.2
+
+### Changed
+- `import` now copies source files by default, leaving the source intact. Pass `--move` to consume the source (rename on the same filesystem, copy-verify-remove across filesystems). Source directories and symlinks are only removed when `--move` is given.
+
+---
+
 ## v1.5.1
 
 ### Fixed
