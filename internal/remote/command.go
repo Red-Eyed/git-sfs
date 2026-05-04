@@ -65,10 +65,42 @@ func CheckRcloneOnPath() error {
 	return nil
 }
 
-// RequireExists checks that the remote root exists. Unlike Ping, a missing
-// path is an error — use this before push to prevent accidental creation of
-// files at a wrong path.
+// backendRoot returns the bare backend prefix (everything up to and including
+// the first ':'), e.g. "hwr1:" from "hwr1:F:/Storage/datasets".
+// Used to probe connectivity before checking a specific path.
+func (r rcloneRemote) backendRoot() string {
+	if i := strings.Index(r.url, ":"); i >= 0 {
+		return r.url[:i+1]
+	}
+	return r.url
+}
+
+// checkConnectivity verifies that rclone can reach the backend at all by
+// listing the backend root. A missing-path response is treated as success —
+// the backend is reachable but has no files at the root yet.
+func (r rcloneRemote) checkConnectivity(ctx context.Context) error {
+	root := r.backendRoot()
+	_, err := r.runOutput(ctx, "lsjson", root)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
+		return nil
+	}
+	return fmt.Errorf("cannot connect to remote %s (check rclone config): %w", root, err)
+}
+
+// RequireExists verifies connectivity to the backend and then checks that the
+// configured root path exists. A missing root is an error — use this before
+// push/pull to prevent accidental file creation at a wrong path.
 func (r rcloneRemote) RequireExists(ctx context.Context) error {
+	if err := r.checkConnectivity(ctx); err != nil {
+		return err
+	}
 	out, err := r.runOutput(ctx, "lsjson", r.url)
 	if err != nil {
 		if ctx.Err() != nil {
