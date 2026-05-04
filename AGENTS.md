@@ -2,7 +2,15 @@
 
 ## Project
 
-`git-sfs` is a Go CLI for storing large file bytes outside Git while Git tracks symlinks.
+`git-sfs` is a Go CLI for storing large file bytes outside Git while Git tracks symlinks. Its primary use case is managing large research and ML datasets — binary files that are too big for Git but must be versioned, shared across machines, and reproduced exactly. Users treat it as a data management tool, so data loss or silent corruption is unacceptable.
+
+Reliability requirements that follow from this:
+
+- Never silently drop, truncate, or corrupt a cached file. Hash-verify at every boundary: after hashing, after download, after copy.
+- Never modify a file the user did not explicitly hand to git-sfs (e.g. do not chmod source files during import).
+- Prefer failing loudly with a clear error over proceeding with incomplete state.
+- Atomic writes (temp file + rename) are mandatory wherever a partial file would be worse than no file.
+- Cache files are write-once and read-only after storage; treat them as immutable.
 
 Project direction:
 
