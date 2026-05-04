@@ -40,6 +40,7 @@ var issueKinds = []string{
 	"broken git symlink",
 	"missing cache file",
 	"corrupt cache file",
+	"wrong cache permissions",
 	"missing remote file",
 	"corrupt remote file",
 	"invalid config",
@@ -137,6 +138,13 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 				Path: item.Path,
 				Hash: item.Hash.String(),
 			})
+		case errors.Is(status.Err, errs.ErrWrongCachePermissions):
+			report.Issues = append(report.Issues, issue{
+				Kind:   "wrong cache permissions",
+				Path:   item.Path,
+				Hash:   item.Hash.String(),
+				Detail: status.Err.Error(),
+			})
 		case status.Err != nil:
 			report.Issues = append(report.Issues, issue{
 				Kind:   "corrupt cache file",
@@ -187,12 +195,16 @@ func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, 
 		default:
 		}
 		cacheFile := c.FilePath(h)
-		if _, err := os.Stat(cacheFile); err != nil {
+		info, err := os.Stat(cacheFile)
+		if err != nil {
 			return remoteStatus{Err: err}
 		}
 		if withIntegrity {
 			if err := hash.VerifyFile(cacheFile, h); err != nil {
 				return remoteStatus{Err: err}
+			}
+			if info.Mode().Perm()&0o222 != 0 {
+				return remoteStatus{Err: fmt.Errorf("cache file is writable: %w", errs.ErrWrongCachePermissions)}
 			}
 		}
 		return remoteStatus{OK: true}
@@ -292,6 +304,8 @@ func pluralKind(kind string) string {
 		return "missing cache files"
 	case "corrupt cache file":
 		return "corrupt cache files"
+	case "wrong cache permissions":
+		return "wrong cache permissions"
 	case "missing remote file":
 		return "missing remote files"
 	case "corrupt remote file":

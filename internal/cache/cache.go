@@ -116,6 +116,9 @@ func (c Cache) Move(src string, h hash.Hash) error {
 	if err := os.Rename(tmp, dst); err != nil {
 		return fmt.Errorf("publish cached file %s: %w", dst, err)
 	}
+	if err := fsutil.MakeReadOnly(dst); err != nil {
+		return fmt.Errorf("protect cached file %s: %w", dst, err)
+	}
 	return nil
 }
 
