@@ -268,3 +268,32 @@ func parseLSJSONExists(out string) (bool, error) {
 	}
 	return len(items) > 0, nil
 }
+
+func parseLSJSONSize(out string) (int64, error) {
+	trimmed := bytes.TrimSpace([]byte(out))
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("[]")) {
+		return -1, nil
+	}
+	var items []struct {
+		Size int64 `json:"Size"`
+	}
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		return -1, fmt.Errorf("parse rclone lsjson output: %w", err)
+	}
+	if len(items) == 0 {
+		return -1, nil
+	}
+	return items[0].Size, nil
+}
+
+// FileSize returns the size in bytes of the remote file for h, or -1 if not found.
+func (r rcloneRemote) FileSize(ctx context.Context, h hash.Hash) (int64, error) {
+	out, err := r.runOutput(ctx, "lsjson", r.remotePath(h))
+	if err != nil {
+		if ctx.Err() != nil {
+			return -1, ctx.Err()
+		}
+		return -1, nil // treat rclone error as "not found"
+	}
+	return parseLSJSONSize(out)
+}

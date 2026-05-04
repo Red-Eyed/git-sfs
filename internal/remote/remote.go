@@ -15,6 +15,8 @@ type Remote interface {
 	Ping(ctx context.Context) error
 	HasFile(ctx context.Context, h hash.Hash) (bool, error)
 	CheckFile(ctx context.Context, h hash.Hash) (bool, error)
+	// FileSize returns the byte size of the remote file for h, or -1 if not found.
+	FileSize(ctx context.Context, h hash.Hash) (int64, error)
 	PushFile(ctx context.Context, h hash.Hash, srcPath string) error
 	PullFile(ctx context.Context, h hash.Hash, dstPath string) error
 }

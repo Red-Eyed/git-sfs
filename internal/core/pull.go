@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
+	"syscall"
 
 	"git-sfs/internal/cache"
 	"git-sfs/internal/hash"
@@ -57,6 +60,19 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 }
 
 func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int) error {
+	// Collect hashes that are not yet in cache.
+	var missing []hash.Hash
+	for _, h := range hashes {
+		if !c.HasValid(h) {
+			missing = append(missing, h)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := checkDiskSpace(ctx, c, r, missing, workers); err != nil {
+		return err
+	}
 	errsByIndex := make([]error, len(hashes))
 	runIndexed(ctx, len(hashes), workers, func(i int) error {
 		h := hashes[i]
@@ -76,4 +92,56 @@ func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashe
 		}
 	}
 	return nil
+}
+
+// checkDiskSpace estimates total bytes needed for the missing hashes and fails
+// if the cache volume has less than 110% of that available.
+func checkDiskSpace(ctx context.Context, c cache.Cache, r remote.Remote, missing []hash.Hash, workers int) error {
+	var total atomic.Int64
+	var mu sync.Mutex
+	var firstErr error
+	errs := make([]error, len(missing))
+	runIndexed(ctx, len(missing), workers, func(i int) error {
+		size, err := r.FileSize(ctx, missing[i])
+		if err != nil {
+			return err
+		}
+		if size > 0 {
+			total.Add(size)
+		}
+		return nil
+	}, func(i int, err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errs[i] = err
+		mu.Unlock()
+	})
+	if firstErr != nil {
+		return firstErr
+	}
+	needed := total.Load()
+	if needed <= 0 {
+		return nil
+	}
+	avail, err := availableBytes(c.Root)
+	if err != nil {
+		return nil // skip guard if we can't stat
+	}
+	// Require at least 110% of needed bytes to leave a safety margin.
+	if uint64(needed)*110/100 > avail {
+		return fmt.Errorf("insufficient disk space: need ~%d bytes, have %d available in %s", needed, avail, c.Root)
+	}
+	return nil
+}
+
+// availableBytes returns the number of bytes available to non-root processes on
+// the filesystem containing path.
+func availableBytes(path string) (uint64, error) {
+	var fs syscall.Statfs_t
+	if err := syscall.Statfs(path, &fs); err != nil {
+		return 0, err
+	}
+	return fs.Bavail * uint64(fs.Bsize), nil
 }

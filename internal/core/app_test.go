@@ -940,6 +940,80 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	})
 }
 
+func TestPullFailsWhenDiskSpaceInsufficient(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	// Use a fake rclone that reports an impossibly large file size so the guard fires.
+	bin := t.TempDir()
+	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+cmd="${1:-}"
+map_path() {
+  case "$1" in
+    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+case "$cmd" in
+  copyto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst" ;;
+  lsjson)
+    src="$(map_path "$2")"
+    if [ -e "$src" ]; then
+      printf '[{"Path":"%s","Size":999999999999999}]\n' "$(basename "$src")"
+    else
+      printf '[]\n'
+    fi ;;
+  moveto)
+    src="$(map_path "$2")"
+    dst="$(map_path "$3")"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst" ;;
+  *) exit 2 ;;
+esac
+`)
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
+	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
+	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+
+	// Push using the standard fake (need a separate setup to push first).
+	// Easier: manually create the remote file so pull has something to pull.
+	writeDataset(t, repo, remoteDir) // sets up config and standard fake rclone temporarily
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Push(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Remove cache so pull will try to fetch.
+		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
+			t.Fatal(err)
+		}
+		// Now override PATH to use the huge-size fake rclone.
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		err = app(&bytes.Buffer{}).Pull(context.Background(), "", ".")
+		if err == nil {
+			t.Fatal("expected disk space error")
+		}
+		if !strings.Contains(err.Error(), "disk space") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestPushFailsWhenRcloneNotOnPath(t *testing.T) {
 	repo := newRepo(t)
 	remoteDir := filepath.Join(t.TempDir(), "remote")
@@ -1046,8 +1120,11 @@ case "$cmd" in
     cp "$src" "$dst" ;;
   lsjson)
     src="$(map_path "$2")"
-    if [ -e "$src" ]; then
-      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    if [ -f "$src" ]; then
+      size=$(wc -c < "$src" | tr -d ' \t')
+      printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
+    elif [ -e "$src" ]; then
+      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
     else
       printf '[]\n'
     fi ;;
@@ -1130,14 +1207,28 @@ case "$cmd" in
     ;;
   lsjson)
     src="$(map_path "$2")"
-    printf 'start %s\n' "$src" >> "$RCLONE_TEST_LOG"
-    sleep 1
-    if [ -e "$src" ]; then
-      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
-    else
-      printf '[]\n'
-    fi
-    printf 'end %s\n' "$src" >> "$RCLONE_TEST_LOG"
+    case "$src" in
+      */files/sha256/*)
+        printf 'start %s\n' "$src" >> "$RCLONE_TEST_LOG"
+        sleep 1
+        if [ -f "$src" ]; then
+          size=$(wc -c < "$src" | tr -d ' \t')
+          printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
+        elif [ -e "$src" ]; then
+          printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+        else
+          printf '[]\n'
+        fi
+        printf 'end %s\n' "$src" >> "$RCLONE_TEST_LOG"
+        ;;
+      *)
+        if [ -e "$src" ]; then
+          printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+        else
+          printf '[]\n'
+        fi
+        ;;
+    esac
     ;;
   moveto)
     src="$(map_path "$2")"
