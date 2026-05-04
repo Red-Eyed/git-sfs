@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.1
+
+### Fixed
+- `install.sh` is now attached to each GitHub release as an asset, enabling installation via `https://github.com/Red-Eyed/git-sfs/releases/latest/download/install.sh` for environments where `raw.githubusercontent.com` is blocked by a corporate proxy.
+
+---
+
 ## v1.6.0
 
 ### Added
