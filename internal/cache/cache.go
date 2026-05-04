@@ -94,9 +94,6 @@ func (c Cache) Move(src string, h hash.Hash) error {
 	if err := os.MkdirAll(c.TmpDir(), 0o755); err != nil {
 		return err
 	}
-	if err := os.Chmod(src, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
-		return err
-	}
 	tmp := filepath.Join(c.TmpDir(), "."+h.String()+".move")
 	_ = os.Remove(tmp)
 	if err := os.Rename(src, tmp); err != nil {

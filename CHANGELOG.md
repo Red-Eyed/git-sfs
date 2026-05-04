@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.1
+
+### Fixed
+- `import` no longer attempts to `chmod` the source file before moving it into cache. The chmod was redundant (the staging file is made read-only before the final rename) and caused "permission denied" when importing from mounts owned by another user.
+
+---
+
 ## v1.5
 
 ### Changed
