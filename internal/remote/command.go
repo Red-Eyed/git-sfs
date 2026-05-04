@@ -173,7 +173,7 @@ func (r rcloneRemote) CopyToRemote(ctx context.Context, cacheFilesDir string, re
 		return err
 	}
 	defer os.Remove(list)
-	return r.run(ctx, "copy", "--ignore-existing", "--files-from", list, cacheFilesDir, r.filesURL())
+	return r.runCopy(ctx, "copy", "--ignore-existing", "--files-from", list, cacheFilesDir, r.filesURL())
 }
 
 func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error {
@@ -185,7 +185,21 @@ func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, 
 		return err
 	}
 	defer os.Remove(list)
-	return r.run(ctx, "copy", "--ignore-existing", "--files-from", list, r.filesURL(), cacheFilesDir)
+	return r.runCopy(ctx, "copy", "--ignore-existing", "--files-from", list, r.filesURL(), cacheFilesDir)
+}
+
+// runCopy runs a rclone copy command, streaming rclone's stderr to the user
+// when in verbose mode (r.debug != nil) and adding --progress so transfer
+// stats are visible. For non-verbose runs stderr is buffered for error messages.
+func (r rcloneRemote) runCopy(ctx context.Context, args ...string) error {
+	extra := []string{}
+	if r.config != "" {
+		extra = append(extra, "--config", r.config)
+	}
+	if r.debug != nil {
+		extra = append(extra, "--progress")
+	}
+	return runCopyWithRetry(ctx, r.debug, r.retryMax, "rclone", append(extra, args...)...)
 }
 
 func (r rcloneRemote) run(ctx context.Context, args ...string) error {
@@ -198,6 +212,68 @@ func (r rcloneRemote) runOutput(ctx context.Context, args ...string) (string, er
 		args = append([]string{"--config", r.config}, args...)
 	}
 	return runWithRetry(ctx, r.debug, r.retryMax, "rclone", args...)
+}
+
+// runCopyWithRetry runs a streaming rclone command (no captured stdout) with
+// exponential backoff. rclone's stderr is written directly to debug so the
+// user sees progress; on failure the exit error is returned as-is (the user
+// already saw any stderr output).
+func runCopyWithRetry(ctx context.Context, debug io.Writer, retryMax int, name string, args ...string) error {
+	if retryMax <= 0 {
+		retryMax = 3
+	}
+	backoff := time.Second
+	var lastErr error
+	for attempt := 1; attempt <= retryMax; attempt++ {
+		err := runStream(ctx, debug, name, args...)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		lastErr = err
+		if attempt < retryMax {
+			if debug != nil {
+				fmt.Fprintf(debug, "retry %d/%d after %s: %v\n", attempt, retryMax, backoff, err)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+		}
+	}
+	return lastErr
+}
+
+// runStream runs a command, streaming stderr to debug (when non-nil) instead
+// of buffering it. Stdout is discarded. Used for rclone copy where captured
+// output is not needed but live progress output is desirable.
+func runStream(ctx context.Context, debug io.Writer, name string, args ...string) error {
+	if debug != nil {
+		fmt.Fprintln(debug, "run:", shellQuote(append([]string{name}, args...)))
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stderr bytes.Buffer
+	if debug != nil {
+		cmd.Stderr = debug
+	} else {
+		cmd.Stderr = &stderr
+	}
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if debug == nil {
+			if msg := strings.TrimSpace(stderr.String()); msg != "" {
+				return fmt.Errorf("%w: %s", err, msg)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // runWithRetry calls runOutput up to retryMax times with exponential backoff.

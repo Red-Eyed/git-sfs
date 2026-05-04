@@ -84,7 +84,12 @@ func TestCommandDispatch(t *testing.T) {
 		bin := t.TempDir()
 		if err := os.WriteFile(filepath.Join(bin, "rclone"), []byte(`#!/bin/sh
 set -eu
-if [ "${1:-}" = "--config" ]; then shift 2; fi
+while [ "${1:-}" = "--config" ] || [ "${1:-}" = "--progress" ]; do
+  case "$1" in
+    --config) shift 2 ;;
+    --progress) shift ;;
+  esac
+done
 cmd="${1:-}"
 map_path() {
   case "$1" in
