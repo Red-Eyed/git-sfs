@@ -2,15 +2,22 @@
 
 ## v1.2
 
+### Added
+- `min_rclone_version` setting in `[settings]`: if set, git-sfs detects the installed rclone version and refuses to run if it is below the required minimum (e.g. `min_rclone_version = "1.67.0"`).
+- `retry_max` setting in `[settings]`: configures how many times a failed rclone call is retried with exponential backoff (default 3).
+- Push and pull check that rclone is on `PATH` before attempting any transfer.
+- Push and pull verify that the remote root directory exists before transferring any files; a missing root now fails immediately with a clear message instead of silently creating files at a wrong path.
+- Disk-space guard: before pull, git-sfs sums the byte sizes of missing remote files and fails early if the cache volume has less than 110% of the required space available.
+- Exit codes are now stable: 0 = success, 1 = config/usage error, 2 = I/O or remote error, 3 = integrity failure.
+- `verify` reports orphaned cache objects (files in cache with no tracked symlink) as an informational hint.
+- `verify --with-integrity` checks that cache file permissions are read-only (`0444`) in addition to verifying content hashes.
+
 ### Fixed
-- `rclone lsjson` output is now parsed from stdout only; rclone log/warning lines written to stderr no longer corrupt JSON parsing (fixes "invalid character '/' after top-level value" on Windows-style remote paths).
+- `rclone lsjson` output is parsed from stdout only; rclone log/warning lines written to stderr no longer corrupt JSON parsing (fixes "invalid character '/' after top-level value" on remotes with Windows-style paths).
+- Cache files are now set read-only immediately after being written to cache (`Cache.Move`); previously the permission was applied only on explicit protect calls.
 
 ### Changed
-- Push and pull both require the remote root directory to exist before transferring any files. A missing root path now fails immediately with a clear message instead of silently creating files at the wrong location.
-- `Ping` removed from the `Remote` interface — `RequireExists` covers both reachability and path-existence in one check.
-
-### Added
-- Fault-injection test coverage: hash-mismatch rejection on pull, no leftover temp files after interrupted download, `ErrMissingCachedFile` on push, no corrupt final file after interrupted upload, `Add` error when cache directory is read-only.
+- Push and pull both require the remote root directory to exist. Previously pull only checked basic reachability and accepted a missing root path.
 
 ---
 
