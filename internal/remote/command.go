@@ -258,7 +258,14 @@ func runStream(ctx context.Context, debug io.Writer, name string, args ...string
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
 	if debug != nil {
-		cmd.Stderr = debug
+		// Pass the underlying *os.File when available so the child process
+		// inherits the real file descriptor. rclone detects a TTY via the fd
+		// and renders the --progress bar; an io.Writer pipe suppresses it.
+		if f, ok := debug.(*os.File); ok {
+			cmd.Stderr = f
+		} else {
+			cmd.Stderr = debug
+		}
 	} else {
 		cmd.Stderr = &stderr
 	}
