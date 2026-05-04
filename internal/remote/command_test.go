@@ -169,6 +169,63 @@ func TestRunWritesDebugCommand(t *testing.T) {
 	}
 }
 
+func TestRunWithRetrySucceedsOnSecondAttempt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts are not used on windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	counter := filepath.Join(dir, "counter")
+	// Script fails on first call, succeeds on second.
+	writeTool(t, filepath.Join(bin, "flaky"), `
+count=0
+if [ -f "`+counter+`" ]; then
+  count=$(cat "`+counter+`")
+fi
+count=$((count + 1))
+printf '%d' "$count" > "`+counter+`"
+if [ "$count" -lt 2 ]; then
+  echo "transient error" >&2
+  exit 1
+fi
+echo "ok"
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := runWithRetry(context.Background(), nil, 3, "flaky")
+	if err != nil {
+		t.Fatalf("expected success on second attempt, got: %v", err)
+	}
+	if !strings.Contains(out, "ok") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestRunWithRetryRespectsContextCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts are not used on windows")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTool(t, filepath.Join(bin, "always-fail"), `exit 1
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	_, err := runWithRetry(ctx, nil, 3, "always-fail")
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !strings.Contains(err.Error(), "context") {
+		t.Fatalf("expected context error, got: %v", err)
+	}
+}
+
 func writeTool(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {

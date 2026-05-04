@@ -20,9 +20,10 @@ import (
 )
 
 type rcloneRemote struct {
-	url    string
-	config string
-	debug  io.Writer
+	url      string
+	config   string
+	debug    io.Writer
+	retryMax int
 }
 
 func NewRclone(url string) Remote {
@@ -30,7 +31,7 @@ func NewRclone(url string) Remote {
 }
 
 func NewRcloneWithOptions(url string, opts Options) Remote {
-	return rcloneRemote{url: strings.TrimRight(url, "/"), config: opts.RcloneConfig, debug: opts.Debug}
+	return rcloneRemote{url: strings.TrimRight(url, "/"), config: opts.RcloneConfig, debug: opts.Debug, retryMax: opts.RetryMax}
 }
 
 func NewRcloneTarget(remote, path string) Remote {
@@ -43,9 +44,9 @@ func NewRcloneTargetWithOptions(remote, path string, opts Options) Remote {
 	}
 	path = strings.TrimRight(path, "/")
 	if strings.HasPrefix(path, "/") || isWindowsAbsPath(path) {
-		return rcloneRemote{url: remote + ":" + path, config: opts.RcloneConfig, debug: opts.Debug}
+		return rcloneRemote{url: remote + ":" + path, config: opts.RcloneConfig, debug: opts.Debug, retryMax: opts.RetryMax}
 	}
-	return rcloneRemote{url: remote + ":" + strings.TrimLeft(path, "/"), config: opts.RcloneConfig, debug: opts.Debug}
+	return rcloneRemote{url: remote + ":" + strings.TrimLeft(path, "/"), config: opts.RcloneConfig, debug: opts.Debug, retryMax: opts.RetryMax}
 }
 
 func isWindowsAbsPath(path string) bool {
@@ -163,7 +164,39 @@ func (r rcloneRemote) runOutput(ctx context.Context, args ...string) (string, er
 	if r.config != "" {
 		args = append([]string{"--config", r.config}, args...)
 	}
-	return runOutput(ctx, r.debug, "rclone", args...)
+	return runWithRetry(ctx, r.debug, r.retryMax, "rclone", args...)
+}
+
+// runWithRetry calls runOutput up to retryMax times with exponential backoff.
+// A zero or negative retryMax uses the default of 3.
+func runWithRetry(ctx context.Context, debug io.Writer, retryMax int, name string, args ...string) (string, error) {
+	if retryMax <= 0 {
+		retryMax = 3
+	}
+	backoff := time.Second
+	var lastErr error
+	for attempt := 1; attempt <= retryMax; attempt++ {
+		out, err := runOutput(ctx, debug, name, args...)
+		if err == nil {
+			return out, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		lastErr = err
+		if attempt < retryMax {
+			if debug != nil {
+				fmt.Fprintf(debug, "retry %d/%d after %s: %v\n", attempt, retryMax, backoff, err)
+			}
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+		}
+	}
+	return "", lastErr
 }
 
 func run(ctx context.Context, debug io.Writer, name string, args ...string) error {

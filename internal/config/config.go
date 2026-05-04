@@ -69,6 +69,7 @@ type RemoteConfig struct {
 type Settings struct {
 	Algorithm        string
 	Jobs             int
+	RetryMax         int
 	MinRcloneVersion string
 }
 
@@ -113,6 +114,8 @@ algorithm = "sha256"
 # Optional: cap parallel work for push, pull, verify, add, and import.
 # 0 means auto.
 n_jobs = 0
+# Optional: retries for each rclone call on transient failures. Default 3.
+# retry_max = 3
 # Optional: fail fast if the installed rclone is older than this version.
 # min_rclone_version = "1.67.0"
 `
@@ -180,6 +183,12 @@ func Load(path string) (Config, error) {
 					return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("invalid settings n_jobs %q", val))
 				}
 				cfg.Settings.Jobs = n
+			case "retry_max":
+				n, err := strconv.Atoi(val)
+				if err != nil {
+					return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("invalid settings retry_max %q", val))
+				}
+				cfg.Settings.RetryMax = n
 			case "min_rclone_version":
 				cfg.Settings.MinRcloneVersion = val
 			default:

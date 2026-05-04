@@ -23,6 +23,7 @@ type Options struct {
 	Debug        io.Writer
 	ConfigDir    string
 	RcloneConfig string
+	RetryMax     int
 }
 
 func New(cfg config.RemoteConfig) (Remote, error) {
