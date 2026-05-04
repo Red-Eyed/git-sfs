@@ -56,6 +56,32 @@ func (r rcloneRemote) remotePath(h hash.Hash) string {
 	return r.url + "/files/" + hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
 }
 
+// CheckRcloneOnPath returns a non-nil error if the rclone binary is not on PATH.
+func CheckRcloneOnPath() error {
+	if _, err := exec.LookPath("rclone"); err != nil {
+		return fmt.Errorf("rclone not found on PATH: %w", err)
+	}
+	return nil
+}
+
+// Ping checks that the remote is reachable with a lightweight lsjson call.
+// A missing path is treated as success: the backend is reachable, the directory
+// just hasn't been created yet (normal before first push).
+func (r rcloneRemote) Ping(ctx context.Context) error {
+	_, err := r.runOutput(ctx, "lsjson", r.url)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
+		return nil
+	}
+	return fmt.Errorf("remote unreachable (%s): %w", r.url, err)
+}
+
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 	out, err := r.runOutput(ctx, "lsjson", r.remotePath(h))
 	if err != nil {

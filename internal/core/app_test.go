@@ -878,6 +878,25 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	})
 }
 
+func TestPushFailsWhenRcloneNotOnPath(t *testing.T) {
+	repo := newRepo(t)
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	writeDataset(t, repo, remoteDir) // sets config.toml and a fake rclone on PATH
+	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
+	// Override PATH to an empty directory so rclone cannot be found.
+	emptyBin := t.TempDir()
+	t.Setenv("PATH", emptyBin)
+	inDir(t, repo, func() {
+		err := app(&bytes.Buffer{}).Push(context.Background(), "")
+		if err == nil {
+			t.Fatal("expected error when rclone is not on PATH")
+		}
+		if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "no such file") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
@@ -1078,12 +1097,14 @@ func assertParallelStarts(t *testing.T, logPath, label string) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
-	if len(lines) < 4 {
-		t.Fatalf("unexpected %s log:\n%s", label, log)
+	// Find any two consecutive "start" lines, indicating parallel execution.
+	// Non-parallel preamble calls (e.g. preflight ping) may appear first.
+	for i := 0; i < len(lines)-1; i++ {
+		if strings.HasPrefix(lines[i], "start ") && strings.HasPrefix(lines[i+1], "start ") {
+			return
+		}
 	}
-	if !strings.HasPrefix(lines[0], "start ") || !strings.HasPrefix(lines[1], "start ") {
-		t.Fatalf("%s did not start in parallel:\n%s", label, log)
-	}
+	t.Fatalf("%s did not start in parallel:\n%s", label, log)
 }
 
 func mustCopy(t *testing.T, src, dst string) {

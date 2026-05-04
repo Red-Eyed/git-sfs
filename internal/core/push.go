@@ -28,6 +28,9 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := a.preflight(ctx, r); err != nil {
+		return err
+	}
 	links, err := collectGitSFSSymlinks(repo, ".")
 	if err != nil {
 		return err

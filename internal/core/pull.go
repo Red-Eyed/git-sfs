@@ -32,6 +32,9 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 	if err != nil {
 		return err
 	}
+	if err := a.preflight(ctx, r); err != nil {
+		return err
+	}
 	links, err := collectGitSFSSymlinks(repo, path)
 	if err != nil {
 		return err

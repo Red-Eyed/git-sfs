@@ -11,6 +11,8 @@ import (
 
 // Remote hides backend details from push and pull workflow code.
 type Remote interface {
+	// Ping does a lightweight check that the remote is reachable.
+	Ping(ctx context.Context) error
 	HasFile(ctx context.Context, h hash.Hash) (bool, error)
 	CheckFile(ctx context.Context, h hash.Hash) (bool, error)
 	PushFile(ctx context.Context, h hash.Hash, srcPath string) error

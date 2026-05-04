@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -93,6 +94,15 @@ func (a App) debugf(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(a.Stderr, "debug: "+format+"\n", args...)
+}
+
+// preflight checks that rclone is on PATH and the remote is reachable.
+// Call this after selectRemote, before starting any transfer.
+func (a App) preflight(ctx context.Context, r remote.Remote) error {
+	if err := remote.CheckRcloneOnPath(); err != nil {
+		return err
+	}
+	return r.Ping(ctx)
 }
 
 func (a App) debugDone(name string, err *error) {
