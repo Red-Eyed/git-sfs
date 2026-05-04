@@ -40,12 +40,23 @@ map_path() {
   esac
 }
 case "$cmd" in
-  copyto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
-    ;;
+  copy)
+    ignore_existing=false; files_from=""; shift
+    while [ "$#" -gt 2 ]; do
+      case "$1" in
+        --ignore-existing) ignore_existing=true; shift ;;
+        --files-from) files_from="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    src_base="$(map_path "$1")"; dst_base="$(map_path "$2")"
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      src_file="${src_base}/${rel}"; dst_file="${dst_base}/${rel}"
+      if $ignore_existing && [ -e "$dst_file" ]; then continue; fi
+      mkdir -p "$(dirname "$dst_file")"
+      cp "$src_file" "$dst_file"
+    done < "$files_from" ;;
   lsjson)
     src="$(map_path "$2")"
     if [ -e "$src" ]; then
@@ -54,12 +65,6 @@ case "$cmd" in
       printf '[]\n'
     fi
     ;;
-  moveto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    mv "$src" "$dst"
-    ;;
   *)
     exit 2
     ;;
@@ -67,17 +72,26 @@ esac
 `)
 	b.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	b.Setenv("RCLONE_TEST_ROOT", filepath.Join(dir, "remote"))
-	src := filepath.Join(dir, "src.bin")
 	payload := benchPayload(8 << 20)
-	if err := os.WriteFile(src, payload, 0o644); err != nil {
+	srcFile := filepath.Join(dir, "src.bin")
+	if err := os.WriteFile(srcFile, payload, 0o644); err != nil {
 		b.Fatal(err)
 	}
-	h, err := hash.File(src)
+	h, err := hash.File(srcFile)
 	if err != nil {
 		b.Fatal(err)
 	}
+	relPath := hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
+	cacheFilesDir := filepath.Join(dir, "cache-files")
+	cachedFile := filepath.Join(cacheFilesDir, relPath)
+	if err := os.MkdirAll(filepath.Dir(cachedFile), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	if err := os.WriteFile(cachedFile, payload, 0o644); err != nil {
+		b.Fatal(err)
+	}
 	r := rcloneRemote{url: "testremote:dataset"}
-	if err := r.PushFile(ctx, h, src); err != nil {
+	if err := r.CopyToRemote(ctx, cacheFilesDir, []string{relPath}); err != nil {
 		b.Fatal(err)
 	}
 	b.SetBytes(int64(len(payload)))

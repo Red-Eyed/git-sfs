@@ -57,12 +57,23 @@ map_path() {
   esac
 }
 case "$cmd" in
-  copyto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
-    ;;
+  copy)
+    ignore_existing=false; files_from=""; shift
+    while [ "$#" -gt 2 ]; do
+      case "$1" in
+        --ignore-existing) ignore_existing=true; shift ;;
+        --files-from) files_from="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    src_base="$(map_path "$1")"; dst_base="$(map_path "$2")"
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      src_file="${src_base}/${rel}"; dst_file="${dst_base}/${rel}"
+      if $ignore_existing && [ -e "$dst_file" ]; then continue; fi
+      mkdir -p "$(dirname "$dst_file")"
+      cp "$src_file" "$dst_file"
+    done < "$files_from" ;;
   lsjson)
     src="$(map_path "$2")"
     if [ -e "$src" ]; then
@@ -70,12 +81,6 @@ case "$cmd" in
     else
       printf '[]\n'
     fi
-    ;;
-  moveto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    mv "$src" "$dst"
     ;;
   *)
     exit 2
@@ -87,12 +92,21 @@ esac
 	configLog := filepath.Join(dir, "config-log")
 	t.Setenv("RCLONE_TEST_CONFIG_LOG", configLog)
 
-	src := filepath.Join(dir, "src")
-	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+	srcFile := filepath.Join(dir, "src")
+	if err := os.WriteFile(srcFile, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := hash.File(src)
+	h, err := hash.File(srcFile)
 	if err != nil {
+		t.Fatal(err)
+	}
+	relPath := hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
+	cacheFilesDir := filepath.Join(dir, "cache-files")
+	cachedFile := filepath.Join(cacheFilesDir, relPath)
+	if err := os.MkdirAll(filepath.Dir(cachedFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachedFile, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r := rcloneRemote{url: "testremote:dataset", config: filepath.Join(dir, ".git-sfs", "rclone.conf")}
@@ -103,7 +117,7 @@ esac
 	if has {
 		t.Fatal("remote should start empty")
 	}
-	if err := r.PushFile(ctx, h, src); err != nil {
+	if err := r.CopyToRemote(ctx, cacheFilesDir, []string{relPath}); err != nil {
 		t.Fatal(err)
 	}
 	has, err = r.HasFile(ctx, h)
@@ -113,11 +127,11 @@ esac
 	if !has {
 		t.Fatal("remote should have file")
 	}
-	dst := filepath.Join(dir, "dst")
-	if err := r.PullFile(ctx, h, dst); err != nil {
+	dstFilesDir := filepath.Join(dir, "dst-files")
+	if err := r.CopyFromRemote(ctx, dstFilesDir, []string{relPath}); err != nil {
 		t.Fatal(err)
 	}
-	if err := hash.VerifyFile(dst, h); err != nil {
+	if err := hash.VerifyFile(filepath.Join(dstFilesDir, relPath), h); err != nil {
 		t.Fatal(err)
 	}
 	log, err := os.ReadFile(configLog)

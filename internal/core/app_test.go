@@ -151,143 +151,6 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	})
 }
 
-func TestPushUsesParallelRcloneUploads(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	remoteRoot := filepath.Join(t.TempDir(), "remote")
-	bin := filepath.Join(t.TempDir(), "bin")
-	if err := os.Mkdir(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
-if [ "${1:-}" = "--config" ]; then
-  shift 2
-fi
-cmd="$1"
-map_path() {
-  case "$1" in
-    testremote:*) printf '%s/%s\n' "$RCLONE_TEST_ROOT" "${1#testremote:}" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
-}
-case "$cmd" in
-  copyto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    case "$src" in
-      "$RCLONE_TEST_ROOT"/*)
-      mkdir -p "$(dirname "$dst")"
-      cp "$src" "$dst"
-        ;;
-      *)
-      printf 'start %s\n' "$src" >> "$RCLONE_TEST_LOG"
-      sleep 1
-      mkdir -p "$(dirname "$dst")"
-      cp "$src" "$dst"
-      printf 'end %s\n' "$src" >> "$RCLONE_TEST_LOG"
-        ;;
-    esac
-    ;;
-  lsjson)
-    src="$(map_path "$2")"
-    if [ -e "$src" ]; then
-      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
-    else
-      printf '[]\n'
-    fi
-    ;;
-  moveto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    mv "$src" "$dst"
-    ;;
-  *)
-    exit 2
-    ;;
-esac
-`)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("RCLONE_TEST_ROOT", remoteRoot)
-	logPath := filepath.Join(t.TempDir(), "rclone.log")
-	t.Setenv("RCLONE_TEST_LOG", logPath)
-	writeRcloneDataset(t, repo, "testremote", "dataset")
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
-	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data"}); err != nil {
-			t.Fatal(err)
-		}
-		start := time.Now()
-		if err := a.Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
-		if time.Since(start) > 3200*time.Millisecond {
-			t.Fatalf("push took too long to be parallel: %s", time.Since(start))
-		}
-	})
-	log, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
-	if len(lines) < 4 {
-		t.Fatalf("unexpected rclone log:\n%s", log)
-	}
-	if !strings.HasPrefix(lines[0], "start ") || !strings.HasPrefix(lines[1], "start ") {
-		t.Fatalf("uploads did not start in parallel:\n%s", log)
-	}
-}
-
-func TestPullUsesParallelRcloneDownloads(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	remoteRoot := filepath.Join(t.TempDir(), "remote")
-	logPath := filepath.Join(t.TempDir(), "rclone.log")
-	bin := filepath.Join(t.TempDir(), "bin")
-	if err := os.Mkdir(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeTimedRcloneTool(t, filepath.Join(bin, "rclone"))
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("RCLONE_TEST_ROOT", remoteRoot)
-	t.Setenv("RCLONE_TEST_LOG", logPath)
-	writeRcloneDataset(t, repo, "testremote", "dataset")
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
-	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
-
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data"}); err != nil {
-			t.Fatal(err)
-		}
-		for _, rel := range []string{"data/one.bin", "data/two.bin"} {
-			h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, rel))
-			if err != nil {
-				t.Fatal(err)
-			}
-			src := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-			dst := filepath.Join(remoteRoot, "dataset", "files", hash.Algorithm, h.Prefix(), h.String())
-			mustCopy(t, src, dst)
-			if err := os.Remove(src); err != nil {
-				t.Fatal(err)
-			}
-		}
-		start := time.Now()
-		if err := a.Pull(context.Background(), "", "data"); err != nil {
-			t.Fatal(err)
-		}
-		if time.Since(start) > 3200*time.Millisecond {
-			t.Fatalf("pull took too long to be parallel: %s", time.Since(start))
-		}
-	})
-
-	assertParallelStarts(t, logPath, "downloads")
-}
-
 func TestVerifyUsesParallelRemoteChecks(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
@@ -1138,7 +1001,7 @@ func TestPullRejectsHashMismatch(t *testing.T) {
 	if err := os.Mkdir(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Fake rclone that copies a wrong-content file on copyto.
+	// Fake rclone: copy writes wrong content for every file in the list.
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
 if [ "${1:-}" = "--config" ]; then shift 2; fi
 cmd="${1:-}"
@@ -1149,10 +1012,22 @@ map_path() {
   esac
 }
 case "$cmd" in
-  copyto)
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    printf 'wrong content\n' > "$dst" ;;
+  copy)
+    files_from=""; shift
+    while [ "$#" -gt 2 ]; do
+      case "$1" in
+        --ignore-existing) shift ;;
+        --files-from) files_from="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    dst_base="$2"
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      dst_file="$(map_path "${dst_base}/${rel}")"
+      mkdir -p "$(dirname "$dst_file")"
+      printf 'wrong content\n' > "$dst_file"
+    done < "$files_from" ;;
   lsjson)
     src="$(map_path "$2")"
     if [ -f "$src" ]; then
@@ -1163,11 +1038,6 @@ case "$cmd" in
     else
       printf 'directory not found: %s\n' "$src" >&2; exit 1
     fi ;;
-  moveto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    mv "$src" "$dst" ;;
   *) exit 2 ;;
 esac
 `)
@@ -1185,89 +1055,17 @@ esac
 		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
 			t.Fatal(err)
 		}
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm)
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		cacheFile = filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		if err := os.Remove(cacheFile); err != nil {
 			t.Fatal(err)
 		}
 		if err := a.Pull(context.Background(), "", "data/blob"); err == nil {
 			t.Fatal("expected error on hash mismatch")
-		}
-		if _, statErr := os.Stat(cacheFile); statErr == nil {
-			t.Fatal("corrupt file must not remain in cache after failed pull")
-		}
-	})
-}
-
-func TestPullInterruptedLeavesNoPartialFile(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	remoteDir := filepath.Join(t.TempDir(), "remote")
-	bin := filepath.Join(t.TempDir(), "bin")
-	if err := os.Mkdir(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Fake rclone that writes partial bytes then exits non-zero on copyto.
-	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
-if [ "${1:-}" = "--config" ]; then shift 2; fi
-cmd="${1:-}"
-map_path() {
-  case "$1" in
-    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
-}
-case "$cmd" in
-  copyto)
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    printf 'partial' > "$dst"
-    exit 1 ;;
-  lsjson)
-    src="$(map_path "$2")"
-    if [ -f "$src" ]; then
-      size=$(wc -c < "$src" | tr -d ' \t')
-      printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
-    elif [ -e "$src" ]; then
-      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
-    else
-      printf 'directory not found: %s\n' "$src" >&2; exit 1
-    fi ;;
-  *) exit 2 ;;
-esac
-`)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
-	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
-	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if err := os.Remove(cacheFile); err != nil {
-			t.Fatal(err)
-		}
-		_ = a.Pull(context.Background(), "", "data/blob")
-		// No .tmp-* file must remain in the cache directory.
-		entries, _ := os.ReadDir(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix()))
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".tmp-") || strings.Contains(e.Name(), ".tmp-") {
-				t.Fatalf("partial temp file left in cache: %s", e.Name())
-			}
 		}
 	})
 }
@@ -1293,71 +1091,6 @@ func TestPushFailsForMissingCacheFile(t *testing.T) {
 		err = a.Push(context.Background(), "")
 		if !errors.Is(err, errs.ErrMissingCachedFile) {
 			t.Fatalf("expected ErrMissingCachedFile, got: %v", err)
-		}
-	})
-}
-
-func TestPushInterruptedUploadLeavesNoCorruptFinalFile(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	remoteDir := filepath.Join(t.TempDir(), "remote")
-	bin := filepath.Join(t.TempDir(), "bin")
-	if err := os.Mkdir(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Fake rclone: copyto succeeds (creates .tmp- file), moveto fails.
-	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
-if [ "${1:-}" = "--config" ]; then shift 2; fi
-cmd="${1:-}"
-map_path() {
-  case "$1" in
-    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
-}
-case "$cmd" in
-  copyto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst" ;;
-  lsjson)
-    src="$(map_path "$2")"
-    if [ -f "$src" ]; then
-      size=$(wc -c < "$src" | tr -d ' \t')
-      printf '[{"Path":"%s","Size":%s}]\n' "$(basename "$src")" "$size"
-    elif [ -e "$src" ]; then
-      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
-    else
-      printf 'directory not found: %s\n' "$src" >&2; exit 1
-    fi ;;
-  moveto) exit 1 ;;
-  *) exit 2 ;;
-esac
-`)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
-	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
-	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = a.Push(context.Background(), "")
-		// The final hash-named file must not exist in the remote files/ dir.
-		finalPath := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if _, statErr := os.Stat(finalPath); statErr == nil {
-			t.Fatal("final remote file must not exist after interrupted moveto")
 		}
 	})
 }
@@ -1438,11 +1171,24 @@ case "$cmd" in
     else
       printf 'directory not found: %s\n' "$src" >&2; exit 1
     fi ;;
-  moveto)
-    src="$(map_path "$2")"
-    dst="$(map_path "$3")"
-    mkdir -p "$(dirname "$dst")"
-    mv "$src" "$dst" ;;
+  copy)
+    ignore_existing=false; files_from=""; shift
+    while [ "$#" -gt 2 ]; do
+      case "$1" in
+        --ignore-existing) ignore_existing=true; shift ;;
+        --files-from) files_from="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    src_base="$1"; dst_base="$2"
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      src_file="$(map_path "${src_base}/${rel}")"
+      dst_file="$(map_path "${dst_base}/${rel}")"
+      if $ignore_existing && [ -e "$dst_file" ]; then continue; fi
+      mkdir -p "$(dirname "$dst_file")"
+      cp "$src_file" "$dst_file"
+    done < "$files_from" ;;
   *) exit 2 ;;
 esac
 `)

@@ -9,13 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"git-sfs/internal/errs"
-	"git-sfs/internal/fsutil"
 	"git-sfs/internal/hash"
 )
 
@@ -149,55 +147,45 @@ func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) 
 	return true, nil
 }
 
-func (r rcloneRemote) PushFile(ctx context.Context, h hash.Hash, srcPath string) error {
-	if err := hash.VerifyFile(srcPath, h); err != nil {
-		return err
-	}
-	dst := r.remotePath(h)
-	tmp := dst + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	if err := r.run(ctx, "copyto", srcPath, tmp); err != nil {
-		return err
-	}
-	// Re-check existence after upload: another push may have landed the file
-	// while we were uploading. Remote files are immutable — never overwrite.
-	has, err := r.HasFile(ctx, h)
-	if err != nil {
-		_ = r.run(ctx, "deletefile", tmp)
-		return err
-	}
-	if has {
-		_ = r.run(ctx, "deletefile", tmp)
-		return nil
-	}
-	if err := r.run(ctx, "moveto", tmp, dst); err != nil {
-		return fmt.Errorf("publish remote file: %w", err)
-	}
-	has, err = r.HasFile(ctx, h)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return fmt.Errorf("uploaded remote file failed verification: %s", h)
-	}
-	return nil
+func (r rcloneRemote) filesURL() string {
+	return r.url + "/files"
 }
 
-func (r rcloneRemote) PullFile(ctx context.Context, h hash.Hash, dstPath string) error {
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+// writeTempPathList writes one relative path per line to a temp file and returns its name.
+func writeTempPathList(paths []string) (string, error) {
+	f, err := os.CreateTemp("", "git-sfs-files-*.txt")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	for _, p := range paths {
+		fmt.Fprintln(f, p)
+	}
+	return f.Name(), nil
+}
+
+func (r rcloneRemote) CopyToRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error {
+	if len(relPaths) == 0 {
+		return nil
+	}
+	list, err := writeTempPathList(relPaths)
+	if err != nil {
 		return err
 	}
-	tmp := dstPath + ".tmp-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	defer os.Remove(tmp)
-	if err := r.run(ctx, "copyto", r.remotePath(h), tmp); err != nil {
+	defer os.Remove(list)
+	return r.run(ctx, "copy", "--ignore-existing", "--files-from", list, cacheFilesDir, r.filesURL())
+}
+
+func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error {
+	if len(relPaths) == 0 {
+		return nil
+	}
+	list, err := writeTempPathList(relPaths)
+	if err != nil {
 		return err
 	}
-	if err := hash.VerifyFile(tmp, h); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, fsutil.ReadOnlyMode(0o644)); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dstPath)
+	defer os.Remove(list)
+	return r.run(ctx, "copy", "--ignore-existing", "--files-from", list, r.filesURL(), cacheFilesDir)
 }
 
 func (r rcloneRemote) run(ctx context.Context, args ...string) error {

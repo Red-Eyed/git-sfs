@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -60,7 +62,6 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 }
 
 func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int) error {
-	// Collect hashes that are not yet in cache.
 	var missing []hash.Hash
 	for _, h := range hashes {
 		if !c.HasValid(h) {
@@ -73,25 +74,18 @@ func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashe
 	if err := checkDiskSpace(ctx, c, r, missing, workers); err != nil {
 		return err
 	}
-	errsByIndex := make([]error, len(hashes))
-	runIndexed(ctx, len(hashes), workers, func(i int) error {
-		h := hashes[i]
-		if c.HasValid(h) {
-			return nil
-		}
-		if err := r.PullFile(ctx, h, c.FilePath(h)); err != nil {
-			return fmt.Errorf("pull %s: %w", h, err)
-		}
-		return nil
-	}, func(i int, err error) {
-		errsByIndex[i] = err
-	})
-	for _, err := range errsByIndex {
-		if err != nil {
-			return err
+	// Remove any corrupt/partial local files so --ignore-existing doesn't skip them.
+	for _, h := range missing {
+		p := c.FilePath(h)
+		if _, err := os.Stat(p); err == nil {
+			os.Remove(p)
 		}
 	}
-	return nil
+	relPaths := make([]string, len(missing))
+	for i, h := range missing {
+		relPaths[i] = hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
+	}
+	return r.CopyFromRemote(ctx, filepath.Join(c.Root, "files"), relPaths)
 }
 
 // checkDiskSpace estimates total bytes needed for the missing hashes and fails

@@ -18,8 +18,12 @@ type Remote interface {
 	CheckFile(ctx context.Context, h hash.Hash) (bool, error)
 	// FileSize returns the byte size of the remote file for h, or -1 if not found.
 	FileSize(ctx context.Context, h hash.Hash) (int64, error)
-	PushFile(ctx context.Context, h hash.Hash, srcPath string) error
-	PullFile(ctx context.Context, h hash.Hash, dstPath string) error
+	// CopyToRemote uploads files listed by relPaths (relative to cacheFilesDir)
+	// to the remote files directory. Existing remote files are never overwritten.
+	CopyToRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error
+	// CopyFromRemote downloads files listed by relPaths (relative to the remote
+	// files directory) into cacheFilesDir. Existing local files are preserved.
+	CopyFromRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error
 }
 
 type Options struct {

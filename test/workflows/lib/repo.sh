@@ -66,8 +66,6 @@ if [ "${1:-}" = "--config" ]; then
   shift 2
 fi
 cmd="${1:-}"
-src="${2:-}"
-dst="${3:-}"
 map_path() {
   # `testremote:` resolves inside the test-owned fake remote root. Any other
   # remote syntax falls back to a simple absolute path mapping for completeness.
@@ -77,23 +75,31 @@ map_path() {
     *) printf '%s\n' "$1" ;;
   esac
 }
-src="$(map_path "$src")"
-dst="$(map_path "$dst")"
 case "$cmd" in
-  copyto)
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
-    ;;
+  copy)
+    ignore_existing=false; files_from=""; shift
+    while [ "$#" -gt 2 ]; do
+      case "$1" in
+        --ignore-existing) ignore_existing=true; shift ;;
+        --files-from) files_from="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    src_base="$(map_path "$1")"; dst_base="$(map_path "$2")"
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      src_file="${src_base}/${rel}"; dst_file="${dst_base}/${rel}"
+      if $ignore_existing && [ -e "$dst_file" ]; then continue; fi
+      mkdir -p "$(dirname "$dst_file")"
+      cp "$src_file" "$dst_file"
+    done < "$files_from" ;;
   lsjson)
-    if [ -e "$src" ]; then
-      printf '[{"Path":"%s"}]\n' "$(basename "$src")"
+    target="$(map_path "${2:-}")"
+    if [ -e "$target" ]; then
+      printf '[{"Path":"%s"}]\n' "$(basename "$target")"
     else
       printf '[]\n'
     fi
-    ;;
-  moveto)
-    mkdir -p "$(dirname "$dst")"
-    mv "$src" "$dst"
     ;;
   *)
     echo "unsupported rclone command: $cmd" >&2
