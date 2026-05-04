@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.6.3
+
+### Fixed
+- `git-sfs mv` now supports moving directories of symlinks, not just individual files. All git-sfs symlinks under the source directory are relocated recursively; empty source directories are cleaned up.
+- `git-sfs mv <src> <new/deep/path>` now creates intermediate parent directories automatically (both for single-symlink and directory moves).
+- `git-sfs mv` works correctly on broken symlinks (files tracked but not yet in local cache).
+
+---
+
 ## v1.6.2
 
 ### Fixed
