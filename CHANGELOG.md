@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.6.0
+
+### Added
+- `git-sfs mv <src> <dst>` — relocates a git-sfs symlink and rewrites its relative target for the new directory depth. Use this instead of `git mv` when moving files across directory levels.
+- `--verbose` now streams rclone's live progress output (`--progress`) directly to stderr during push and pull, so transfer speed and ETA are visible.
+- Lock contention is now reported: if a command blocks waiting for another git-sfs process to finish, it prints `waiting for lock <name> (held by pid: …)` immediately instead of hanging silently.
+
+### Changed
+- `import` copies source files by default, leaving the source intact. Pass `--move` to consume the source (rename on the same filesystem, copy-verify-remove across filesystems).
+
+---
+
 ## v1.5.2
 
 ### Changed
