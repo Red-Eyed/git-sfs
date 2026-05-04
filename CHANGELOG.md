@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4
+
+### Fixed
+- Push no longer overwrites an existing remote file. After uploading to a temp path, git-sfs re-checks whether the final destination already exists before issuing the rename. If another push landed the same file concurrently, the temp upload is discarded. Remote files are content-addressed and immutable — once written they are never touched again.
+
+---
+
 ## v1.3
 
 ### Added
