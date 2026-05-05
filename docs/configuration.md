@@ -43,9 +43,12 @@ Forbidden here:
 - machine-local absolute paths
 - temporary state
 
-Relative rclone config paths are resolved from `.git-sfs`. For example,
-`config = "rclone.conf"` uses `.git-sfs/rclone.conf`. Commit that file only
-when it contains shareable, non-secret rclone settings.
+The optional `config` field points to an rclone config file. All remotes
+typically share the same file — rclone.conf can define multiple backends and
+each `[remotes.X]` section just names which backend to use. Relative paths are
+resolved from `.git-sfs`, so `config = "rclone.conf"` means `.git-sfs/rclone.conf`.
+Commit that file only when it contains shareable, non-secret rclone settings.
+Omit `config` to use rclone's default config (`~/.config/rclone/rclone.conf`).
 
 ## .git-sfs/cache
 
