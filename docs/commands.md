@@ -211,26 +211,3 @@ Then for each configured remote (or the selected remote):
 
 `git-sfs doctor` exits non-zero if any check fails, so it can be used in CI setup scripts to verify the environment before running a workflow.
 
-## git-sfs gc
-
-Show unreferenced cached files:
-
-```sh
-git-sfs gc --dry-run
-```
-
-Remove unreferenced cached files:
-
-```sh
-git-sfs gc --files
-```
-
-`git-sfs gc` must never delete files referenced by the current Git symlink tree.
-
-In dry-run mode, `git-sfs gc` prints each unreferenced file it would remove and a
-stable summary count:
-
-```text
-would remove /path/to/cache/files/sha256/...
-gc dry-run would remove 1 file(s)
-```
