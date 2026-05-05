@@ -3,12 +3,13 @@ package core
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
@@ -24,26 +25,14 @@ func TestPushPullRoundTrip(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
 
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := app(&bytes.Buffer{}).Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}))
+		require.NoError(t, app(&bytes.Buffer{}).Push(context.Background(), ""))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if err := os.Remove(cacheFile); err != nil {
-			t.Fatal(err)
-		}
-		if err := app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(cacheFile, h); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Remove(cacheFile))
+		require.NoError(t, app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"))
+		require.NoError(t, hash.VerifyFile(cacheFile, h))
 	})
 }
 
@@ -54,39 +43,23 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "config.toml"), []byte("version = 1\n\n[remotes.default]\nbackend = local\npath = "+remoteDir+"\nconfig = "+filepath.Join(repo, ".git-sfs", "rclone.conf")+"\n\n[settings]\nalgorithm = sha256\n"))
 	mustWrite(t, filepath.Join(repo, ".git-sfs", "rclone.conf"), []byte("[local]\ntype = local\n"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
 
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := app(&bytes.Buffer{}).Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}))
+		require.NoError(t, app(&bytes.Buffer{}).Push(context.Background(), ""))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if err := os.Remove(cacheFile); err != nil {
-			t.Fatal(err)
-		}
-		if err := app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(cacheFile, h); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Remove(cacheFile))
+		require.NoError(t, app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"))
+		require.NoError(t, hash.VerifyFile(cacheFile, h))
 		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if err := hash.VerifyFile(remoteFile, h); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, hash.VerifyFile(remoteFile, h))
 	})
 }
 
@@ -101,37 +74,20 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data"}))
+		require.NoError(t, a.Push(context.Background(), ""))
 		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "two.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		cacheOne := filepath.Join(cacheDir, "files", hash.Algorithm, h1.Prefix(), h1.String())
 		cacheTwo := filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String())
-		if err := os.Remove(cacheOne); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(cacheTwo); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Pull(context.Background(), "", "data/one.bin"); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(cacheOne, h1); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(cacheTwo); !os.IsNotExist(err) {
-			t.Fatalf("unselected cache file was restored: %v", err)
-		}
+		require.NoError(t, os.Remove(cacheOne))
+		require.NoError(t, os.Remove(cacheTwo))
+		require.NoError(t, a.Pull(context.Background(), "", "data/one.bin"))
+		require.NoError(t, hash.VerifyFile(cacheOne, h1))
+		_, err = os.Stat(cacheTwo)
+		require.True(t, os.IsNotExist(err), "unselected cache file was restored")
 	})
 }
 
@@ -146,40 +102,20 @@ func TestPullWithMixedPresentAndMissingCacheFiles(t *testing.T) {
 
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data"}))
+		require.NoError(t, a.Push(context.Background(), ""))
 		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "nested", "two.bin"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		cacheOne := filepath.Join(cacheDir, "files", hash.Algorithm, h1.Prefix(), h1.String())
 		cacheTwo := filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String())
-		if err := os.Remove(cacheTwo); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Pull(context.Background(), "", "data/"); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(cacheOne, h1); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(cacheTwo, h2); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Pull(context.Background(), "", "data/one.bin"); err != nil {
-			t.Fatal(err)
-		}
-		if err := hash.VerifyFile(cacheOne, h1); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, os.Remove(cacheTwo))
+		require.NoError(t, a.Pull(context.Background(), "", "data/"))
+		require.NoError(t, hash.VerifyFile(cacheOne, h1))
+		require.NoError(t, hash.VerifyFile(cacheTwo, h2))
+		require.NoError(t, a.Pull(context.Background(), "", "data/one.bin"))
+		require.NoError(t, hash.VerifyFile(cacheOne, h1))
 	})
 }
 
@@ -191,19 +127,11 @@ func TestPullFailsForMissingRemoteFile(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Pull(context.Background(), "", "data/blob"); err == nil {
-			t.Fatal("expected missing remote file error")
-		}
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
+		require.Error(t, a.Pull(context.Background(), "", "data/blob"))
 	})
 }
 
@@ -215,12 +143,8 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), "missing"); err == nil {
-			t.Fatal("expected missing remote error")
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
+		require.Error(t, a.Push(context.Background(), "missing"))
 	})
 }
 
@@ -270,77 +194,43 @@ esac
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 
-	// Push using the standard fake (need a separate setup to push first).
-	// Easier: manually create the remote file so pull has something to pull.
-	writeDataset(t, repo, remoteDir) // sets up config and standard fake rclone temporarily
+	writeDataset(t, repo, remoteDir)
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
+		require.NoError(t, a.Push(context.Background(), ""))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		// Remove cache so pull will try to fetch.
-		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
-			t.Fatal(err)
-		}
-		// Now override PATH to use the huge-size fake rclone.
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		err = app(&bytes.Buffer{}).Pull(context.Background(), "", ".")
-		if err == nil {
-			t.Fatal("expected disk space error")
-		}
-		if !strings.Contains(err.Error(), "disk space") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.ErrorContains(t, err, "disk space")
 	})
 }
 
 func TestPushFailsWhenRcloneNotOnPath(t *testing.T) {
 	repo := newRepo(t)
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeDataset(t, repo, remoteDir) // sets config.toml and a fake rclone on PATH
+	writeDataset(t, repo, remoteDir)
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
-	// Override PATH to an empty directory so rclone cannot be found.
-	emptyBin := t.TempDir()
-	t.Setenv("PATH", emptyBin)
+	t.Setenv("PATH", t.TempDir())
 	inDir(t, repo, func() {
 		err := app(&bytes.Buffer{}).Push(context.Background(), "")
-		if err == nil {
-			t.Fatal("expected error when rclone is not on PATH")
-		}
-		if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "no such file") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.Error(t, err)
+		require.True(t, strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no such file"), "unexpected error: %v", err)
 	})
 }
 
 func TestPushFailsForMissingRemotePath(t *testing.T) {
 	repo := newRepo(t)
-	// Set up with a valid remote so that Add works, then switch RCLONE_TEST_ROOT
-	// to a non-existent path before Push to exercise the RequireExists guard.
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		// Point RCLONE_TEST_ROOT at a path that does not exist.
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
 		t.Setenv("RCLONE_TEST_ROOT", filepath.Join(t.TempDir(), "nonexistent"))
-		err := a.Push(context.Background(), "")
-		if err == nil {
-			t.Fatal("expected error when remote root does not exist")
-		}
-		if !strings.Contains(err.Error(), "does not exist") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.ErrorContains(t, a.Push(context.Background(), ""), "does not exist")
 	})
 }
 
@@ -352,25 +242,13 @@ func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), ""); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
+		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "")) // idempotent
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Push(context.Background(), ""); err == nil {
-			t.Fatal("expected missing cache file error")
-		}
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
+		require.Error(t, a.Push(context.Background(), ""))
 	})
 }
 
@@ -382,12 +260,8 @@ func TestPullSkipsExistingValidCacheFile(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Pull(context.Background(), "", "data/blob"); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
+		require.NoError(t, a.Pull(context.Background(), "", "data/blob"))
 	})
 }
 
@@ -398,17 +272,9 @@ func TestPullFailsForMissingRemotePath(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
 		t.Setenv("RCLONE_TEST_ROOT", filepath.Join(t.TempDir(), "nonexistent"))
-		err := a.Pull(context.Background(), "", ".")
-		if err == nil {
-			t.Fatal("expected error when remote root does not exist")
-		}
-		if !strings.Contains(err.Error(), "does not exist") {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.ErrorContains(t, a.Pull(context.Background(), "", "."), "does not exist")
 	})
 }
 
@@ -417,9 +283,7 @@ func TestPullRejectsHashMismatch(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
 	bin := filepath.Join(t.TempDir(), "bin")
-	if err := os.Mkdir(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Mkdir(bin, 0o755))
 	// Fake rclone: copy writes wrong content for every file in the list.
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
 if [ "${1:-}" = "--config" ]; then shift 2; fi
@@ -465,30 +329,19 @@ esac
 `)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("RCLONE_TEST_ROOT", remoteDir)
-	if err := os.MkdirAll(remoteDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
 	content := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
 	mustWrite(t, filepath.Join(repo, ".git-sfs/config.toml"), []byte(content))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
-		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm)
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		cacheFile = filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		if err := os.Remove(cacheFile); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Pull(context.Background(), "", "data/blob"); err == nil {
-			t.Fatal("expected error on hash mismatch")
-		}
+		require.NoError(t, err)
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		require.NoError(t, os.Remove(cacheFile))
+		require.Error(t, a.Pull(context.Background(), "", "data/blob"))
 	})
 }
 
@@ -500,19 +353,11 @@ func TestPushFailsForMissingCacheFile(t *testing.T) {
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
-		if err := a.Add(context.Background(), []string{"data/blob"}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())); err != nil {
-			t.Fatal(err)
-		}
-		err = a.Push(context.Background(), "")
-		if !errors.Is(err, errs.ErrMissingCachedFile) {
-			t.Fatalf("expected ErrMissingCachedFile, got: %v", err)
-		}
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
+		require.ErrorIs(t, a.Push(context.Background(), ""), errs.ErrMissingCachedFile)
 	})
 }
+

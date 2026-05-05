@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"git-sfs/internal/hash"
 	"git-sfs/internal/sfspath"
 )
@@ -19,32 +21,21 @@ func TestMoveFileIntoCacheWithoutCopyingToRepo(t *testing.T) {
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, src, []byte("large payload"))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), src, "data/blob.bin", ImportOptions{Move: true}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, app(&bytes.Buffer{}).ImportWithOptions(context.Background(), src, "data/blob.bin", ImportOptions{Move: true}))
 	})
-	if _, err := os.Stat(src); !os.IsNotExist(err) {
-		t.Fatalf("source still exists after move: %v", err)
-	}
+	_, err := os.Stat(src)
+	require.True(t, os.IsNotExist(err), "source still exists after move")
 	dst := filepath.Join(repo, "data", "blob.bin")
 	info, err := os.Lstat(dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("destination should be a symlink")
-	}
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&os.ModeSymlink, "destination should be a symlink")
 	h, _, err := sfspath.ParseGitSymlink(repo, dst)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-	if err := hash.VerifyFile(cacheFile, h); err != nil {
-		t.Fatal(err)
-	}
-	if info, err := os.Stat(cacheFile); err != nil || info.Mode().Perm()&0o222 != 0 {
-		t.Fatalf("cache file should exist and be read-only: info=%v err=%v", info, err)
-	}
+	require.NoError(t, hash.VerifyFile(cacheFile, h))
+	info, err = os.Stat(cacheFile)
+	require.NoError(t, err)
+	require.Zero(t, info.Mode().Perm()&0o222, "cache file should be read-only")
 }
 
 func TestImportResolvesSourceFileSymlink(t *testing.T) {
@@ -55,29 +46,17 @@ func TestImportResolvesSourceFileSymlink(t *testing.T) {
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, src, []byte("large payload"))
-	if err := os.Symlink(src, link); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Symlink(src, link))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/blob.bin", ImportOptions{FollowSymlinks: true, Move: true}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/blob.bin", ImportOptions{FollowSymlinks: true, Move: true}))
 	})
-	if _, err := os.Lstat(link); !os.IsNotExist(err) {
-		t.Fatalf("source symlink should be removed after import: %v", err)
-	}
-	if _, err := os.Stat(src); !os.IsNotExist(err) {
-		t.Fatalf("resolved source should be moved into cache: %v", err)
-	}
-	dst := filepath.Join(repo, "data", "blob.bin")
-	h, _, err := sfspath.ParseGitSymlink(repo, dst)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-	if err := hash.VerifyFile(cacheFile, h); err != nil {
-		t.Fatal(err)
-	}
+	_, err := os.Lstat(link)
+	require.True(t, os.IsNotExist(err), "source symlink should be removed after import")
+	_, err = os.Stat(src)
+	require.True(t, os.IsNotExist(err), "resolved source should be moved into cache")
+	h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob.bin"))
+	require.NoError(t, err)
+	require.NoError(t, hash.VerifyFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
 }
 
 func TestImportRejectsSourceSymlinkWithoutFollowFlag(t *testing.T) {
@@ -87,20 +66,14 @@ func TestImportRejectsSourceSymlinkWithoutFollowFlag(t *testing.T) {
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	mustWrite(t, src, []byte("large payload"))
-	if err := os.Symlink(src, link); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Symlink(src, link))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).Import(context.Background(), link, "data/blob.bin"); err == nil {
-			t.Fatal("expected source symlink import without -L to fail")
-		}
+		require.Error(t, app(&bytes.Buffer{}).Import(context.Background(), link, "data/blob.bin"))
 	})
-	if _, err := os.Lstat(link); err != nil {
-		t.Fatalf("source symlink should remain after failed import: %v", err)
-	}
-	if _, err := os.Stat(src); err != nil {
-		t.Fatalf("resolved source should remain after failed import: %v", err)
-	}
+	_, err := os.Lstat(link)
+	require.NoError(t, err, "source symlink should remain after failed import")
+	_, err = os.Stat(src)
+	require.NoError(t, err, "resolved source should remain after failed import")
 }
 
 func TestMoveDirectoryIntoCache(t *testing.T) {
@@ -113,28 +86,19 @@ func TestMoveDirectoryIntoCache(t *testing.T) {
 	mustWrite(t, filepath.Join(srcDir, "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(srcDir, "nested", "two.bin"), []byte("two"))
 	mustWrite(t, linkedSrc, []byte("linked"))
-	if err := os.Symlink(linkedSrc, filepath.Join(srcDir, "nested", "linked.bin")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(srcDir, "one.bin"), filepath.Join(srcDir, "nested", "one-link.bin")); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Symlink(linkedSrc, filepath.Join(srcDir, "nested", "linked.bin")))
+	require.NoError(t, os.Symlink(filepath.Join(srcDir, "one.bin"), filepath.Join(srcDir, "nested", "one-link.bin")))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), srcDir, "data/imported", ImportOptions{FollowSymlinks: true, Move: true}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, app(&bytes.Buffer{}).ImportWithOptions(context.Background(), srcDir, "data/imported", ImportOptions{FollowSymlinks: true, Move: true}))
 	})
-	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-		t.Fatalf("source directory should be removed when empty: %v", err)
-	}
-	if _, err := os.Stat(linkedSrc); !os.IsNotExist(err) {
-		t.Fatalf("nested symlink target should be moved into cache: %v", err)
-	}
+	_, err := os.Stat(srcDir)
+	require.True(t, os.IsNotExist(err), "source directory should be removed when empty")
+	_, err = os.Stat(linkedSrc)
+	require.True(t, os.IsNotExist(err), "nested symlink target should be moved into cache")
 	for _, rel := range []string{"data/imported/one.bin", "data/imported/nested/two.bin", "data/imported/nested/linked.bin", "data/imported/nested/one-link.bin"} {
 		info, err := os.Lstat(filepath.Join(repo, rel))
-		if err != nil || info.Mode()&os.ModeSymlink == 0 {
-			t.Fatalf("%s should be a symlink: info=%v err=%v", rel, info, err)
-		}
+		require.NoError(t, err, rel)
+		require.NotZero(t, info.Mode()&os.ModeSymlink, "%s should be a symlink", rel)
 	}
 }
 
@@ -147,24 +111,17 @@ func TestImportResolvesSourceDirectorySymlink(t *testing.T) {
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(srcDir, "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(srcDir, "nested", "two.bin"), []byte("two"))
-	if err := os.Symlink(srcDir, link); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.Symlink(srcDir, link))
 	inDir(t, repo, func() {
-		if err := app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/imported", ImportOptions{FollowSymlinks: true, Move: true}); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, app(&bytes.Buffer{}).ImportWithOptions(context.Background(), link, "data/imported", ImportOptions{FollowSymlinks: true, Move: true}))
 	})
-	if _, err := os.Lstat(link); !os.IsNotExist(err) {
-		t.Fatalf("source symlink should be removed after import: %v", err)
-	}
-	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
-		t.Fatalf("resolved source directory should be removed when empty: %v", err)
-	}
+	_, err := os.Lstat(link)
+	require.True(t, os.IsNotExist(err), "source symlink should be removed after import")
+	_, err = os.Stat(srcDir)
+	require.True(t, os.IsNotExist(err), "resolved source directory should be removed when empty")
 	for _, rel := range []string{"data/imported/one.bin", "data/imported/nested/two.bin"} {
 		info, err := os.Lstat(filepath.Join(repo, rel))
-		if err != nil || info.Mode()&os.ModeSymlink == 0 {
-			t.Fatalf("%s should be a symlink: info=%v err=%v", rel, info, err)
-		}
+		require.NoError(t, err, rel)
+		require.NotZero(t, info.Mode()&os.ModeSymlink, "%s should be a symlink", rel)
 	}
 }

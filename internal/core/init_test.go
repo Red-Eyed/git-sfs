@@ -5,39 +5,31 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInitSetupAndGitignore(t *testing.T) {
 	repo := newRepo(t)
 	inDir(t, repo, func() {
-		stdout := &bytes.Buffer{}
-		a := app(stdout)
-		if err := a.Init(context.Background(), false); err != nil {
-			t.Fatal(err)
-		}
-		if err := a.Setup(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if target, err := os.Readlink(filepath.Join(repo, ".git-sfs", "cache")); err != nil || target == "" {
-			t.Fatalf("cache symlink missing: target=%q err=%v", target, err)
-		}
-		if info, err := os.Stat(filepath.Join(repo, ".git-sfs", ".cache", "files")); err != nil || !info.IsDir() {
-			t.Fatalf("default cache missing: %v", err)
-		}
-		if err := a.Init(context.Background(), false); err == nil {
-			t.Fatal("init should not overwrite config")
-		}
-		if err := a.Init(context.Background(), true); err != nil {
-			t.Fatal(err)
-		}
+		a := app(&bytes.Buffer{})
+		require.NoError(t, a.Init(context.Background(), false))
+		require.NoError(t, a.Setup(context.Background()))
+
+		target, err := os.Readlink(filepath.Join(repo, ".git-sfs", "cache"))
+		require.NoError(t, err)
+		require.NotEmpty(t, target, "cache symlink missing")
+
+		info, err := os.Stat(filepath.Join(repo, ".git-sfs", ".cache", "files"))
+		require.NoError(t, err)
+		require.True(t, info.IsDir(), "default cache missing")
+
+		require.Error(t, a.Init(context.Background(), false), "init should not overwrite config")
+		require.NoError(t, a.Init(context.Background(), true))
+
 		gitignore, err := os.ReadFile(filepath.Join(repo, ".gitignore"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(gitignore), ".git-sfs/cache") {
-			t.Fatalf(".gitignore missing .git-sfs/: %q", gitignore)
-		}
+		require.NoError(t, err)
+		require.Contains(t, string(gitignore), ".git-sfs/cache")
 	})
 }
