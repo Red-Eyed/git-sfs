@@ -36,9 +36,10 @@ Importance: **H** high · **M** medium · **L** low. Effort: **S** small (hours)
 | 6 | Dogfood end-to-end | Full workflow: create repo · add · push · clone · setup · pull · verify files open normally. | M | S |
 | 7 | Concurrency tests | Concurrent pull · push · add of duplicate content. | M | M |
 | 8 | `--dry-run` for push/pull | Print what would be transferred without touching remote or cache. | M | M |
-| 9 | Cloud rclone integration tests | Gated on env vars. Cover upload · skip existing · pull · interruption retry · permission errors. | M | M |
-| 10 | Fuzz testing | Fuzz `config.toml` parsing, symlink target parsing, hash string parsing. Short corpus run in CI. | M | M |
-| 11 | Shell completions | Bash, Zsh, and Fish completions in the release archive. | L | M |
+| 9 | Real rclone in tests | Replace fake rclone shell stubs with the real binary using a `local:` backend. Fake stubs require manual flag maintenance and mask integration bugs (e.g. `--size-only` vs `--ignore-existing` divergence). Fault-injection scenarios that need controlled failures can inject bad files directly into the temp remote directory instead of intercepting rclone. Requires rclone on CI PATH. | H | M |
+| 10 | Cloud rclone integration tests | Gated on env vars. Cover upload · skip existing · pull · interruption retry · permission errors. | M | M |
+| 11 | Fuzz testing | Fuzz `config.toml` parsing, symlink target parsing, hash string parsing. Short corpus run in CI. | M | M |
+| 12 | Shell completions | Bash, Zsh, and Fish completions in the release archive. | L | M |
 
 ## Planned
 
