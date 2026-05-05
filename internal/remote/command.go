@@ -211,7 +211,11 @@ func (r rcloneRemote) CopyToRemote(ctx context.Context, cacheFilesDir string, re
 		return err
 	}
 	defer os.Remove(list)
-	return r.runCopy(ctx, "copy", "--ignore-existing", "--files-from", list, cacheFilesDir, r.filesURL())
+	// --size-only: skip files whose byte count already matches. This catches
+	// partial uploads (wrong size → re-upload) without relying on modtime,
+	// which many SFTP servers do not support. --ignore-existing would silently
+	// skip corrupt partial uploads left by an interrupted transfer.
+	return r.runCopy(ctx, "copy", "--size-only", "--files-from", list, cacheFilesDir, r.filesURL())
 }
 
 func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error {

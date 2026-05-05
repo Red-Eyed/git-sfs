@@ -360,4 +360,3 @@ func TestPushFailsForMissingCacheFile(t *testing.T) {
 		require.ErrorIs(t, a.Push(context.Background(), ""), errs.ErrMissingCachedFile)
 	})
 }
-

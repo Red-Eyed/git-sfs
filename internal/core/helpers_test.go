@@ -63,10 +63,11 @@ case "$cmd" in
     src="$(map_path "$2")"
     if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi ;;
   copy)
-    ignore_existing=false; files_from=""; shift
+    ignore_existing=false; size_only=false; files_from=""; shift
     while [ "$#" -gt 2 ]; do
       case "$1" in
         --ignore-existing) ignore_existing=true; shift ;;
+        --size-only) size_only=true; shift ;;
         --files-from) files_from="$2"; shift 2 ;;
         *) shift ;;
       esac
@@ -77,8 +78,14 @@ case "$cmd" in
       src_file="$(map_path "${src_base}/${rel}")"
       dst_file="$(map_path "${dst_base}/${rel}")"
       if $ignore_existing && [ -e "$dst_file" ]; then continue; fi
+      if $size_only && [ -e "$dst_file" ]; then
+        src_size=$(wc -c < "$src_file" | tr -d ' \t')
+        dst_size=$(wc -c < "$dst_file" | tr -d ' \t')
+        if [ "$src_size" = "$dst_size" ]; then continue; fi
+      fi
       mkdir -p "$(dirname "$dst_file")"
       cp "$src_file" "$dst_file"
+      chmod 644 "$dst_file"
     done < "$files_from" ;;
   *) exit 2 ;;
 esac
