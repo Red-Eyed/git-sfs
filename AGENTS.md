@@ -17,7 +17,7 @@ Project direction:
 - Keep `git-sfs` as small as possible.
 - Treat it as a layer on top of Git, the filesystem, and well-known file movers.
 - Prefer plain files, symlinks, directories, and subprocess calls over custom state.
-- Supported remote tools should stay boring and familiar: `rsync`, `ssh`, and `rclone`.
+- `rclone` is the only supported remote tool.
 - Do not add manifests, databases, background services, custom protocols, or hidden metadata.
 - If a feature needs a new internal format, first ask whether Git or the filesystem already provides the needed state.
 - Prefer simple built-in progress output over third-party terminal UI libraries.
