@@ -18,7 +18,7 @@ func ResolveRepo() (string, error) {
 		return "", err
 	}
 	for {
-		if st, err := os.Stat(filepath.Join(wd, ".git")); err == nil && st.IsDir() {
+		if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
 			return wd, nil
 		}
 		parent := filepath.Dir(wd)

@@ -36,6 +36,29 @@ func TestResolveRepoWalksUp(t *testing.T) {
 	})
 }
 
+// Git submodules have .git as a file, not a directory.
+func TestResolveRepoSubmodule(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".git"), []byte("gitdir: ../.git/modules/sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(repo, "sub", "dir")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inDir(t, nested, func() {
+		got, err := ResolveRepo()
+		if err != nil {
+			t.Fatal(err)
+		}
+		realGot, _ := filepath.EvalSymlinks(got)
+		realRepo, _ := filepath.EvalSymlinks(repo)
+		if realGot != realRepo {
+			t.Fatalf("submodule: got %q want %q", got, repo)
+		}
+	})
+}
+
 func TestResolveRepoFailsOutsideRepo(t *testing.T) {
 	inDir(t, t.TempDir(), func() {
 		if _, err := ResolveRepo(); err == nil {
