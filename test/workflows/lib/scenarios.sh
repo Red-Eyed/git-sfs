@@ -207,6 +207,7 @@ scenario_filesystem_workflows() {
   chmod u+w "$(cache_file_for "$shared_cache" "$hash_train")" "$remote/files/sha256/${hash_train:0:2}/$hash_train"
   printf "corrupt cache bytes\n" > "$(cache_file_for "$shared_cache" "$hash_train")"
   printf "corrupt remote bytes\n" > "$remote/files/sha256/${hash_train:0:2}/$hash_train"
+  chmod a-w "$(cache_file_for "$shared_cache" "$hash_train")" "$remote/files/sha256/${hash_train:0:2}/$hash_train"
   (
     cd "$repo_b"
     git_sfs verify data/train-000.tar.zst >/dev/null

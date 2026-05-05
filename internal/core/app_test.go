@@ -660,6 +660,9 @@ func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 		if err := os.WriteFile(cacheFile, []byte("corrupt"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Chmod(cacheFile, 0o444); err != nil {
+			t.Fatal(err)
+		}
 		stdout.Reset()
 		if err := app(stdout).Verify(context.Background(), "", false, true, "."); err == nil {
 			t.Fatal("verify should fail for corrupt cache file")
@@ -693,7 +696,7 @@ func TestVerifyDetectsWrongCachePermissions(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		if err := app(stdout).Verify(context.Background(), "", false, true, "."); err == nil {
+		if err := app(stdout).Verify(context.Background(), "", false, false, "."); err == nil {
 			t.Fatal("verify should fail for writable cache file")
 		}
 		if !strings.Contains(stdout.String(), "wrong cache permissions: 1") {
@@ -931,10 +934,16 @@ func TestVerifyWithoutIntegritySkipsCorruptionChecks(t *testing.T) {
 		if err := os.WriteFile(cacheFile, []byte("corrupt-cache"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Chmod(cacheFile, 0o444); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.Chmod(remoteFile, 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(remoteFile, []byte("corrupt-remote"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(remoteFile, 0o444); err != nil {
 			t.Fatal(err)
 		}
 		if err := a.Verify(context.Background(), "", true, false, "."); err != nil {

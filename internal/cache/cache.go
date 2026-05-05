@@ -40,32 +40,42 @@ func (c Cache) HasValid(h hash.Hash) bool {
 	return hash.VerifyFile(c.FilePath(h), h) == nil
 }
 
+// readOnly strips write bits from mode, preserving read and execute bits.
+func readOnly(mode os.FileMode) os.FileMode {
+	return mode &^ 0o222
+}
+
 func (c Cache) Protect(h hash.Hash) error {
 	path := c.FilePath(h)
 	if err := hash.VerifyFile(path, h); err != nil {
 		return err
 	}
-	return fsutil.MakeReadOnly(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return os.Chmod(path, readOnly(info.Mode()))
 }
 
 // Store copies src into the cache only after naming it by its expected hash.
 // The final file is accepted only if its bytes still match h.
 func (c Cache) Store(src string, h hash.Hash) error {
-	dst := c.FilePath(h)
-	if c.HasValid(h) {
-		return fsutil.MakeReadOnly(dst)
-	}
 	st, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
-	if err := fsutil.AtomicCopy(src, dst, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
+	mode := readOnly(st.Mode())
+	dst := c.FilePath(h)
+	if c.HasValid(h) {
+		return os.Chmod(dst, mode)
+	}
+	if err := fsutil.AtomicCopy(src, dst, mode); err != nil {
 		return err
 	}
 	if err := hash.VerifyFile(dst, h); err != nil {
 		return err
 	}
-	return fsutil.MakeReadOnly(dst)
+	return os.Chmod(dst, mode)
 }
 
 // Move moves src into the cache, verifies it by hash, then publishes the final immutable object.
@@ -75,18 +85,19 @@ func (c Cache) Move(src string, h hash.Hash) error {
 	if err != nil {
 		return err
 	}
-	if filepath.Clean(srcAbs) == filepath.Clean(dst) {
-		return fsutil.MakeReadOnly(dst)
-	}
-	if c.HasValid(h) {
-		if err := fsutil.MakeReadOnly(dst); err != nil {
-			return err
-		}
-		return os.Remove(src)
-	}
 	st, err := os.Stat(src)
 	if err != nil {
 		return err
+	}
+	mode := readOnly(st.Mode())
+	if filepath.Clean(srcAbs) == filepath.Clean(dst) {
+		return os.Chmod(dst, mode)
+	}
+	if c.HasValid(h) {
+		if err := os.Chmod(dst, mode); err != nil {
+			return err
+		}
+		return os.Remove(src)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
@@ -100,23 +111,20 @@ func (c Cache) Move(src string, h hash.Hash) error {
 		if !isCrossDeviceRename(err) {
 			return fmt.Errorf("move into cache staging failed: %w", err)
 		}
-		if err := copyThenRemove(src, tmp, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
+		if err := copyThenRemove(src, tmp, mode); err != nil {
 			return err
 		}
 	}
 	if err := hash.VerifyFile(tmp, h); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp, fsutil.ReadOnlyMode(st.Mode().Perm())); err != nil {
+	if err := os.Chmod(tmp, mode); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		return fmt.Errorf("publish cached file %s: %w", dst, err)
 	}
-	if err := fsutil.MakeReadOnly(dst); err != nil {
-		return fmt.Errorf("protect cached file %s: %w", dst, err)
-	}
-	return nil
+	return os.Chmod(dst, mode)
 }
 
 func isCrossDeviceRename(err error) bool {

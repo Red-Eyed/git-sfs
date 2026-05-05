@@ -228,12 +228,12 @@ func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, 
 		if err != nil {
 			return remoteStatus{Err: err}
 		}
+		if info.Mode().Perm()&0o222 != 0 {
+			return remoteStatus{Err: fmt.Errorf("cache file is writable: %w", errs.ErrWrongCachePermissions)}
+		}
 		if withIntegrity {
 			if err := hash.VerifyFile(cacheFile, h); err != nil {
 				return remoteStatus{Err: err}
-			}
-			if info.Mode().Perm()&0o222 != 0 {
-				return remoteStatus{Err: fmt.Errorf("cache file is writable: %w", errs.ErrWrongCachePermissions)}
 			}
 		}
 		return remoteStatus{OK: true}

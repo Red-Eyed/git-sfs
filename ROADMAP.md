@@ -19,6 +19,7 @@ databases, daemons, custom protocols, and hidden metadata.
 - Disk space guard — estimate bytes needed before pull, fail early
 - `min_rclone_version` and `min_git_sfs_version` — enforced at startup
 - Submodule support — `.git` file recognized as repo root alongside `.git` directory
+- Cache file immutability — all cache files written mode 0444; permission verified by `verify` without `--with-integrity`
 - CHANGELOG — Keep a Changelog format, updated with each release
 
 ## Remaining
@@ -27,18 +28,17 @@ Importance: **H** high · **M** medium · **L** low. Effort: **S** small (hours)
 
 | # | Task | Description | Importance | Effort |
 |---|------|-------------|:----------:|:------:|
-| 1 | Cache file immutability | Write cache files mode 0444; verify mode in `verify`. Prevents silent data corruption. | H | S |
-| 2 | Stable exit codes | 0 success · 1 config/usage · 2 I/O or remote · 3 integrity failure. Document for scripting. | H | S |
-| 3 | Disaster recovery docs | Cache-loss recovery (re-pull) and remote corruption recovery (re-push after verify). `docs/recovery.md`. | H | S |
-| 4 | Fault-injection tests | Partial copy · hash mismatch · missing/corrupt remote file · disk/write failure. | H | M |
-| 5 | Remote publish safety | Confirm temp path cleanup and that final remote files are never corrupt after interrupted upload. | H | M |
-| 6 | Platform CI matrix | Run shell workflow suite on macOS and Linux, amd64 and arm64, in CI. | H | M |
-| 7 | Dogfood end-to-end | Full workflow: create repo · add · push · clone · setup · pull · verify files open normally. | M | S |
-| 8 | Concurrency tests | Concurrent pull · push · add of duplicate content. | M | M |
-| 9 | `--dry-run` for push/pull | Print what would be transferred without touching remote or cache. | M | M |
-| 10 | Cloud rclone integration tests | Gated on env vars. Cover upload · skip existing · pull · interruption retry · permission errors. | M | M |
-| 11 | Fuzz testing | Fuzz `config.toml` parsing, symlink target parsing, hash string parsing. Short corpus run in CI. | M | M |
-| 12 | Shell completions | Bash, Zsh, and Fish completions in the release archive. | L | M |
+| 1 | Stable exit codes | 0 success · 1 config/usage · 2 I/O or remote · 3 integrity failure. Document for scripting. | H | S |
+| 2 | Disaster recovery docs | Cache-loss recovery (re-pull) and remote corruption recovery (re-push after verify). `docs/recovery.md`. | H | S |
+| 3 | Fault-injection tests | Partial copy · hash mismatch · missing/corrupt remote file · disk/write failure. | H | M |
+| 4 | Remote publish safety | Confirm temp path cleanup and that final remote files are never corrupt after interrupted upload. | H | M |
+| 5 | Platform CI matrix | Run shell workflow suite on macOS and Linux, amd64 and arm64, in CI. | H | M |
+| 6 | Dogfood end-to-end | Full workflow: create repo · add · push · clone · setup · pull · verify files open normally. | M | S |
+| 7 | Concurrency tests | Concurrent pull · push · add of duplicate content. | M | M |
+| 8 | `--dry-run` for push/pull | Print what would be transferred without touching remote or cache. | M | M |
+| 9 | Cloud rclone integration tests | Gated on env vars. Cover upload · skip existing · pull · interruption retry · permission errors. | M | M |
+| 10 | Fuzz testing | Fuzz `config.toml` parsing, symlink target parsing, hash string parsing. Short corpus run in CI. | M | M |
+| 11 | Shell completions | Bash, Zsh, and Fish completions in the release archive. | L | M |
 
 ## Planned
 
