@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.7.0
+
+### Added
+- `git-sfs doctor` — new diagnostic command that runs ten sequential checks and reports pass/fail for each: git repository, config file, git-sfs version, cache config, cache writability, rclone binary, rclone version, and per-remote checks (rclone config file, backend reachable, remote path exists). Exits non-zero if any check fails. Useful for verifying a new machine setup before running a workflow.
+- `min_git_sfs_version` setting in `[settings]` — fail fast if the installed git-sfs is older than the declared minimum. Enforced at the start of every command.
+- `min_rclone_version` setting in `[settings]` — previously parsed but never enforced; now verified before any remote operation.
+
+### Fixed
+- Submodule support: `git-sfs` now recognises a `.git` file (used by Git submodules) as a repository root. Previously it required a `.git` directory and would walk up to the parent repository, rooting all paths to the wrong tree.
+- Explicit error messages throughout: "not a git repository", "config file not found: … (run git-sfs init)", "missing cache config: set GIT_SFS_CACHE, pass --cache, or run git-sfs setup", "rclone config file not found: …", and "cannot connect to remote … (check rclone config)" — instead of raw OS errors with no context.
+- Remote connectivity check (`lsd`) no longer silently swallows rclone config errors (e.g. "didn't find section in config file") that previously caused a misleading "remote path does not exist" message.
+- `push` now goes through the same `preflight` path as `pull` and `verify`, ensuring consistent rclone-on-PATH and version checks.
+
+---
+
 ## v1.6.3
 
 ### Fixed
