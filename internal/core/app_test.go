@@ -1023,6 +1023,9 @@ case "$cmd" in
     dst="$(map_path "$3")"
     mkdir -p "$(dirname "$dst")"
     mv "$src" "$dst" ;;
+  lsd)
+    src="$(map_path "$2")"
+    if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi ;;
   *) exit 2 ;;
 esac
 `)
@@ -1221,6 +1224,9 @@ case "$cmd" in
     else
       printf 'directory not found: %s\n' "$src" >&2; exit 1
     fi ;;
+  lsd)
+    src="$(map_path "$2")"
+    if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi ;;
   *) exit 2 ;;
 esac
 `)
@@ -1354,6 +1360,9 @@ case "$cmd" in
     else
       printf 'directory not found: %s\n' "$src" >&2; exit 1
     fi ;;
+  lsd)
+    src="$(map_path "$2")"
+    if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi ;;
   copy)
     ignore_existing=false; files_from=""; shift
     while [ "$#" -gt 2 ]; do
@@ -1474,6 +1483,10 @@ case "$cmd" in
     dst="$(map_path "$3")"
     mkdir -p "$(dirname "$dst")"
     mv "$src" "$dst"
+    ;;
+  lsd)
+    src="$(map_path "$2")"
+    if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi
     ;;
   *)
     exit 2

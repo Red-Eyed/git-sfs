@@ -116,6 +116,7 @@ case "$cmd" in
       cp "$src_file" "$dst_file"
     done < "$files_from" ;;
   lsjson) src="$(map_path "$2")"; if [ -e "$src" ]; then printf '[{"Path":"%s"}]\n' "$(basename "$src")"; else printf '[]\n'; fi ;;
+  lsd) src="$(map_path "$2")"; if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi ;;
   *) exit 2 ;;
 esac
 `), 0o755); err != nil {

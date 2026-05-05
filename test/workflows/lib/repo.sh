@@ -101,6 +101,10 @@ case "$cmd" in
       printf '[]\n'
     fi
     ;;
+  lsd)
+    target="$(map_path "${2:-}")"
+    if [ -d "$target" ]; then exit 0; else printf 'directory not found: %s\n' "$target" >&2; exit 1; fi
+    ;;
   *)
     echo "unsupported rclone command: $cmd" >&2
     exit 2

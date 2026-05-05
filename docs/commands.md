@@ -182,6 +182,35 @@ Missing hashes are downloaded with `[settings].n_jobs` worker slots when configu
 When a path is provided, only symlinks below that path are considered. This is
 the intended way to partially pull a dataset from the remote.
 
+## git-sfs doctor
+
+Run a series of configuration and connectivity checks:
+
+```sh
+git-sfs doctor
+git-sfs doctor -r backup
+```
+
+`-r remote` checks only the named remote instead of all configured remotes.
+
+Checks run in order. When a check fails, dependent checks are skipped:
+
+1. git repository (is the current directory inside a git repo?)
+2. git-sfs config (can `.git-sfs/config.toml` be parsed?)
+3. git-sfs version (satisfies `min_git_sfs_version` if set)
+4. cache config (is a cache path configured via `GIT_SFS_CACHE`, `--cache`, or `git-sfs setup`?)
+5. cache directory (does it exist and is it writable?)
+6. rclone binary (is `rclone` on `PATH`?)
+7. rclone version (satisfies `min_rclone_version` if set)
+
+Then for each configured remote (or the selected remote):
+
+8. rclone config file (does the per-remote config file exist?)
+9. remote backend (is the rclone backend reachable?)
+10. remote path (does the configured remote path exist?)
+
+`git-sfs doctor` exits non-zero if any check fails, so it can be used in CI setup scripts to verify the environment before running a workflow.
+
 ## git-sfs gc
 
 Show unreferenced cached files:

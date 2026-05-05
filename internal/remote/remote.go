@@ -11,8 +11,14 @@ import (
 
 // Remote hides backend details from push and pull workflow code.
 type Remote interface {
-	// RequireExists checks that the remote root path exists and is reachable.
-	// Returns an error if the path is missing or the backend is unreachable.
+	// CheckBackend verifies that the rclone backend itself is reachable,
+	// without checking whether the configured path exists.
+	CheckBackend(ctx context.Context) error
+	// CheckPath verifies that the configured remote path exists.
+	// Call after CheckBackend to distinguish connectivity from missing-path errors.
+	CheckPath(ctx context.Context) error
+	// RequireExists checks backend connectivity and that the root path exists.
+	// Returns an error if the backend is unreachable or the path is missing.
 	RequireExists(ctx context.Context) error
 	HasFile(ctx context.Context, h hash.Hash) (bool, error)
 	CheckFile(ctx context.Context, h hash.Hash) (bool, error)
@@ -42,9 +48,15 @@ func NewWithOptions(cfg config.RemoteConfig, opts Options) (Remote, error) {
 	return NewRcloneTargetWithOptions(cfg.Backend, cfg.Path, opts), nil
 }
 
-func rcloneConfigPath(configDir, config string) string {
-	if config == "" || filepath.IsAbs(config) {
-		return config
+// ResolveConfigPath resolves a rclone config file path relative to configDir.
+// Absolute paths and empty strings are returned as-is.
+func ResolveConfigPath(configDir, cfgPath string) string {
+	if cfgPath == "" || filepath.IsAbs(cfgPath) {
+		return cfgPath
 	}
-	return filepath.Join(configDir, config)
+	return filepath.Join(configDir, cfgPath)
+}
+
+func rcloneConfigPath(configDir, config string) string {
+	return ResolveConfigPath(configDir, config)
 }

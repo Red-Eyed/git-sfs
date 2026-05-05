@@ -27,11 +27,13 @@ Allowed here:
 
 `[settings]` currently supports:
 
-- `algorithm = "sha256"`
-- `n_jobs = 0`
+- `algorithm = "sha256"` — only `sha256` is supported in v1
+- `n_jobs = 0` — worker cap for parallel operations (`add`, `import`, `push`, `pull`, `verify`); `0` means auto
+- `retry_max = 3` — retries per rclone call on transient failures
+- `min_rclone_version = "1.67.0"` — fail fast if the installed rclone is older than this version
+- `min_git_sfs_version = "1.6.0"` — fail fast if git-sfs itself is older than this version
 
-`n_jobs` controls bounded parallel work for `add`, `import`, `push`, `pull`,
-and remote-heavy `verify` checks. `0` means auto.
+`min_rclone_version` and `min_git_sfs_version` are enforced at the start of every command that uses a remote. Run `git-sfs doctor` to check both without performing an actual operation.
 
 Forbidden here:
 

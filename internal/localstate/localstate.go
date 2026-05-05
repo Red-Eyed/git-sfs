@@ -11,19 +11,21 @@ import (
 	"git-sfs/internal/errs"
 )
 
-// ResolveRepo walks upward from the current directory until it finds .git.
+// ResolveRepo walks upward from the current directory until it finds .git
+// (directory for a regular repo, file for a submodule).
 func ResolveRepo() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
+	start := wd
 	for {
 		if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
 			return wd, nil
 		}
 		parent := filepath.Dir(wd)
 		if parent == wd {
-			return "", errs.ErrInvalidConfig
+			return "", fmt.Errorf("not a git repository: no .git found in %s or any parent directory", start)
 		}
 		wd = parent
 	}
@@ -44,7 +46,7 @@ func ResolveCache(repo, flagValue string) (cache.Cache, error) {
 	if local.CachePath != "" {
 		return cache.Cache{Root: abs(local.CachePath)}, nil
 	}
-	return cache.Cache{}, errs.ErrMissingCacheConfig
+	return cache.Cache{}, fmt.Errorf("%w: set GIT_SFS_CACHE, pass --cache, or run git-sfs setup", errs.ErrMissingCacheConfig)
 }
 
 // InitGitSFS creates the local project state directory used by materialization.

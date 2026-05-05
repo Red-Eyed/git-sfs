@@ -70,7 +70,7 @@ func (a App) Verify(ctx context.Context, remoteName string, checkRemote, withInt
 			printReport(a.Stdout, report)
 			return fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
 		}
-		if err := a.preflight(ctx, r); err != nil {
+		if err := a.preflight(ctx, cfg, r); err != nil {
 			return err
 		}
 	}

@@ -126,6 +126,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			path = pfs.Args()[0]
 		}
 		return app.Pull(ctx, remoteName, path)
+	case "doctor":
+		dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+		dfs.SetOutput(stderr)
+		var remoteName string
+		dfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
+		if err := dfs.Parse(cmdArgs); err != nil {
+			return err
+		}
+		return app.Doctor(ctx, remoteName)
 	case "help", "-h", "--help":
 		usage(stdout)
 		return nil
@@ -154,5 +163,6 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  verify  [-r remote] [--remote] [--with-integrity] [path]")
 	fmt.Fprintln(w, "  push    [-r remote]")
 	fmt.Fprintln(w, "  pull    [-r remote] [path]")
+	fmt.Fprintln(w, "  doctor  [-r remote]")
 	fmt.Fprintln(w, "  help")
 }

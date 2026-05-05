@@ -8,7 +8,6 @@ import (
 	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
 	"git-sfs/internal/lock"
-	"git-sfs/internal/remote"
 )
 
 // Push uploads each referenced cache file to the remote in a single rclone call.
@@ -29,10 +28,7 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := remote.CheckRcloneOnPath(); err != nil {
-		return err
-	}
-	if err := r.RequireExists(ctx); err != nil {
+	if err := a.preflight(ctx, cfg, r); err != nil {
 		return err
 	}
 	links, err := collectGitSFSSymlinks(repo, ".")

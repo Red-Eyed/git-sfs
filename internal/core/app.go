@@ -11,6 +11,7 @@ import (
 	"git-sfs/internal/config"
 	"git-sfs/internal/localstate"
 	"git-sfs/internal/remote"
+	"git-sfs/internal/version"
 )
 
 type App struct {
@@ -31,6 +32,11 @@ func (a App) open() (string, cache.Cache, config.Config, error) {
 	cfg, err := config.Load(filepath.Join(repo, a.ConfigPath))
 	if err != nil {
 		return "", cache.Cache{}, config.Config{}, err
+	}
+	if min := cfg.Settings.MinGitSFSVersion; min != "" {
+		if err := config.CheckGitSFSVersion(version.Version, min); err != nil {
+			return "", cache.Cache{}, config.Config{}, err
+		}
 	}
 	c, err := localstate.ResolveCache(repo, a.CacheFlag)
 	if err != nil {
@@ -96,11 +102,21 @@ func (a App) debugf(format string, args ...any) {
 	fmt.Fprintf(a.Stderr, "debug: "+format+"\n", args...)
 }
 
-// preflight checks that rclone is on PATH and that the remote root exists.
+// preflight checks that rclone is on PATH, meets the minimum version
+// requirement (if configured), and that the remote root exists.
 // Call this after selectRemote, before starting any transfer.
-func (a App) preflight(ctx context.Context, r remote.Remote) error {
+func (a App) preflight(ctx context.Context, cfg config.Config, r remote.Remote) error {
 	if err := remote.CheckRcloneOnPath(); err != nil {
 		return err
+	}
+	if min := cfg.Settings.MinRcloneVersion; min != "" {
+		ver, err := remote.DetectRcloneVersion(ctx, "")
+		if err != nil {
+			return fmt.Errorf("check rclone version: %w", err)
+		}
+		if err := config.CheckRcloneVersion(ver, min); err != nil {
+			return err
+		}
 	}
 	return r.RequireExists(ctx)
 }

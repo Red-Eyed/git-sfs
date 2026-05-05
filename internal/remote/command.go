@@ -73,12 +73,42 @@ func (r rcloneRemote) backendRoot() string {
 	return r.url
 }
 
-// checkConnectivity verifies that rclone can reach the backend at all by
-// listing the backend root. A missing-path response is treated as success —
-// the backend is reachable but has no files at the root yet.
-func (r rcloneRemote) checkConnectivity(ctx context.Context) error {
+// validateConfig checks that the rclone config file exists before any rclone
+// call is made. A wrong or missing path produces a clear error instead of
+// letting the OS errno surface deep inside a copy command.
+func (r rcloneRemote) validateConfig() error {
+	if r.config == "" {
+		return nil
+	}
+	if _, err := os.Stat(r.config); err != nil {
+		return fmt.Errorf("rclone config file not found: %s", r.config)
+	}
+	return nil
+}
+
+// isRemotePathNotFound reports whether a rclone error indicates that a remote
+// path simply does not exist (backend is reachable, directory is absent).
+// It deliberately excludes errors that mention "config" or "section" — those
+// are rclone configuration errors, not missing-path signals.
+func isRemotePathNotFound(msg string) bool {
+	if strings.Contains(msg, "config") || strings.Contains(msg, "section") {
+		return false
+	}
+	// "no such file or directory" is an OS errno; it appears when rclone reads
+	// a local path or a local backend — treat it as path-not-found only when
+	// there is no config-related context in the message.
+	return strings.Contains(msg, "directory not found") ||
+		strings.Contains(msg, "object not found") ||
+		strings.Contains(msg, "no such file or directory") ||
+		strings.Contains(msg, "path not found")
+}
+
+// CheckBackend verifies that rclone can reach the backend at all by listing
+// directories at the backend root. A missing-path response is treated as
+// success — the backend is reachable but has no directories at the root yet.
+func (r rcloneRemote) CheckBackend(ctx context.Context) error {
 	root := r.backendRoot()
-	_, err := r.runOutput(ctx, "lsjson", root)
+	_, err := r.runOutput(ctx, "lsd", root)
 	if err == nil {
 		return nil
 	}
@@ -86,33 +116,41 @@ func (r rcloneRemote) checkConnectivity(ctx context.Context) error {
 		return ctx.Err()
 	}
 	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
+	if isRemotePathNotFound(msg) {
 		return nil
 	}
 	return fmt.Errorf("cannot connect to remote %s (check rclone config): %w", root, err)
 }
 
-// RequireExists verifies connectivity to the backend and then checks that the
-// configured root path exists. A missing root is an error — use this before
-// push/pull to prevent accidental file creation at a wrong path.
-func (r rcloneRemote) RequireExists(ctx context.Context) error {
-	if err := r.checkConnectivity(ctx); err != nil {
-		return err
-	}
+// CheckPath verifies that the configured remote root path exists.
+// Call after CheckBackend to distinguish connectivity from missing-path errors.
+func (r rcloneRemote) CheckPath(ctx context.Context) error {
 	out, err := r.runOutput(ctx, "lsjson", r.url)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "not found") || strings.Contains(msg, "no such file") {
+		if isRemotePathNotFound(msg) {
 			return fmt.Errorf("remote path does not exist: %s (create it before pushing)", r.url)
 		}
 		return fmt.Errorf("remote unreachable (%s): %w", r.url, err)
 	}
-	// An empty listing is fine — the remote directory exists but has no files yet.
 	_ = out
 	return nil
+}
+
+// RequireExists verifies connectivity to the backend and then checks that the
+// configured root path exists. A missing root is an error — use this before
+// push/pull to prevent accidental file creation at a wrong path.
+func (r rcloneRemote) RequireExists(ctx context.Context) error {
+	if err := r.validateConfig(); err != nil {
+		return err
+	}
+	if err := r.CheckBackend(ctx); err != nil {
+		return err
+	}
+	return r.CheckPath(ctx)
 }
 
 func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {

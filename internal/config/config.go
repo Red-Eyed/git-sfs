@@ -30,6 +30,31 @@ func ParseSemver(s string) ([3]int, error) {
 	return out, nil
 }
 
+// CheckGitSFSVersion returns an error if current is below minimum.
+// A current value of "dev" skips the check so development builds are never blocked.
+func CheckGitSFSVersion(current, minimum string) error {
+	if current == "dev" {
+		return nil
+	}
+	got, err := ParseSemver(current)
+	if err != nil {
+		return fmt.Errorf("parse git-sfs version: %w", err)
+	}
+	min, err := ParseSemver(minimum)
+	if err != nil {
+		return errors.Join(errs.ErrInvalidConfig, fmt.Errorf("parse min_git_sfs_version: %w", err))
+	}
+	for i := range got {
+		if got[i] > min[i] {
+			return nil
+		}
+		if got[i] < min[i] {
+			return fmt.Errorf("git-sfs %s is below required %s (upgrade: https://github.com/vadstup/git-sfs)", current, minimum)
+		}
+	}
+	return nil
+}
+
 // CheckRcloneVersion returns an error if detected is below minimum.
 // Both strings should be in "X.Y.Z" or "vX.Y.Z" form.
 func CheckRcloneVersion(detected, minimum string) error {
@@ -71,6 +96,7 @@ type Settings struct {
 	Jobs             int
 	RetryMax         int
 	MinRcloneVersion string
+	MinGitSFSVersion string
 }
 
 type Local struct {
@@ -118,11 +144,16 @@ n_jobs = 0
 # retry_max = 3
 # Optional: fail fast if the installed rclone is older than this version.
 # min_rclone_version = "1.67.0"
+# Optional: fail fast if git-sfs itself is older than this version.
+# min_git_sfs_version = "1.6.0"
 `
 
 func Load(path string) (Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return Config{}, fmt.Errorf("config file not found: %s (run git-sfs init)", path)
+		}
 		return Config{}, fmt.Errorf("open config %s: %w", path, err)
 	}
 	defer f.Close()
@@ -191,6 +222,8 @@ func Load(path string) (Config, error) {
 				cfg.Settings.RetryMax = n
 			case "min_rclone_version":
 				cfg.Settings.MinRcloneVersion = val
+			case "min_git_sfs_version":
+				cfg.Settings.MinGitSFSVersion = val
 			default:
 				return Config{}, errors.Join(errs.ErrInvalidConfig, fmt.Errorf("unknown settings field %q", key))
 			}
