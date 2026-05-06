@@ -36,8 +36,26 @@ func (c Cache) Init() error {
 	return nil
 }
 
+// HasValid reports whether h is present in the cache and intact.
+// A read-only file at the content-addressed path is sufficient proof: write
+// protection is set by Protect only after hash verification, so the file cannot
+// have been mutated since. Files that predate write-protection enforcement are
+// hash-verified on first access and protected in place as a one-time migration.
 func (c Cache) HasValid(h hash.Hash) bool {
-	return hash.VerifyFile(c.FilePath(h), h) == nil
+	path := c.FilePath(h)
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if info.Mode()&0o222 == 0 {
+		return true
+	}
+	// Legacy file: has write bit, so verify by hash and protect if valid.
+	if hash.VerifyFile(path, h) != nil {
+		return false
+	}
+	os.Chmod(path, readOnly(info.Mode()))
+	return true
 }
 
 // readOnly strips write bits from mode, preserving read and execute bits.

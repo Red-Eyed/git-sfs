@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.2
+
+### Fixed
+- `pull` no longer re-hashes files already in the cache. `HasValid` now checks write-protection via `stat` instead of reading and SHA-256ing the full file — a read-only file at the content-addressed path is sufficient proof of integrity. Files written by older versions (which lacked write protection) are hash-verified once on first access and protected in place.
+
+---
+
 ## v1.8.1
 
 ### Fixed
