@@ -24,12 +24,22 @@ type App struct {
 	Verbose    bool
 }
 
+// resolvedConfigPath returns ConfigPath as-is when it is absolute, or joined
+// with repo when it is relative. filepath.Join cannot be used directly because
+// it does not treat an absolute second argument specially on all platforms.
+func (a App) resolvedConfigPath(repo string) string {
+	if filepath.IsAbs(a.ConfigPath) {
+		return a.ConfigPath
+	}
+	return filepath.Join(repo, a.ConfigPath)
+}
+
 func (a App) open() (string, cache.Cache, config.Config, error) {
 	repo, err := localstate.ResolveRepo()
 	if err != nil {
 		return "", cache.Cache{}, config.Config{}, err
 	}
-	cfg, err := config.Load(filepath.Join(repo, a.ConfigPath))
+	cfg, err := config.Load(a.resolvedConfigPath(repo))
 	if err != nil {
 		return "", cache.Cache{}, config.Config{}, err
 	}
@@ -60,7 +70,7 @@ func (a App) selectRemote(repo string, cfg config.Config, name string) (remote.R
 	if a.Verbose {
 		debug = a.Stderr
 	}
-	return remote.NewWithOptions(rc, remote.Options{Debug: debug, ConfigDir: filepath.Dir(filepath.Join(repo, a.ConfigPath)), RetryMax: cfg.Settings.RetryMax})
+	return remote.NewWithOptions(rc, remote.Options{Debug: debug, ConfigDir: filepath.Dir(a.resolvedConfigPath(repo)), RetryMax: cfg.Settings.RetryMax})
 }
 
 func (a App) jobs(cfg config.Config, n int) int {

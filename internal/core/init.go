@@ -24,7 +24,7 @@ func (a App) Init(ctx context.Context, force bool) (err error) {
 	if err != nil {
 		return err
 	}
-	cfgPath := filepath.Join(repo, a.ConfigPath)
+	cfgPath := a.resolvedConfigPath(repo)
 	if _, err := os.Stat(cfgPath); err == nil && !force {
 		err = fmt.Errorf("%s already exists; use --force to overwrite", a.ConfigPath)
 		return err

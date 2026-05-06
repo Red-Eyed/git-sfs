@@ -37,7 +37,7 @@ func (a App) Doctor(ctx context.Context, remoteName string) error {
 	}
 
 	// 2. git-sfs config
-	configPath := filepath.Join(repo, a.ConfigPath)
+	configPath := a.resolvedConfigPath(repo)
 	var cfg config.Config
 	_, cfgOK := d.check("git-sfs config", func() (string, error) {
 		c, err := config.Load(configPath)
