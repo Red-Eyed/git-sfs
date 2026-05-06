@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.8.1
+
+### Fixed
+- `--config /absolute/path` no longer has the repo root prepended to it. `filepath.Join` strips the leading slash from an absolute second argument instead of treating it as rooted, so absolute config paths were silently resolved to `<repo>/absolute/path`.
+
+---
+
+## v1.8.0
+
+### Added
+- Cache files are now stored and enforced as read-only (mode `0444`). Any cache file found with write permission is rejected at read time, protecting against accidental mutation of immutable content-addressed data.
+
+### Fixed
+- `push` uses `--size-only` comparison to prevent silent corruption when a previous upload was interrupted mid-transfer and left a truncated file on the remote.
+
+---
+
 ## v1.7.0
 
 ### Added
