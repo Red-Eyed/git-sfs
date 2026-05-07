@@ -3,6 +3,8 @@
 [![CI](https://github.com/Red-Eyed/git-sfs/actions/workflows/ci.yml/badge.svg)](https://github.com/Red-Eyed/git-sfs/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Red-Eyed/git-sfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Red-Eyed/git-sfs)
 
+**SFS** stands for **Symbolic File Storage** — like Git LFS, but instead of large file pointers it uses plain symlinks that Git already understands natively.
+
 `git-sfs` keeps large files — datasets, model checkpoints, media archives — out of
 Git while Git tracks exactly where they belong.
 
