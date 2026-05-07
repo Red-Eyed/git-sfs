@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,9 @@ import (
 	"git-sfs/internal/materialize"
 	"git-sfs/internal/progress"
 )
+
+//go:embed git_sfs_dir_readme.md
+var gitSFSDirReadme []byte
 
 // Init creates the tracked project config and the untracked .git-sfs workspace.
 func (a App) Init(ctx context.Context, force bool) (err error) {
@@ -53,6 +57,9 @@ func (a App) Init(ctx context.Context, force bool) (err error) {
 		return err
 	}
 	if err := ensureGitignore(repo); err != nil {
+		return err
+	}
+	if err := ensureDirReadme(repo); err != nil {
 		return err
 	}
 	a.say("initialized git-sfs repository")
@@ -107,6 +114,14 @@ func (a App) Setup(ctx context.Context) (err error) {
 	}
 	a.say("setup complete")
 	return nil
+}
+
+func ensureDirReadme(repo string) error {
+	path := filepath.Join(repo, ".git-sfs", "README.md")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	return os.WriteFile(path, []byte(gitSFSDirReadme), 0o644)
 }
 
 func ensureGitignore(repo string) error {

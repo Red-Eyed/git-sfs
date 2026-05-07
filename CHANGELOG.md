@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.4
+
+### Added
+- `git-sfs init` now writes `.git-sfs/README.md` — a brief orientation for anyone who opens that directory, listing all paths it contains and linking to the full documentation. The file is skipped if it already exists.
+
+---
+
 ## v1.8.3
 
 ### Fixed
