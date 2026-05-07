@@ -31,7 +31,7 @@ If `raw.githubusercontent.com` is blocked (corporate proxy), use the release ass
 curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/latest/download/install.sh | sh
 ```
 
-Prebuilt binaries for macOS and Linux (arm64 and x86_64). Installs `rclone` too if not already on `PATH`.
+Prebuilt binaries for macOS and Linux (arm64 and x86_64). Windows is not supported — git-sfs relies on symlinks, which require elevated privileges on Windows. Installs `rclone` too if not already on `PATH`.
 See [docs/installation.md](docs/installation.md) for proxy, CA bundle, and source-build options.
 
 Build from source:
