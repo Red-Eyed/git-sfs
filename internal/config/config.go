@@ -12,6 +12,8 @@ import (
 	"git-sfs/internal/errs"
 )
 
+const RepoURL = "https://github.com/Red-Eyed/git-sfs"
+
 // ParseSemver parses a version string like "1.67.0" or "v1.67.0" into [major, minor, patch].
 func ParseSemver(s string) ([3]int, error) {
 	s = strings.TrimPrefix(s, "v")
@@ -49,7 +51,7 @@ func CheckGitSFSVersion(current, minimum string) error {
 			return nil
 		}
 		if got[i] < min[i] {
-			return fmt.Errorf("git-sfs %s is below required %s (upgrade: https://github.com/vadstup/git-sfs)", current, minimum)
+			return fmt.Errorf("git-sfs %s is below required %s (upgrade: %s)", current, minimum, RepoURL)
 		}
 	}
 	return nil

@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.3
+
+### Fixed
+- Upgrade URL in version-check error message corrected to `https://github.com/Red-Eyed/git-sfs`; URL is now stored in `config.RepoURL` constant.
+
+---
+
 ## v1.8.2
 
 ### Fixed
