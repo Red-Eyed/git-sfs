@@ -65,11 +65,16 @@ func readOnly(mode os.FileMode) os.FileMode {
 
 func (c Cache) Protect(h hash.Hash) error {
 	path := c.FilePath(h)
-	if err := hash.VerifyFile(path, h); err != nil {
-		return err
-	}
 	info, err := os.Stat(path)
 	if err != nil {
+		return err
+	}
+	// Already protected: write-protection was set only after prior hash verification,
+	// so the file cannot have been mutated since. No need to re-hash.
+	if info.Mode()&0o222 == 0 {
+		return nil
+	}
+	if err := hash.VerifyFile(path, h); err != nil {
 		return err
 	}
 	return os.Chmod(path, readOnly(info.Mode()))

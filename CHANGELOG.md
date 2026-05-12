@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.5
+
+### Fixed
+- `pull` no longer re-hashes already-protected cache files. `Protect` now checks the file's write-protection bit before hashing: a read-only file was written by a prior `Protect` call that already verified it, so the bytes cannot have changed. Only newly-downloaded files (which rclone writes with normal permissions) go through SHA-256 verification.
+
+---
+
 ## v1.8.4
 
 ### Added
