@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.10.0
+
+### Added
+- Long-running operations (`add`, `import`, `verify`, `setup`, `pull`) are cancelable with `Ctrl-C`. The hash, copy, and download loops check for cancellation on every chunk, so an interrupt stops promptly instead of running to completion. Cancellation is safe — an interrupted write never publishes a partial cache file (temp + rename) — and an interrupted run reports `canceled` and exits with status `130`.
+- `add` and `import` show byte-weighted hashing progress: the bar advances by bytes hashed, giving smooth within-file progress for large files instead of a count that jumps straight from 0 to 100%.
+
+### Changed
+- Local hashing progress is now live *during* the hash phase instead of only after it. On a terminal the bar redraws in place; when output is redirected to a log or CI, it emits periodic percentage lines (bounded to ~100) so long jobs stay visibly live.
+
+### Fixed
+- `git-sfs add` and `git-sfs import` no longer appear frozen for the entire hashing phase. Progress was previously emitted only in the post-hash symlink step, so a multi-hour add showed nothing until it finished and then dumped all output at once.
+
+---
+
 ## v1.9.0
 
 ### Added

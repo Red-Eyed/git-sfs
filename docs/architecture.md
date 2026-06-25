@@ -17,7 +17,7 @@ internal/
   materialize/     .git-sfs/cache hard-link management (cache ↔ repo binding)
   localstate/      repo root detection; cache symlink resolution and binding
   lock/            directory-based process lock with 100ms poll
-  progress/        TTY-aware stderr bar for local hashing; transfers use rclone --progress
+  progress/        byte-weighted local-hashing bar: live redraw on a TTY, periodic lines in logs; transfers use rclone --progress
   remote/          Remote interface; rclone backend
   errs/            sentinel errors
   version/         version string embedded at build time
