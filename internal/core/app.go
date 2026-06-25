@@ -70,7 +70,13 @@ func (a App) selectRemote(repo string, cfg config.Config, name string) (remote.R
 	if a.Verbose {
 		debug = a.Stderr
 	}
-	return remote.NewWithOptions(rc, remote.Options{Debug: debug, ConfigDir: filepath.Dir(a.resolvedConfigPath(repo)), RetryMax: cfg.Settings.RetryMax})
+	// Let rclone render its own transfer progress bar to stderr unless the user
+	// silenced output; this covers push/pull, where rclone moves the bytes.
+	var progress io.Writer
+	if !a.Quiet {
+		progress = a.Stderr
+	}
+	return remote.NewWithOptions(rc, remote.Options{Debug: debug, Progress: progress, ConfigDir: filepath.Dir(a.resolvedConfigPath(repo)), RetryMax: cfg.Settings.RetryMax})
 }
 
 func (a App) jobs(cfg config.Config, n int) int {

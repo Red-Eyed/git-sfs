@@ -155,6 +155,7 @@ func TestPullFailsWhenDiskSpaceInsufficient(t *testing.T) {
 	bin := t.TempDir()
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
 if [ "${1:-}" = "--config" ]; then shift 2; fi
+if [ "${1:-}" = "--progress" ]; then shift; fi
 cmd="${1:-}"
 map_path() {
   case "$1" in
@@ -287,6 +288,7 @@ func TestPullRejectsHashMismatch(t *testing.T) {
 	// Fake rclone: copy writes wrong content for every file in the list.
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
 if [ "${1:-}" = "--config" ]; then shift 2; fi
+if [ "${1:-}" = "--progress" ]; then shift; fi
 cmd="${1:-}"
 map_path() {
   case "$1" in

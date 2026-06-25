@@ -21,6 +21,7 @@ type rcloneRemote struct {
 	url      string
 	config   string
 	debug    io.Writer
+	progress io.Writer
 	retryMax int
 }
 
@@ -29,7 +30,7 @@ func NewRclone(url string) Remote {
 }
 
 func NewRcloneWithOptions(url string, opts Options) Remote {
-	return rcloneRemote{url: strings.TrimRight(url, "/"), config: opts.RcloneConfig, debug: opts.Debug, retryMax: opts.RetryMax}
+	return rcloneRemote{url: strings.TrimRight(url, "/"), config: opts.RcloneConfig, debug: opts.Debug, progress: opts.Progress, retryMax: opts.RetryMax}
 }
 
 func NewRcloneTarget(remote, path string) Remote {
@@ -42,9 +43,9 @@ func NewRcloneTargetWithOptions(remote, path string, opts Options) Remote {
 	}
 	path = strings.TrimRight(path, "/")
 	if strings.HasPrefix(path, "/") || isWindowsAbsPath(path) {
-		return rcloneRemote{url: remote + ":" + path, config: opts.RcloneConfig, debug: opts.Debug, retryMax: opts.RetryMax}
+		return rcloneRemote{url: remote + ":" + path, config: opts.RcloneConfig, debug: opts.Debug, progress: opts.Progress, retryMax: opts.RetryMax}
 	}
-	return rcloneRemote{url: remote + ":" + strings.TrimLeft(path, "/"), config: opts.RcloneConfig, debug: opts.Debug, retryMax: opts.RetryMax}
+	return rcloneRemote{url: remote + ":" + strings.TrimLeft(path, "/"), config: opts.RcloneConfig, debug: opts.Debug, progress: opts.Progress, retryMax: opts.RetryMax}
 }
 
 func isWindowsAbsPath(path string) bool {
@@ -230,18 +231,31 @@ func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, 
 	return r.runCopy(ctx, "copy", "--ignore-existing", "--files-from", list, r.filesURL(), cacheFilesDir)
 }
 
-// runCopy runs a rclone copy command, streaming rclone's stderr to the user
-// when in verbose mode (r.debug != nil) and adding --progress so transfer
-// stats are visible. For non-verbose runs stderr is buffered for error messages.
+// runCopy runs a rclone copy command, streaming rclone's stderr (including its
+// own --progress bar) to the user whenever output is not silenced, so transfer
+// stats are visible during push and pull. --progress is added when the progress
+// writer is set (i.e. not --quiet). For silenced runs stderr is buffered for
+// error messages.
 func (r rcloneRemote) runCopy(ctx context.Context, args ...string) error {
 	extra := []string{}
 	if r.config != "" {
 		extra = append(extra, "--config", r.config)
 	}
-	if r.debug != nil {
+	if r.progress != nil {
 		extra = append(extra, "--progress")
 	}
-	return runCopyWithRetry(ctx, r.debug, r.retryMax, "rclone", append(extra, args...)...)
+	return runCopyWithRetry(ctx, r.streamTarget(), r.debug, r.retryMax, "rclone", append(extra, args...)...)
+}
+
+// streamTarget is where rclone's stderr (and its --progress bar) is sent during
+// a copy. Verbose debug output takes precedence; otherwise the progress writer
+// (set when not --quiet) receives it. A nil result means stderr is buffered and
+// surfaced only on failure.
+func (r rcloneRemote) streamTarget() io.Writer {
+	if r.debug != nil {
+		return r.debug
+	}
+	return r.progress
 }
 
 func (r rcloneRemote) run(ctx context.Context, args ...string) error {
@@ -257,17 +271,18 @@ func (r rcloneRemote) runOutput(ctx context.Context, args ...string) (string, er
 }
 
 // runCopyWithRetry runs a streaming rclone command (no captured stdout) with
-// exponential backoff. rclone's stderr is written directly to debug so the
-// user sees progress; on failure the exit error is returned as-is (the user
-// already saw any stderr output).
-func runCopyWithRetry(ctx context.Context, debug io.Writer, retryMax int, name string, args ...string) error {
+// exponential backoff. rclone's stderr is written directly to streamTo so the
+// user sees progress; logTo (verbose only) receives our own command and retry
+// logging. On failure the exit error is returned as-is (the user already saw
+// any stderr output).
+func runCopyWithRetry(ctx context.Context, streamTo, logTo io.Writer, retryMax int, name string, args ...string) error {
 	if retryMax <= 0 {
 		retryMax = 3
 	}
 	backoff := time.Second
 	var lastErr error
 	for attempt := 1; attempt <= retryMax; attempt++ {
-		err := runStream(ctx, debug, name, args...)
+		err := runStream(ctx, streamTo, logTo, name, args...)
 		if err == nil {
 			return nil
 		}
@@ -276,8 +291,8 @@ func runCopyWithRetry(ctx context.Context, debug io.Writer, retryMax int, name s
 		}
 		lastErr = err
 		if attempt < retryMax {
-			if debug != nil {
-				fmt.Fprintf(debug, "retry %d/%d after %s: %v\n", attempt, retryMax, backoff, err)
+			if logTo != nil {
+				fmt.Fprintf(logTo, "retry %d/%d after %s: %v\n", attempt, retryMax, backoff, err)
 			}
 			select {
 			case <-ctx.Done():
@@ -290,23 +305,24 @@ func runCopyWithRetry(ctx context.Context, debug io.Writer, retryMax int, name s
 	return lastErr
 }
 
-// runStream runs a command, streaming stderr to debug (when non-nil) instead
-// of buffering it. Stdout is discarded. Used for rclone copy where captured
-// output is not needed but live progress output is desirable.
-func runStream(ctx context.Context, debug io.Writer, name string, args ...string) error {
-	if debug != nil {
-		fmt.Fprintln(debug, "run:", shellQuote(append([]string{name}, args...)))
+// runStream runs a command, streaming its stderr to streamTo (when non-nil)
+// instead of buffering it. Stdout is discarded. logTo (when non-nil) receives
+// our own "run:" command echo. Used for rclone copy where captured output is
+// not needed but live progress output is desirable.
+func runStream(ctx context.Context, streamTo, logTo io.Writer, name string, args ...string) error {
+	if logTo != nil {
+		fmt.Fprintln(logTo, "run:", shellQuote(append([]string{name}, args...)))
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
-	if debug != nil {
+	if streamTo != nil {
 		// Pass the underlying *os.File when available so the child process
 		// inherits the real file descriptor. rclone detects a TTY via the fd
 		// and renders the --progress bar; an io.Writer pipe suppresses it.
-		if f, ok := debug.(*os.File); ok {
+		if f, ok := streamTo.(*os.File); ok {
 			cmd.Stderr = f
 		} else {
-			cmd.Stderr = debug
+			cmd.Stderr = streamTo
 		}
 	} else {
 		cmd.Stderr = &stderr
@@ -315,7 +331,7 @@ func runStream(ctx context.Context, debug io.Writer, name string, args ...string
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if debug == nil {
+		if streamTo == nil {
 			if msg := strings.TrimSpace(stderr.String()); msg != "" {
 				return fmt.Errorf("%w: %s", err, msg)
 			}

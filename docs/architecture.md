@@ -7,7 +7,7 @@ This document is for contributors. For the user-facing model see [Concepts](conc
 ```text
 cmd/git-sfs/       entry point — parses args, calls cli.Run, exits on error
 internal/
-  cli/             flag parsing and command routing; no business logic
+  cli/             kong-based arg parsing and command routing; no business logic
   core/            command implementations (App struct)
   config/          TOML parser (no third-party lib); strict unknown-field rejection
   cache/           content-addressed local store; atomic writes; read-only protection
@@ -17,7 +17,7 @@ internal/
   materialize/     .git-sfs/cache hard-link management (cache ↔ repo binding)
   localstate/      repo root detection; cache symlink resolution and binding
   lock/            directory-based process lock with 100ms poll
-  progress/        stderr progress bar driven by a goroutine
+  progress/        TTY-aware stderr bar for local hashing; transfers use rclone --progress
   remote/          Remote interface; rclone backend
   errs/            sentinel errors
   version/         version string embedded at build time

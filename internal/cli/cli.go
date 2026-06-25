@@ -2,140 +2,165 @@ package cli
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/alecthomas/kong"
 
 	"git-sfs/internal/core"
 	"git-sfs/internal/version"
 )
 
-type options struct {
-	cache   string
-	config  string
-	verbose bool
-	quiet   bool
-	version bool
+// grammar is the typed command-line surface. kong maps argv onto these fields,
+// validating types and positional arity, and exposes per-command --help. Global
+// flags live at the top level and are inherited by every subcommand, so they may
+// appear before or after the command name (e.g. "git-sfs push --verbose").
+type grammar struct {
+	Cache   string `help:"cache directory" placeholder:"PATH"`
+	Config  string `help:"dataset config path" default:".git-sfs/config.toml" placeholder:"PATH"`
+	Jobs    int    `short:"j" help:"max parallel jobs (0 = auto)"`
+	Verbose bool   `help:"verbose output"`
+	Quiet   bool   `help:"quiet output"`
+
+	Init   initCmd   `cmd:"" help:"initialize git-sfs in this repository"`
+	Setup  setupCmd  `cmd:"" help:"materialize symlinks for already-cached files"`
+	Add    addCmd    `cmd:"" help:"cache files and replace them with symlinks"`
+	Mv     mvCmd     `cmd:"" help:"move a tracked file and its symlink"`
+	Import importCmd `cmd:"" help:"copy external files into the cache"`
+	Verify verifyCmd `cmd:"" help:"check local cache and remote integrity"`
+	Push   pushCmd   `cmd:"" help:"upload referenced cache files to the remote"`
+	Pull   pullCmd   `cmd:"" help:"download missing files from the remote"`
+	Doctor doctorCmd `cmd:"" help:"diagnose configuration and remote problems"`
+	Help   helpCmd   `cmd:"" help:"show usage"`
 }
+
+type initCmd struct {
+	Force bool `help:"overwrite an existing config"`
+}
+
+type setupCmd struct{}
+
+type addCmd struct {
+	// Optional at the kong level so the empty case yields our own clear error
+	// rather than kong's generic "expected <path>" message.
+	Paths []string `arg:"" optional:"" name:"path" help:"files to cache"`
+}
+
+type mvCmd struct {
+	Source string `arg:"" help:"source path"`
+	Dest   string `arg:"" help:"destination path"`
+}
+
+type importCmd struct {
+	Move           bool   `help:"delete source files after caching (default: copy, leave source intact)"`
+	FollowSymlinks bool   `short:"L" name:"follow-symlinks" help:"follow source symlinks"`
+	Source         string `arg:"" help:"source path"`
+	Dest           string `arg:"" help:"destination path"`
+}
+
+type verifyCmd struct {
+	RemoteName    string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+	CheckRemote   bool   `name:"remote" negatable:"" default:"true" help:"check remote files"`
+	WithIntegrity bool   `name:"with-integrity" help:"recalculate hashes for local cache and remote files"`
+	Path          string `arg:"" optional:"" default:"." help:"path to verify"`
+}
+
+type pushCmd struct {
+	RemoteName string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+}
+
+type pullCmd struct {
+	RemoteName string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+	Path       string `arg:"" optional:"" default:"." help:"path to pull"`
+}
+
+type doctorCmd struct {
+	RemoteName string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+}
+
+type helpCmd struct{}
 
 func Run(ctx context.Context, args []string) error {
 	return run(ctx, args, os.Stdout, os.Stderr)
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("git-sfs", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	var opts options
-	fs.StringVar(&opts.cache, "cache", "", "cache directory")
-	fs.StringVar(&opts.config, "config", ".git-sfs/config.toml", "dataset config path")
-	fs.BoolVar(&opts.verbose, "verbose", false, "verbose output")
-	fs.BoolVar(&opts.quiet, "quiet", false, "quiet output")
-	fs.BoolVar(&opts.version, "version", false, "print version")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if opts.version {
+	// Command-less invocations are handled before kong so they need no
+	// subcommand: --version prints the version, and a bare call prints usage.
+	if has(args, "--version") {
 		fmt.Fprintln(stdout, version.Version)
 		return nil
 	}
-	rest := fs.Args()
-	if len(rest) == 0 {
+	if len(args) == 0 {
 		usage(stdout)
 		return nil
+	}
+
+	var g grammar
+	parser, err := kong.New(&g,
+		kong.Name("git-sfs"),
+		kong.Description("store large file bytes outside Git while Git tracks symlinks"),
+		kong.Writers(stdout, stderr),
+		// Never terminate the process; errors propagate to main, which owns the
+		// exit-code mapping. kong still prints --help output during Parse.
+		kong.Exit(func(int) {}),
+	)
+	if err != nil {
+		return err
+	}
+	kctx, parseErr := parser.Parse(args)
+	// kong prints help during Parse when --help/-h is present; stop here so a
+	// command is not also executed.
+	if has(args, "--help") || has(args, "-h") {
+		return nil
+	}
+	if parseErr != nil {
+		return parseErr
+	}
+
+	cmd := kctx.Selected().Name
+	if g.Verbose {
+		fmt.Fprintf(stderr, "debug: command=%s\n", cmd)
 	}
 
 	app := core.App{
 		Stdout:     stdout,
 		Stderr:     stderr,
-		CacheFlag:  opts.cache,
-		ConfigPath: opts.config,
-		Quiet:      opts.quiet,
-		Verbose:    opts.verbose,
+		CacheFlag:  g.Cache,
+		ConfigPath: g.Config,
+		Jobs:       g.Jobs,
+		Quiet:      g.Quiet,
+		Verbose:    g.Verbose,
 	}
+	return dispatch(ctx, app, g, cmd, stdout)
+}
 
-	cmd, cmdArgs := rest[0], rest[1:]
-	if opts.verbose {
-		fmt.Fprintf(stderr, "debug: command=%s args=%q\n", cmd, cmdArgs)
-	}
+func dispatch(ctx context.Context, app core.App, g grammar, cmd string, stdout io.Writer) error {
 	switch cmd {
 	case "init":
-		return app.Init(ctx, has(cmdArgs, "--force"))
+		return app.Init(ctx, g.Init.Force)
 	case "setup":
 		return app.Setup(ctx)
 	case "add":
-		if len(cmdArgs) == 0 {
+		if len(g.Add.Paths) == 0 {
 			return fmt.Errorf("add requires at least one path")
 		}
-		return app.Add(ctx, cmdArgs)
+		return app.Add(ctx, g.Add.Paths)
 	case "mv":
-		if len(cmdArgs) != 2 {
-			return fmt.Errorf("mv requires source and destination")
-		}
-		return app.Mv(cmdArgs[0], cmdArgs[1])
+		return app.Mv(g.Mv.Source, g.Mv.Dest)
 	case "import":
-		ifs := flag.NewFlagSet("import", flag.ContinueOnError)
-		ifs.SetOutput(stderr)
-		var followSymlinks, move bool
-		ifs.BoolVar(&followSymlinks, "L", false, "follow source symlinks")
-		ifs.BoolVar(&move, "move", false, "delete source files after caching (default: copy, leave source intact)")
-		if err := ifs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		cmdArgs = ifs.Args()
-		if len(cmdArgs) != 2 {
-			return fmt.Errorf("%s requires source and destination", cmd)
-		}
-		return app.ImportWithOptions(ctx, cmdArgs[0], cmdArgs[1], core.ImportOptions{FollowSymlinks: followSymlinks, Move: move})
+		opts := core.ImportOptions{FollowSymlinks: g.Import.FollowSymlinks, Move: g.Import.Move}
+		return app.ImportWithOptions(ctx, g.Import.Source, g.Import.Dest, opts)
 	case "verify":
-		vfs := flag.NewFlagSet("verify", flag.ContinueOnError)
-		vfs.SetOutput(stderr)
-		var remoteName string
-		var checkRemote bool
-		var withIntegrity bool
-		vfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
-		vfs.BoolVar(&checkRemote, "remote", true, "check remote files")
-		vfs.BoolVar(&withIntegrity, "with-integrity", false, "recalculate hashes for local cache and remote files")
-		if err := vfs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		path := "."
-		if len(vfs.Args()) > 0 {
-			path = vfs.Args()[0]
-		}
-		return app.Verify(ctx, remoteName, checkRemote, withIntegrity, path)
+		return app.Verify(ctx, g.Verify.RemoteName, g.Verify.CheckRemote, g.Verify.WithIntegrity, g.Verify.Path)
 	case "push":
-		pfs := flag.NewFlagSet("push", flag.ContinueOnError)
-		pfs.SetOutput(stderr)
-		var remoteName string
-		pfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
-		if err := pfs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		return app.Push(ctx, remoteName)
+		return app.Push(ctx, g.Push.RemoteName)
 	case "pull":
-		pfs := flag.NewFlagSet("pull", flag.ContinueOnError)
-		pfs.SetOutput(stderr)
-		var remoteName string
-		pfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
-		if err := pfs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		path := "."
-		if len(pfs.Args()) > 0 {
-			path = pfs.Args()[0]
-		}
-		return app.Pull(ctx, remoteName, path)
+		return app.Pull(ctx, g.Pull.RemoteName, g.Pull.Path)
 	case "doctor":
-		dfs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-		dfs.SetOutput(stderr)
-		var remoteName string
-		dfs.StringVar(&remoteName, "r", "", "remote name (default: \"default\")")
-		if err := dfs.Parse(cmdArgs); err != nil {
-			return err
-		}
-		return app.Doctor(ctx, remoteName)
-	case "help", "-h", "--help":
+		return app.Doctor(ctx, g.Doctor.RemoteName)
+	case "help":
 		usage(stdout)
 		return nil
 	default:
@@ -153,16 +178,27 @@ func has(args []string, want string) bool {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: git-sfs [--cache path] [--config path] <command> [args]")
+	fmt.Fprintln(w, "usage: git-sfs [global flags] <command> [args]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "global flags:")
+	fmt.Fprintln(w, "  --cache PATH    cache directory")
+	fmt.Fprintln(w, "  --config PATH   dataset config path (default .git-sfs/config.toml)")
+	fmt.Fprintln(w, "  -j, --jobs N    max parallel jobs (0 = auto)")
+	fmt.Fprintln(w, "  --verbose       verbose output")
+	fmt.Fprintln(w, "  --quiet         quiet output")
+	fmt.Fprintln(w, "  --version       print version")
+	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "commands:")
-	fmt.Fprintln(w, "  init")
+	fmt.Fprintln(w, "  init    [--force]")
 	fmt.Fprintln(w, "  setup")
-	fmt.Fprintln(w, "  add")
+	fmt.Fprintln(w, "  add     <path>...")
 	fmt.Fprintln(w, "  mv      <src> <dst>")
 	fmt.Fprintln(w, "  import  [--move] [-L] <src> <dst>")
-	fmt.Fprintln(w, "  verify  [-r remote] [--remote] [--with-integrity] [path]")
+	fmt.Fprintln(w, "  verify  [-r remote] [--no-remote] [--with-integrity] [path]")
 	fmt.Fprintln(w, "  push    [-r remote]")
 	fmt.Fprintln(w, "  pull    [-r remote] [path]")
 	fmt.Fprintln(w, "  doctor  [-r remote]")
 	fmt.Fprintln(w, "  help")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "run 'git-sfs <command> --help' for command-specific flags")
 }

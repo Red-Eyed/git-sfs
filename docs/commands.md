@@ -1,16 +1,27 @@
 # Commands
 
-Global flags:
+Global flags may appear before or after the command name — both
+`git-sfs --verbose push` and `git-sfs push --verbose` work:
 
 ```sh
-git-sfs --verbose push
+git-sfs push --verbose
+git-sfs pull -j 8 data/
 git-sfs --version
 ```
 
 `--verbose` prints command debug output to stderr, including remote subprocess
 commands when a remote backend is involved.
 
+`-j`, `--jobs` sets the maximum number of parallel workers for commands that
+process many files (`add`, `import`, `setup`, `verify`, `pull`). It overrides
+`[settings].n_jobs` from the config; `0` (the default) means auto.
+
+`--quiet` silences normal output, including the local hashing progress bar and
+rclone's transfer progress during `push`/`pull`.
+
 `--version` prints the `git-sfs` release version from the build tag.
+
+Run `git-sfs <command> --help` for the flags specific to a command.
 
 ## git-sfs init
 

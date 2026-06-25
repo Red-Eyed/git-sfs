@@ -34,6 +34,7 @@ type Remote interface {
 
 type Options struct {
 	Debug        io.Writer
+	Progress     io.Writer
 	ConfigDir    string
 	RcloneConfig string
 	RetryMax     int

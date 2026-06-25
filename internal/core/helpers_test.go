@@ -36,6 +36,7 @@ func writeDataset(t *testing.T, repo, remoteDir string) {
 	bin := t.TempDir()
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
 if [ "${1:-}" = "--config" ]; then shift 2; fi
+if [ "${1:-}" = "--progress" ]; then shift; fi
 cmd="${1:-}"
 map_path() {
   case "$1" in
@@ -135,6 +136,7 @@ func writeTimedRcloneTool(t *testing.T, path string) {
 if [ "${1:-}" = "--config" ]; then
   shift 2
 fi
+if [ "${1:-}" = "--progress" ]; then shift; fi
 cmd="${1:-}"
 map_path() {
   case "$1" in

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.9.0
+
+### Added
+- `-j`/`--jobs` global flag sets the parallel worker count from the command line, overriding `[settings].n_jobs`. The `App.Jobs` capability already existed but no flag exposed it.
+- Per-command help: `git-sfs <command> --help` lists that command's flags and arguments.
+
+### Changed
+- Command-line parsing now uses `github.com/alecthomas/kong`. Global flags (`--cache`, `--config`, `--verbose`, `--quiet`, `-j`, `--version`) may now appear before or after the command name; previously a flag placed after the subcommand was silently ignored.
+- `git-sfs init --force` is a validated flag instead of a hand-scanned argument.
+- Local hashing progress (`add`/`import`/`setup`) redraws in place on a terminal and prints a single summary line on non-terminals (CI, pipes) instead of one line per file.
+
+### Fixed
+- `push`/`pull` now show rclone's transfer progress whenever output is not silenced with `--quiet`. Previously the bar appeared only in `--verbose` mode, so normal transfers showed no progress at all.
+
+---
+
 ## v1.8.5
 
 ### Fixed
