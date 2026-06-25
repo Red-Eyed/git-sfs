@@ -23,6 +23,9 @@ case "$HOST_OS" in
 esac
 
 cleanup() {
+  # Go writes module cache files read-only, so plain rm -rf fails on the temp
+  # GOMODCACHE. Restore write permission first so teardown always succeeds.
+  chmod -R u+w "$WORK" 2>/dev/null || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
