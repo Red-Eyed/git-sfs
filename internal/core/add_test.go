@@ -53,9 +53,9 @@ func TestAddReportsByteProgress(t *testing.T) {
 	inDir(t, repo, func() {
 		require.NoError(t, a.Add(context.Background(), []string{"data"}))
 	})
-	// Non-terminal writer: a single humanized byte summary sized to the total
-	// bytes hashed (3 + 6 = 9), proving the bar is byte-weighted.
-	require.Contains(t, stderr.String(), "add 9 B/9 B")
+	// Non-terminal writer: a humanized byte status sized to the total bytes
+	// hashed (3 + 6 = 9), proving the bar is byte-weighted.
+	require.Contains(t, stderr.String(), "add 100% 9 B/9 B")
 }
 
 func TestVerboseAddOutputsDebug(t *testing.T) {

@@ -20,9 +20,12 @@ const barWidth = 20
 // Network transfers are not covered here: rclone renders its own --progress bar
 // for push and pull.
 //
-// On a terminal the bar redraws in place with a carriage return. When the writer
-// is not a terminal (a pipe, a file, CI logs), per-step redraws are suppressed
-// and a single summary line is written on Close, so logs are not flooded.
+// On a terminal the bar redraws in place with a carriage return on every update,
+// so progress is live. When the writer is not a terminal (a pipe, a file, CI
+// logs) a carriage return is useless, so instead a fresh progress line is
+// written each time the whole-percent figure advances. This keeps a long-running
+// job visibly live in logs while bounding output to ~100 lines, rather than
+// dumping everything at the end.
 type Bar struct {
 	w        io.Writer
 	label    string
@@ -31,9 +34,10 @@ type Bar struct {
 	enabled  bool
 	isTTY    bool
 
-	mu     sync.Mutex
-	done   int64
-	closed bool
+	mu          sync.Mutex
+	done        int64
+	lastPercent int
+	closed      bool
 }
 
 // New creates a count-mode bar advanced one item at a time with Step.
@@ -73,11 +77,19 @@ func (b *Bar) Add(n int) {
 	}
 	if b.isTTY {
 		fmt.Fprint(b.w, "\r"+renderBar(b.label, b.done, b.total, b.humanize))
+		return
+	}
+	// Non-terminal: emit a line each time the percentage advances (1%..99%), so
+	// a long job stays visibly live in logs. The final 100% line is left to Close
+	// to avoid a duplicate.
+	if percent := b.percent(); percent > b.lastPercent && percent < 100 {
+		b.lastPercent = percent
+		fmt.Fprintln(b.w, b.statusLine(percent))
 	}
 }
 
 // Close finishes the bar: it terminates the in-place line on a terminal, or
-// writes a single summary line otherwise. Calling Close more than once is safe.
+// writes a final status line otherwise. Calling Close more than once is safe.
 func (b *Bar) Close() {
 	if b == nil || !b.enabled {
 		return
@@ -92,7 +104,14 @@ func (b *Bar) Close() {
 		fmt.Fprintln(b.w)
 		return
 	}
-	fmt.Fprintf(b.w, "%s %s\n", b.label, amounts(b.done, b.total, b.humanize))
+	fmt.Fprintln(b.w, b.statusLine(b.percent()))
+}
+
+func (b *Bar) percent() int { return int(b.done * 100 / b.total) }
+
+// statusLine is the non-terminal log form, e.g. "add 42% 3.0 MiB/7.1 MiB".
+func (b *Bar) statusLine(percent int) string {
+	return fmt.Sprintf("%s %d%% %s", b.label, percent, amounts(b.done, b.total, b.humanize))
 }
 
 // renderBar produces the bar body without the carriage return or trailing

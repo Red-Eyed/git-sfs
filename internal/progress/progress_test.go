@@ -2,6 +2,7 @@ package progress
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -45,16 +46,40 @@ func TestHumanizeBytes(t *testing.T) {
 	}
 }
 
-// A byte-mode bar to a non-terminal writer must not flood per-step; it writes a
-// single humanized summary on Close.
-func TestBytesBarNonTerminalSummaryOnly(t *testing.T) {
+// A byte-mode bar to a non-terminal writer must stay live: it emits a line as
+// the percentage advances, not one dump at the end. With a 100-byte total each
+// byte is 1%, so stepping byte-by-byte produces a line per percent.
+func TestBytesBarNonTerminalEmitsPeriodicProgress(t *testing.T) {
 	var buf bytes.Buffer
-	bar := NewBytes(&buf, "add", 3<<20, false)
-	bar.Add(1 << 20)
-	bar.Add(2 << 20)
+	bar := NewBytes(&buf, "add", 100, false)
+	for i := 0; i < 100; i++ {
+		bar.Add(1)
+	}
 	bar.Close()
-	if got := buf.String(); got != "add 3.0 MiB/3.0 MiB\n" {
-		t.Fatalf("summary = %q", got)
+	out := buf.String()
+	if !strings.Contains(out, "add 50% 50 B/100 B") {
+		t.Fatalf("missing mid-run progress line: %q", out)
+	}
+	if !strings.Contains(out, "add 100% 100 B/100 B") {
+		t.Fatalf("missing final line: %q", out)
+	}
+	// Liveness: progress is spread across many lines, not a single end dump.
+	if n := strings.Count(out, "\n"); n < 50 {
+		t.Fatalf("expected many progress lines for liveness, got %d: %q", n, out)
+	}
+}
+
+// Output must stay bounded: the percentage throttle caps lines at ~100 even when
+// stepped far more often than that.
+func TestBytesBarNonTerminalBoundsOutput(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewBytes(&buf, "add", 100000, false)
+	for i := 0; i < 100000; i++ {
+		bar.Add(1)
+	}
+	bar.Close()
+	if n := strings.Count(buf.String(), "\n"); n > 101 {
+		t.Fatalf("expected at most ~100 lines, got %d", n)
 	}
 }
 
