@@ -91,8 +91,6 @@ func (a App) selectRemote(s session, name string) (remote.Remote, error) {
 		Progress:  progress,
 		ConfigDir: filepath.Dir(a.resolvedConfigPath(s.repo)),
 		RetryMax:  s.cfg.Settings.RetryMax,
-		// Keep rclone's scratch on the cache filesystem, not /tmp.
-		TempDir: filepath.Join(s.cache.TmpDir(), "rclone_temp"),
 	})
 }
 

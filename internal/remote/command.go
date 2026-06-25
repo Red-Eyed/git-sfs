@@ -30,7 +30,7 @@ func NewRclone(url string) Remote {
 }
 
 func NewRcloneWithOptions(url string, opts Options) Remote {
-	return rcloneRemote{url: strings.TrimRight(url, "/"), config: opts.RcloneConfig, debug: opts.Debug, progress: opts.Progress, retryMax: opts.RetryMax}
+	return newRcloneRemote(url, opts)
 }
 
 func NewRcloneTarget(remote, path string) Remote {
@@ -39,13 +39,23 @@ func NewRcloneTarget(remote, path string) Remote {
 
 func NewRcloneTargetWithOptions(remote, path string, opts Options) Remote {
 	if remote == "" {
-		return NewRcloneWithOptions(path, opts)
+		return newRcloneRemote(path, opts)
 	}
 	path = strings.TrimRight(path, "/")
 	if strings.HasPrefix(path, "/") || isWindowsAbsPath(path) {
-		return rcloneRemote{url: remote + ":" + path, config: opts.RcloneConfig, debug: opts.Debug, progress: opts.Progress, retryMax: opts.RetryMax}
+		return newRcloneRemote(remote+":"+path, opts)
 	}
-	return rcloneRemote{url: remote + ":" + strings.TrimLeft(path, "/"), config: opts.RcloneConfig, debug: opts.Debug, progress: opts.Progress, retryMax: opts.RetryMax}
+	return newRcloneRemote(remote+":"+strings.TrimLeft(path, "/"), opts)
+}
+
+func newRcloneRemote(url string, opts Options) rcloneRemote {
+	return rcloneRemote{
+		url:      strings.TrimRight(url, "/"),
+		config:   opts.RcloneConfig,
+		debug:    opts.Debug,
+		progress: opts.Progress,
+		retryMax: opts.RetryMax,
+	}
 }
 
 func isWindowsAbsPath(path string) bool {
@@ -276,33 +286,9 @@ func (r rcloneRemote) runOutput(ctx context.Context, args ...string) (string, er
 // logging. On failure the exit error is returned as-is (the user already saw
 // any stderr output).
 func runCopyWithRetry(ctx context.Context, streamTo, logTo io.Writer, retryMax int, name string, args ...string) error {
-	if retryMax <= 0 {
-		retryMax = 3
-	}
-	backoff := time.Second
-	var lastErr error
-	for attempt := 1; attempt <= retryMax; attempt++ {
-		err := runStream(ctx, streamTo, logTo, name, args...)
-		if err == nil {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		lastErr = err
-		if attempt < retryMax {
-			if logTo != nil {
-				fmt.Fprintf(logTo, "retry %d/%d after %s: %v\n", attempt, retryMax, backoff, err)
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-			backoff *= 2
-		}
-	}
-	return lastErr
+	return retryLoop(ctx, logTo, retryMax, func() error {
+		return runStream(ctx, streamTo, logTo, name, args...)
+	})
 }
 
 // runStream runs a command, streaming its stderr to streamTo (when non-nil)
@@ -341,36 +327,47 @@ func runStream(ctx context.Context, streamTo, logTo io.Writer, name string, args
 	return nil
 }
 
-// runWithRetry calls runOutput up to retryMax times with exponential backoff.
-// A zero or negative retryMax uses the default of 3.
-func runWithRetry(ctx context.Context, debug io.Writer, retryMax int, name string, args ...string) (string, error) {
-	if retryMax <= 0 {
-		retryMax = 3
+// retryLoop calls do up to max times with exponential backoff, returning nil on
+// the first success. Context cancellation stops the loop early. A zero or
+// negative max defaults to 3.
+func retryLoop(ctx context.Context, log io.Writer, max int, do func() error) error {
+	if max <= 0 {
+		max = 3
 	}
 	backoff := time.Second
 	var lastErr error
-	for attempt := 1; attempt <= retryMax; attempt++ {
-		out, err := runOutput(ctx, debug, name, args...)
-		if err == nil {
-			return out, nil
+	for attempt := 1; attempt <= max; attempt++ {
+		if err := do(); err == nil {
+			return nil
+		} else if ctx.Err() != nil {
+			return ctx.Err()
+		} else {
+			lastErr = err
 		}
-		if ctx.Err() != nil {
-			return "", ctx.Err()
+		if attempt == max {
+			break
 		}
-		lastErr = err
-		if attempt < retryMax {
-			if debug != nil {
-				fmt.Fprintf(debug, "retry %d/%d after %s: %v\n", attempt, retryMax, backoff, err)
-			}
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(backoff):
-			}
-			backoff *= 2
+		if log != nil {
+			fmt.Fprintf(log, "retry %d/%d after %s: %v\n", attempt, max, backoff, lastErr)
 		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
 	}
-	return "", lastErr
+	return lastErr
+}
+
+func runWithRetry(ctx context.Context, debug io.Writer, retryMax int, name string, args ...string) (string, error) {
+	var captured string
+	err := retryLoop(ctx, debug, retryMax, func() error {
+		out, err := runOutput(ctx, debug, name, args...)
+		captured = out
+		return err
+	})
+	return captured, err
 }
 
 func run(ctx context.Context, debug io.Writer, name string, args ...string) error {
