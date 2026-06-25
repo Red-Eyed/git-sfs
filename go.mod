@@ -1,6 +1,6 @@
 module git-sfs
 
-go 1.22
+go 1.26
 
 require (
 	github.com/alecthomas/kong v1.15.0

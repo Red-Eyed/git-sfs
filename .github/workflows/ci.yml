@@ -12,13 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go: ["1.22.x", "1.x"]
-        exclude:
-          # Go 1.22's linker emits test binaries that the current macos-latest
-          # dyld rejects ("missing LC_UUID load command"). The 1.22 floor stays
-          # covered on Linux; macOS is covered by the latest Go toolchain.
-          - os: macos-latest
-            go: "1.22.x"
+        go: ["1.x"]
 
     steps:
       - uses: actions/checkout@v4
