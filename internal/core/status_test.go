@@ -53,7 +53,7 @@ func TestStatusLocalOnlyReportsSizesWithoutRemote(t *testing.T) {
 	require.Contains(t, out, "cached locally: 1")
 	require.Contains(t, out, "missing locally: 0")
 	require.Contains(t, out, "total size: 13 B")
-	require.Contains(t, out, "data/blob: 13 B cached")
+	require.Contains(t, out, "data/blob: 13 B local=cached")
 	require.NotContains(t, out, "on remote:")
 }
 
@@ -84,7 +84,7 @@ func TestStatusSizesMissingLocalFileFromRemote(t *testing.T) {
 	require.Contains(t, out, "on remote: 1")
 	require.Contains(t, out, "unpushed: 0")
 	require.Contains(t, out, "total size: 13 B")
-	require.Contains(t, out, "data/blob: 13 B missing on-remote")
+	require.Contains(t, out, "data/blob: 13 B local=missing remote=present")
 }
 
 func TestStatusReportsUnpushedFile(t *testing.T) {

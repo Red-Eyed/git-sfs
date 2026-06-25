@@ -208,29 +208,35 @@ func writeStatusText(w io.Writer, records []fileRecord, checkRemote bool) {
 }
 
 // formatStatusLine renders one details row: path, size, local state, optional
-// remote state, then the hash. Size is "-" when unknown (not cached and not
-// found on a consulted remote).
+// remote state, then the hash. The local and remote states are written as
+// explicit "local=" / "remote=" key-value pairs so they cannot be misread as a
+// single phrase (e.g. a file cached nowhere but present remotely reads as
+// "local=missing remote=present", never "missing on remote"). Size is "-" when
+// unknown — not cached and not found on a consulted remote.
 func formatStatusLine(rec fileRecord, checkRemote bool) string {
 	size := "-"
 	if rec.State.Size != sizeUnknown {
 		size = progress.HumanizeBytes(rec.State.Size)
 	}
-	local := "missing"
-	if rec.State.Cached {
-		local = "cached"
-	}
-	line := fmt.Sprintf("%s: %s %s", rec.Path, size, local)
+	line := fmt.Sprintf("%s: %s local=%s", rec.Path, size, localWord(rec.State.Cached))
 	if checkRemote {
-		line += " " + remoteWord(rec.State.Remote)
+		line += " remote=" + remoteWord(rec.State.Remote)
 	}
 	return line + " " + rec.State.Hash.String()
 }
 
+func localWord(cached bool) string {
+	if cached {
+		return "cached"
+	}
+	return "missing"
+}
+
 func remoteWord(remote *bool) string {
 	if remote != nil && *remote {
-		return "on-remote"
+		return "present"
 	}
-	return "unpushed"
+	return "missing"
 }
 
 type summary struct {

@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.11.1
+
+### Fixed
+- `git-sfs status` detail lines no longer read ambiguously. The local and remote states are now written as explicit `local=` / `remote=` key-value pairs, so a file that is absent locally but present remotely shows `local=missing remote=present` (with its size recovered from remote metadata) instead of `missing on-remote`, which could be misread as "missing on the remote".
+
+---
+
 ## v1.11.0
 
 ### Added
