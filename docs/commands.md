@@ -160,6 +160,56 @@ On failure, `git-sfs verify` prints stable category counts followed by a
 When a path is provided, only files and symlinks below that path are checked.
 This keeps verification practical for partial-download workflows.
 
+## git-sfs status
+
+Show tracked files, their sizes, and where each one lives — **without
+downloading any bytes**:
+
+```sh
+git-sfs status
+git-sfs status data/
+git-sfs status --remote default
+git-sfs status --remote backup --json data/
+```
+
+For every tracked symlink, `git-sfs status` reports the file size, whether it is
+cached locally, and (when a remote is given) whether it is present on that
+remote. Size comes from the local cache file when present; otherwise, with a
+remote, it is read from the remote's metadata (`rclone lsjson`) so you can learn
+a file's size before ever pulling it.
+
+By default `status` is local-only and makes no network calls.
+
+`--remote NAME` checks presence and sizes against the named remote
+(`--remote default` for the default remote). Supplying it both selects the
+remote and turns on the remote check; it only reads remote metadata and never
+transfers file bytes. Run `git-sfs remotes` to see the configured names.
+
+`--json` emits a machine-readable summary plus one record per tracked symlink,
+for scripting.
+
+When a path is provided, only symlinks below that path are inspected.
+
+Counts are aggregated over unique file contents, so files shared by several
+symlinks are counted and sized once. Unlike `verify`, `status` is informational
+and always exits `0`.
+
+## git-sfs remotes
+
+List the remotes configured in `.git-sfs/config.toml`:
+
+```sh
+git-sfs remotes
+git-sfs remotes --json
+```
+
+`git-sfs remotes` prints each configured remote's name, backend, path, and
+rclone config file, and marks the one named `default` (used by `push`, `pull`,
+and `verify` when no `-r` is given). It reads only the committed config and never
+contacts a backend — use `git-sfs doctor` to test connectivity.
+
+`--json` emits the same list as machine-readable records.
+
 ## git-sfs push
 
 Upload referenced cached files to the remote:

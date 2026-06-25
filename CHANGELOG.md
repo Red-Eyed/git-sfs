@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.11.0
+
+### Added
+- `git-sfs status` reports each tracked file's size and whether it is cached locally — **without downloading any bytes**. By default it is local-only and makes no network calls. Pass `--remote NAME` to additionally check presence and recover sizes for not-yet-pulled files from that remote's metadata (`rclone lsjson`), so you can learn a file's size before pulling it. `--json` emits a machine-readable summary plus one record per symlink, and a path argument scopes the report to a subtree. Counts are aggregated over unique file contents, and `status` is informational — it always exits `0`.
+- `git-sfs remotes` lists the remotes configured in `.git-sfs/config.toml` (name, backend, path, rclone config), marking the `default` remote, with a `--json` form. It reads only the committed config and never contacts a backend.
+
+---
+
 ## v1.10.0
 
 ### Added

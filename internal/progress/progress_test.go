@@ -40,8 +40,8 @@ func TestHumanizeBytes(t *testing.T) {
 		3 << 30: "3.0 GiB",
 	}
 	for n, want := range cases {
-		if got := humanizeBytes(n); got != want {
-			t.Fatalf("humanizeBytes(%d) = %q, want %q", n, got, want)
+		if got := HumanizeBytes(n); got != want {
+			t.Fatalf("HumanizeBytes(%d) = %q, want %q", n, got, want)
 		}
 	}
 }

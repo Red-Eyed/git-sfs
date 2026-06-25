@@ -24,6 +24,8 @@ func TestHelp(t *testing.T) {
 		"  add",
 		"  import",
 		"  verify",
+		"  status",
+		"  remotes",
 		"  push",
 		"  pull",
 		"  help",
@@ -140,6 +142,9 @@ esac
 			{"push"},
 			{"verify"},
 			{"verify", "data/blob"},
+			{"status"},
+			{"status", "--remote", "default", "data/blob"},
+			{"remotes"},
 			{"pull", "data/blob"},
 		} {
 			stderr.Reset()

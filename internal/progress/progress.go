@@ -127,13 +127,13 @@ func renderBar(label string, done, total int64, humanize bool) string {
 
 func amounts(done, total int64, humanize bool) string {
 	if humanize {
-		return humanizeBytes(done) + "/" + humanizeBytes(total)
+		return HumanizeBytes(done) + "/" + HumanizeBytes(total)
 	}
 	return fmt.Sprintf("%d/%d", done, total)
 }
 
-// humanizeBytes formats a byte count with a binary (1024-based) unit suffix.
-func humanizeBytes(n int64) string {
+// HumanizeBytes formats a byte count with a binary (1024-based) unit suffix.
+func HumanizeBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

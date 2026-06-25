@@ -23,16 +23,18 @@ type grammar struct {
 	Verbose bool   `help:"verbose output"`
 	Quiet   bool   `help:"quiet output"`
 
-	Init   initCmd   `cmd:"" help:"initialize git-sfs in this repository"`
-	Setup  setupCmd  `cmd:"" help:"materialize symlinks for already-cached files"`
-	Add    addCmd    `cmd:"" help:"cache files and replace them with symlinks"`
-	Mv     mvCmd     `cmd:"" help:"move a tracked file and its symlink"`
-	Import importCmd `cmd:"" help:"copy external files into the cache"`
-	Verify verifyCmd `cmd:"" help:"check local cache and remote integrity"`
-	Push   pushCmd   `cmd:"" help:"upload referenced cache files to the remote"`
-	Pull   pullCmd   `cmd:"" help:"download missing files from the remote"`
-	Doctor doctorCmd `cmd:"" help:"diagnose configuration and remote problems"`
-	Help   helpCmd   `cmd:"" help:"show usage"`
+	Init    initCmd    `cmd:"" help:"initialize git-sfs in this repository"`
+	Setup   setupCmd   `cmd:"" help:"materialize symlinks for already-cached files"`
+	Add     addCmd     `cmd:"" help:"cache files and replace them with symlinks"`
+	Mv      mvCmd      `cmd:"" help:"move a tracked file and its symlink"`
+	Import  importCmd  `cmd:"" help:"copy external files into the cache"`
+	Verify  verifyCmd  `cmd:"" help:"check local cache and remote integrity"`
+	Status  statusCmd  `cmd:"" help:"show tracked file sizes and cache/remote presence"`
+	Remotes remotesCmd `cmd:"" help:"list configured remotes"`
+	Push    pushCmd    `cmd:"" help:"upload referenced cache files to the remote"`
+	Pull    pullCmd    `cmd:"" help:"download missing files from the remote"`
+	Doctor  doctorCmd  `cmd:"" help:"diagnose configuration and remote problems"`
+	Help    helpCmd    `cmd:"" help:"show usage"`
 }
 
 type initCmd struct {
@@ -64,6 +66,16 @@ type verifyCmd struct {
 	CheckRemote   bool   `name:"remote" negatable:"" default:"true" help:"check remote files"`
 	WithIntegrity bool   `name:"with-integrity" help:"recalculate hashes for local cache and remote files"`
 	Path          string `arg:"" optional:"" default:"." help:"path to verify"`
+}
+
+type statusCmd struct {
+	Remote string `name:"remote" help:"check presence and sizes against this remote (metadata only, no download)" placeholder:"NAME"`
+	JSON   bool   `name:"json" help:"emit machine-readable JSON"`
+	Path   string `arg:"" optional:"" default:"." help:"path to inspect"`
+}
+
+type remotesCmd struct {
+	JSON bool `name:"json" help:"emit machine-readable JSON"`
 }
 
 type pushCmd struct {
@@ -154,6 +166,10 @@ func dispatch(ctx context.Context, app core.App, g grammar, cmd string, stdout i
 		return app.ImportWithOptions(ctx, g.Import.Source, g.Import.Dest, opts)
 	case "verify":
 		return app.Verify(ctx, g.Verify.RemoteName, g.Verify.CheckRemote, g.Verify.WithIntegrity, g.Verify.Path)
+	case "status":
+		return app.Status(ctx, g.Status.Remote, g.Status.JSON, g.Status.Path)
+	case "remotes":
+		return app.Remotes(g.Remotes.JSON)
 	case "push":
 		return app.Push(ctx, g.Push.RemoteName)
 	case "pull":
@@ -195,6 +211,8 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  mv      <src> <dst>")
 	fmt.Fprintln(w, "  import  [--move] [-L] <src> <dst>")
 	fmt.Fprintln(w, "  verify  [-r remote] [--no-remote] [--with-integrity] [path]")
+	fmt.Fprintln(w, "  status  [--remote NAME] [--json] [path]")
+	fmt.Fprintln(w, "  remotes [--json]")
 	fmt.Fprintln(w, "  push    [-r remote]")
 	fmt.Fprintln(w, "  pull    [-r remote] [path]")
 	fmt.Fprintln(w, "  doctor  [-r remote]")
