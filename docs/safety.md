@@ -30,6 +30,8 @@ renamed into place once complete, so an interrupted `add`, `import`, or `pull`
 never publishes a partial cache file. Rerun the command to resume — already-valid
 files are skipped.
 
+An interrupted run reports `canceled` and exits with status `130`.
+
 ## Remote Writes
 
 Remote writes should upload to a temporary remote path and then publish to the

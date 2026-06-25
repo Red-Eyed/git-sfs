@@ -10,43 +10,69 @@ import (
 
 const barWidth = 20
 
-// Bar reports progress for a local, countable operation (hashing files into the
-// cache during add/import/setup). Network transfers are not covered here: rclone
-// renders its own --progress bar for push and pull.
+// Bar reports progress for a local, countable operation. It has two modes:
+//
+//   - count mode (New): the unit is "items", e.g. files protected during setup.
+//   - byte mode (NewBytes): the unit is bytes, e.g. bytes hashed during add and
+//     import. Byte mode gives smooth within-file progress for large files, where
+//     a file count would jump straight from 0 to 100%.
+//
+// Network transfers are not covered here: rclone renders its own --progress bar
+// for push and pull.
 //
 // On a terminal the bar redraws in place with a carriage return. When the writer
 // is not a terminal (a pipe, a file, CI logs), per-step redraws are suppressed
 // and a single summary line is written on Close, so logs are not flooded.
 type Bar struct {
-	w       io.Writer
-	label   string
-	total   int
-	enabled bool
-	isTTY   bool
+	w        io.Writer
+	label    string
+	total    int64
+	humanize bool
+	enabled  bool
+	isTTY    bool
 
 	mu     sync.Mutex
-	done   int
+	done   int64
 	closed bool
 }
 
+// New creates a count-mode bar advanced one item at a time with Step.
 func New(w io.Writer, label string, total int, off bool) *Bar {
-	b := &Bar{w: w, label: label, total: total}
+	return newBar(w, label, int64(total), false, off)
+}
+
+// NewBytes creates a byte-mode bar advanced by byte counts with Add. total is
+// the number of bytes the operation will process.
+func NewBytes(w io.Writer, label string, total int64, off bool) *Bar {
+	return newBar(w, label, total, true, off)
+}
+
+func newBar(w io.Writer, label string, total int64, humanize, off bool) *Bar {
+	b := &Bar{w: w, label: label, total: total, humanize: humanize}
 	b.enabled = !off && w != nil && total > 0
 	b.isTTY = isTerminal(w)
 	return b
 }
 
-// Step advances the bar by one unit. It is safe to call concurrently from
-// multiple worker goroutines.
-func (b *Bar) Step() {
-	if b == nil || !b.enabled {
+// Step advances a count-mode bar by one item.
+func (b *Bar) Step() { b.Add(1) }
+
+// Add advances the bar by n units (items or bytes). It is safe to call
+// concurrently from multiple worker goroutines.
+func (b *Bar) Add(n int) {
+	if b == nil || !b.enabled || n <= 0 {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.done++
+	b.done += int64(n)
+	if b.done > b.total {
+		// A byte total is a snapshot; if a file grew between sizing and hashing,
+		// clamp so the bar never exceeds 100%.
+		b.done = b.total
+	}
 	if b.isTTY {
-		fmt.Fprint(b.w, "\r"+barLine(b.label, b.done, b.total))
+		fmt.Fprint(b.w, "\r"+renderBar(b.label, b.done, b.total, b.humanize))
 	}
 }
 
@@ -66,18 +92,39 @@ func (b *Bar) Close() {
 		fmt.Fprintln(b.w)
 		return
 	}
-	fmt.Fprintf(b.w, "%s %d/%d\n", b.label, b.done, b.total)
+	fmt.Fprintf(b.w, "%s %s\n", b.label, amounts(b.done, b.total, b.humanize))
 }
 
-// barLine renders the bar body without the carriage return or trailing newline,
-// e.g. "add [##########----------] 12/24".
-func barLine(label string, done, total int) string {
-	filled := done * barWidth / total
+// renderBar produces the bar body without the carriage return or trailing
+// newline, e.g. "add [##########----------] 12.0 MB/24.0 MB".
+func renderBar(label string, done, total int64, humanize bool) string {
+	filled := int(done * barWidth / total)
 	if filled > barWidth {
 		filled = barWidth
 	}
 	bar := strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled)
-	return fmt.Sprintf("%s [%s] %d/%d", label, bar, done, total)
+	return fmt.Sprintf("%s [%s] %s", label, bar, amounts(done, total, humanize))
+}
+
+func amounts(done, total int64, humanize bool) string {
+	if humanize {
+		return humanizeBytes(done) + "/" + humanizeBytes(total)
+	}
+	return fmt.Sprintf("%d/%d", done, total)
+}
+
+// humanizeBytes formats a byte count with a binary (1024-based) unit suffix.
+func humanizeBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // isTerminal reports whether w is a character device (a terminal). It avoids a

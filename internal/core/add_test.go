@@ -40,6 +40,24 @@ func TestAddAndVerify(t *testing.T) {
 	}
 }
 
+func TestAddReportsByteProgress(t *testing.T) {
+	repo := newRepo(t)
+	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
+	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))    // 3 bytes
+	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("hello!")) // 6 bytes
+
+	stderr := &bytes.Buffer{}
+	a := app(&bytes.Buffer{})
+	a.Stderr = stderr
+	inDir(t, repo, func() {
+		require.NoError(t, a.Add(context.Background(), []string{"data"}))
+	})
+	// Non-terminal writer: a single humanized byte summary sized to the total
+	// bytes hashed (3 + 6 = 9), proving the bar is byte-weighted.
+	require.Contains(t, stderr.String(), "add 9 B/9 B")
+}
+
 func TestVerboseAddOutputsDebug(t *testing.T) {
 	repo := newRepo(t)
 	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))

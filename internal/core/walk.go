@@ -64,6 +64,19 @@ func shouldSkip(repo, path string) bool {
 		strings.Contains(path, string(filepath.Separator)+".git-sfs"+string(filepath.Separator))
 }
 
+// sumFileSizes returns the total size in bytes of the given paths. Paths that
+// cannot be stat'd contribute 0; the result only sizes a progress bar, so a
+// missing size is not fatal here and surfaces as a real error later.
+func sumFileSizes(paths []string) int64 {
+	var total int64
+	for _, p := range paths {
+		if info, err := os.Stat(p); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
 func absFromRepo(repo, p string) string {
 	if filepath.IsAbs(p) {
 		return filepath.Clean(p)

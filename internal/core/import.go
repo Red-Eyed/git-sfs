@@ -64,9 +64,11 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 	if err != nil {
 		return err
 	}
-	bar := progress.New(a.Stderr, "import", len(pairs), a.Quiet)
+	// Byte-weighted progress over the unique source files that are hashed (see
+	// add.go for why the bar tracks the hash pass).
+	bar := progress.NewBytes(a.Stderr, "import", sumFileSizes(uniqueImportSources(pairs)), a.Quiet)
 	defer bar.Close()
-	prepared := prepareImportFiles(ctx, c, pairs, opts, a.jobs(cfg, len(pairs)))
+	prepared := prepareImportFiles(ctx, c, pairs, opts, a.jobs(cfg, len(pairs)), bar.Add)
 	imported := map[string]hash.Hash{}
 	for _, item := range prepared {
 		if item.Err != nil {
@@ -96,7 +98,6 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 			return err
 		}
 		a.say("imported " + pair.Src + " -> " + rel(repo, pair.Dst) + " -> " + h.String())
-		bar.Step()
 	}
 	if opts.Move {
 		removeSourceLinks(links)
@@ -105,7 +106,23 @@ func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opt
 	return nil
 }
 
-func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, opts ImportOptions, workers int) []importPrepared {
+// uniqueImportSources returns one source path per unique movePair key, matching
+// the deduplication prepareImportFiles applies, so a byte total sizes exactly
+// the files that will be hashed.
+func uniqueImportSources(pairs []movePair) []string {
+	seen := map[string]bool{}
+	var srcs []string
+	for _, pair := range pairs {
+		if seen[pair.Key] {
+			continue
+		}
+		seen[pair.Key] = true
+		srcs = append(srcs, pair.Src)
+	}
+	return srcs
+}
+
+func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, opts ImportOptions, workers int, onRead func(n int)) []importPrepared {
 	seen := map[string]movePair{}
 	var unique []movePair
 	for _, pair := range pairs {
@@ -118,7 +135,7 @@ func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, op
 	out := make([]importPrepared, len(unique))
 	runIndexed(ctx, len(unique), workers, func(i int) error {
 		pair := unique[i]
-		h, err := hash.File(ctx, pair.Src)
+		h, err := hash.FileProgress(ctx, pair.Src, onRead)
 		if err != nil {
 			return err
 		}

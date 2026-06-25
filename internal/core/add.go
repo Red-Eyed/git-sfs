@@ -63,9 +63,12 @@ func (a App) Add(ctx context.Context, paths []string) (err error) {
 		}
 	}
 	sort.Strings(files)
-	bar := progress.New(a.Stderr, "add", len(files), a.Quiet)
+	// Byte-weighted progress: the bar tracks bytes hashed (the first of three
+	// passes; copy and verification follow). This gives smooth within-file
+	// progress for large files instead of a count that jumps 0 -> 100%.
+	bar := progress.NewBytes(a.Stderr, "add", sumFileSizes(files), a.Quiet)
 	defer bar.Close()
-	prepared := prepareAddFiles(ctx, c, files, a.jobs(cfg, len(files)))
+	prepared := prepareAddFiles(ctx, c, files, a.jobs(cfg, len(files)), bar.Add)
 	for i, file := range files {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -88,15 +91,14 @@ func (a App) Add(ctx context.Context, paths []string) (err error) {
 			return err
 		}
 		a.say("added " + rel(repo, file) + " -> " + h.String())
-		bar.Step()
 	}
 	return nil
 }
 
-func prepareAddFiles(ctx context.Context, c cache.Cache, files []string, workers int) []addPrepared {
+func prepareAddFiles(ctx context.Context, c cache.Cache, files []string, workers int, onRead func(n int)) []addPrepared {
 	out := make([]addPrepared, len(files))
 	runIndexed(ctx, len(files), workers, func(i int) error {
-		h, err := hash.File(ctx, files[i])
+		h, err := hash.FileProgress(ctx, files[i], onRead)
 		if err != nil {
 			return err
 		}

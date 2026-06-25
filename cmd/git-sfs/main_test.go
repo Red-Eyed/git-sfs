@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -26,6 +27,9 @@ func TestExitCode(t *testing.T) {
 		{errs.ErrMissingCachedFile, 2},
 		{errs.ErrMissingRemoteFile, 2},
 		{fmt.Errorf("some I/O error"), 2},
+		{context.Canceled, 130},
+		{fmt.Errorf("wrapped: %w", context.Canceled), 130},
+		{errors.Join(context.Canceled, fmt.Errorf("detail")), 130},
 	}
 	for _, tc := range cases {
 		got := exitCode(tc.err)
