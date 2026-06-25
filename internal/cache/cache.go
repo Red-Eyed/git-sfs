@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -41,7 +42,7 @@ func (c Cache) Init() error {
 // protection is set by Protect only after hash verification, so the file cannot
 // have been mutated since. Files that predate write-protection enforcement are
 // hash-verified on first access and protected in place as a one-time migration.
-func (c Cache) HasValid(h hash.Hash) bool {
+func (c Cache) HasValid(ctx context.Context, h hash.Hash) bool {
 	path := c.FilePath(h)
 	info, err := os.Stat(path)
 	if err != nil {
@@ -51,7 +52,7 @@ func (c Cache) HasValid(h hash.Hash) bool {
 		return true
 	}
 	// Legacy file: has write bit, so verify by hash and protect if valid.
-	if hash.VerifyFile(path, h) != nil {
+	if hash.VerifyFile(ctx, path, h) != nil {
 		return false
 	}
 	os.Chmod(path, readOnly(info.Mode()))
@@ -63,7 +64,7 @@ func readOnly(mode os.FileMode) os.FileMode {
 	return mode &^ 0o222
 }
 
-func (c Cache) Protect(h hash.Hash) error {
+func (c Cache) Protect(ctx context.Context, h hash.Hash) error {
 	path := c.FilePath(h)
 	info, err := os.Stat(path)
 	if err != nil {
@@ -74,7 +75,7 @@ func (c Cache) Protect(h hash.Hash) error {
 	if info.Mode()&0o222 == 0 {
 		return nil
 	}
-	if err := hash.VerifyFile(path, h); err != nil {
+	if err := hash.VerifyFile(ctx, path, h); err != nil {
 		return err
 	}
 	return os.Chmod(path, readOnly(info.Mode()))
@@ -82,27 +83,27 @@ func (c Cache) Protect(h hash.Hash) error {
 
 // Store copies src into the cache only after naming it by its expected hash.
 // The final file is accepted only if its bytes still match h.
-func (c Cache) Store(src string, h hash.Hash) error {
+func (c Cache) Store(ctx context.Context, src string, h hash.Hash) error {
 	st, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
 	mode := readOnly(st.Mode())
 	dst := c.FilePath(h)
-	if c.HasValid(h) {
+	if c.HasValid(ctx, h) {
 		return os.Chmod(dst, mode)
 	}
-	if err := fsutil.AtomicCopy(src, dst, mode); err != nil {
+	if err := fsutil.AtomicCopy(ctx, src, dst, mode); err != nil {
 		return err
 	}
-	if err := hash.VerifyFile(dst, h); err != nil {
+	if err := hash.VerifyFile(ctx, dst, h); err != nil {
 		return err
 	}
 	return os.Chmod(dst, mode)
 }
 
 // Move moves src into the cache, verifies it by hash, then publishes the final immutable object.
-func (c Cache) Move(src string, h hash.Hash) error {
+func (c Cache) Move(ctx context.Context, src string, h hash.Hash) error {
 	dst := c.FilePath(h)
 	srcAbs, err := filepath.Abs(src)
 	if err != nil {
@@ -116,7 +117,7 @@ func (c Cache) Move(src string, h hash.Hash) error {
 	if filepath.Clean(srcAbs) == filepath.Clean(dst) {
 		return os.Chmod(dst, mode)
 	}
-	if c.HasValid(h) {
+	if c.HasValid(ctx, h) {
 		if err := os.Chmod(dst, mode); err != nil {
 			return err
 		}
@@ -134,11 +135,11 @@ func (c Cache) Move(src string, h hash.Hash) error {
 		if !isCrossDeviceRename(err) {
 			return fmt.Errorf("move into cache staging failed: %w", err)
 		}
-		if err := copyThenRemove(src, tmp, mode); err != nil {
+		if err := copyThenRemove(ctx, src, tmp, mode); err != nil {
 			return err
 		}
 	}
-	if err := hash.VerifyFile(tmp, h); err != nil {
+	if err := hash.VerifyFile(ctx, tmp, h); err != nil {
 		return err
 	}
 	if err := os.Chmod(tmp, mode); err != nil {
@@ -154,8 +155,8 @@ func isCrossDeviceRename(err error) bool {
 	return errors.Is(err, syscall.EXDEV)
 }
 
-func copyThenRemove(src, dst string, mode os.FileMode) error {
-	if err := fsutil.AtomicCopy(src, dst, mode); err != nil {
+func copyThenRemove(ctx context.Context, src, dst string, mode os.FileMode) error {
+	if err := fsutil.AtomicCopy(ctx, src, dst, mode); err != nil {
 		return fmt.Errorf("copy into cache staging after cross-filesystem rename failed: %w", err)
 	}
 	if err := os.Remove(src); err != nil {

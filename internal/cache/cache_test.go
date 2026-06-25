@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +15,7 @@ func TestStoreUsesContentAddressedPathAndDetectsCorruption(t *testing.T) {
 	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := hash.File(src)
+	h, err := hash.File(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,13 +23,13 @@ func TestStoreUsesContentAddressedPathAndDetectsCorruption(t *testing.T) {
 	if err := c.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Store(src, h); err != nil {
+	if err := c.Store(context.Background(), src, h); err != nil {
 		t.Fatal(err)
 	}
 	if got := c.FilePath(h); filepath.Base(filepath.Dir(got)) != h.Prefix() {
 		t.Fatalf("file path %q does not include hash prefix %q", got, h.Prefix())
 	}
-	if !c.HasValid(h) {
+	if !c.HasValid(context.Background(), h) {
 		t.Fatal("stored file should be valid")
 	}
 	info, err := os.Stat(c.FilePath(h))
@@ -44,7 +45,7 @@ func TestStoreUsesContentAddressedPathAndDetectsCorruption(t *testing.T) {
 	if err := os.WriteFile(c.FilePath(h), []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c.HasValid(h) {
+	if c.HasValid(context.Background(), h) {
 		t.Fatal("corrupt file should not be valid")
 	}
 }
@@ -55,7 +56,7 @@ func TestMovePlacesSourceAtContentAddressedPath(t *testing.T) {
 	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := hash.File(src)
+	h, err := hash.File(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,13 +64,13 @@ func TestMovePlacesSourceAtContentAddressedPath(t *testing.T) {
 	if err := c.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Move(src, h); err != nil {
+	if err := c.Move(context.Background(), src, h); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Fatalf("source should be gone after move: %v", err)
 	}
-	if !c.HasValid(h) {
+	if !c.HasValid(context.Background(), h) {
 		t.Fatal("moved file should be valid in cache")
 	}
 	info, err := os.Stat(c.FilePath(h))
@@ -91,7 +92,7 @@ func TestMoveReusesExistingObject(t *testing.T) {
 	if err := os.WriteFile(second, []byte("same"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := hash.File(first)
+	h, err := hash.File(context.Background(), first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,16 +100,16 @@ func TestMoveReusesExistingObject(t *testing.T) {
 	if err := c.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Move(first, h); err != nil {
+	if err := c.Move(context.Background(), first, h); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Move(second, h); err != nil {
+	if err := c.Move(context.Background(), second, h); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(second); !os.IsNotExist(err) {
 		t.Fatalf("duplicate source should be removed after cache hit: %v", err)
 	}
-	if !c.HasValid(h) {
+	if !c.HasValid(context.Background(), h) {
 		t.Fatal("cache object should remain valid")
 	}
 }
@@ -120,7 +121,7 @@ func TestCopyThenRemoveStagesCrossFilesystemMoveFallback(t *testing.T) {
 	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyThenRemove(src, dst, 0o444); err != nil {
+	if err := copyThenRemove(context.Background(), src, dst, 0o444); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
@@ -148,7 +149,7 @@ func TestCacheErrors(t *testing.T) {
 		t.Fatal("expected init error when cache root is a file")
 	}
 	h := hash.Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if err := (Cache{Root: filepath.Join(dir, "cache")}).Store(filepath.Join(dir, "missing"), h); err == nil {
+	if err := (Cache{Root: filepath.Join(dir, "cache")}).Store(context.Background(), filepath.Join(dir, "missing"), h); err == nil {
 		t.Fatal("expected missing source error")
 	}
 }

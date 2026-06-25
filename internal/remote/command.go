@@ -180,7 +180,7 @@ func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) 
 		}
 		return false, nil
 	}
-	if err := hash.VerifyFile(name, h); err != nil {
+	if err := hash.VerifyFile(ctx, name, h); err != nil {
 		return false, errors.Join(errs.ErrCorruptRemoteFile, err)
 	}
 	return true, nil

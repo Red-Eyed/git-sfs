@@ -1,6 +1,9 @@
 package fsutil
 
 import (
+	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +16,7 @@ func TestAtomicCopyPublishesCompleteFile(t *testing.T) {
 	if err := os.WriteFile(src, []byte("payload"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := AtomicCopy(src, dst, 0o600); err != nil {
+	if err := AtomicCopy(context.Background(), src, dst, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(dst)
@@ -29,6 +32,53 @@ func TestAtomicCopyPublishesCompleteFile(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v", info.Mode().Perm())
+	}
+}
+
+func TestAtomicCopyRespectsCanceledContext(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	if err := os.WriteFile(src, []byte("payload"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := AtomicCopy(ctx, src, dst, 0o600)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("destination must not be published on cancel: %v", err)
+	}
+}
+
+// endlessReader never returns EOF, so CopyCtx would loop forever unless it
+// honors cancellation. It cancels the context once enough bytes have been read.
+type endlessReader struct {
+	read     int
+	cancelAt int
+	cancel   func()
+}
+
+func (r *endlessReader) Read(p []byte) (int, error) {
+	r.read += len(p)
+	if r.read >= r.cancelAt {
+		r.cancel()
+	}
+	return len(p), nil
+}
+
+func TestCopyCtxStopsMidStreamOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	src := &endlessReader{cancelAt: 64, cancel: cancel}
+	written, err := CopyCtx(ctx, io.Discard, src, make([]byte, 16))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	// The loop must stop shortly after cancellation, not copy unboundedly.
+	if written > 16*8 {
+		t.Fatalf("copied %d bytes after cancel; expected it to stop promptly", written)
 	}
 }
 

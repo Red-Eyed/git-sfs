@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,7 @@ func BenchmarkStore8MiB(b *testing.B) {
 	if err := os.WriteFile(src, payload, 0o644); err != nil {
 		b.Fatal(err)
 	}
-	h, err := hash.File(src)
+	h, err := hash.File(context.Background(), src)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -28,7 +29,7 @@ func BenchmarkStore8MiB(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = os.Remove(dst)
-		if err := c.Store(src, h); err != nil {
+		if err := c.Store(context.Background(), src, h); err != nil {
 			b.Fatal(err)
 		}
 	}

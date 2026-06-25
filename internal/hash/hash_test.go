@@ -1,10 +1,25 @@
 package hash
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestFileRespectsCanceledContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data")
+	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := File(ctx, path); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
 
 func TestFileHashChangesWithContent(t *testing.T) {
 	dir := t.TempDir()
@@ -12,14 +27,14 @@ func TestFileHashChangesWithContent(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h1, err := File(path)
+	h1, err := File(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h2, err := File(path)
+	h2, err := File(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,11 +49,11 @@ func TestVerifyFileAndParse(t *testing.T) {
 	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := File(path)
+	h, err := File(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyFile(path, h); err != nil {
+	if err := VerifyFile(context.Background(), path, h); err != nil {
 		t.Fatal(err)
 	}
 	parsed, err := Parse(h.String())
@@ -59,7 +74,7 @@ func TestVerifyFileRejectsMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if err := VerifyFile(path, bad); err == nil {
+	if err := VerifyFile(context.Background(), path, bad); err == nil {
 		t.Fatal("expected mismatch")
 	}
 }
@@ -73,7 +88,7 @@ func TestParseRejectsInvalidHashes(t *testing.T) {
 }
 
 func TestFileMissingAndShortPrefix(t *testing.T) {
-	if _, err := File(filepath.Join(t.TempDir(), "missing")); err == nil {
+	if _, err := File(context.Background(), filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("expected missing file error")
 	}
 	if Hash("a").Prefix() != "" {

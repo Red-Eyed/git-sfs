@@ -1,6 +1,7 @@
 package hash
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -11,26 +12,52 @@ import (
 const Algorithm = "sha256"
 const HexLen = 64
 
+const chunkSize = 4 << 20
+
 type Hash string
 
 // File streams path through SHA-256 without loading large files into memory.
-func File(path string) (Hash, error) {
+// The read loop checks ctx before each chunk so a long hash can be canceled
+// promptly (within one chunk) by Ctrl-C.
+func File(ctx context.Context, path string) (Hash, error) {
+	return FileProgress(ctx, path, nil)
+}
+
+// FileProgress is File with a per-chunk callback. onRead, when non-nil, is
+// called with the number of bytes hashed in each chunk, so callers can drive a
+// byte-weighted progress bar. The hash value is identical to File's.
+func FileProgress(ctx context.Context, path string, onRead func(n int)) (Hash, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 	h := sha256.New()
-	buf := make([]byte, 4<<20)
-	if _, err := io.CopyBuffer(h, f, buf); err != nil {
-		return "", err
+	buf := make([]byte, chunkSize)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			h.Write(buf[:n])
+			if onRead != nil {
+				onRead(n)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", readErr
+		}
 	}
 	return Hash(hex.EncodeToString(h.Sum(nil))), nil
 }
 
 // VerifyFile rejects missing files and files whose content does not match want.
-func VerifyFile(path string, want Hash) error {
-	got, err := File(path)
+func VerifyFile(ctx context.Context, path string, want Hash) error {
+	got, err := File(ctx, path)
 	if err != nil {
 		return err
 	}

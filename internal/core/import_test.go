@@ -32,7 +32,7 @@ func TestMoveFileIntoCacheWithoutCopyingToRepo(t *testing.T) {
 	h, _, err := sfspath.ParseGitSymlink(repo, dst)
 	require.NoError(t, err)
 	cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-	require.NoError(t, hash.VerifyFile(cacheFile, h))
+	require.NoError(t, hash.VerifyFile(context.Background(), cacheFile, h))
 	info, err = os.Stat(cacheFile)
 	require.NoError(t, err)
 	require.Zero(t, info.Mode().Perm()&0o222, "cache file should be read-only")
@@ -56,7 +56,7 @@ func TestImportResolvesSourceFileSymlink(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "resolved source should be moved into cache")
 	h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob.bin"))
 	require.NoError(t, err)
-	require.NoError(t, hash.VerifyFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
+	require.NoError(t, hash.VerifyFile(context.Background(), filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
 }
 
 func TestImportRejectsSourceSymlinkWithoutFollowFlag(t *testing.T) {

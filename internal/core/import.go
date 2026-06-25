@@ -118,15 +118,15 @@ func prepareImportFiles(ctx context.Context, c cache.Cache, pairs []movePair, op
 	out := make([]importPrepared, len(unique))
 	runIndexed(ctx, len(unique), workers, func(i int) error {
 		pair := unique[i]
-		h, err := hash.File(pair.Src)
+		h, err := hash.File(ctx, pair.Src)
 		if err != nil {
 			return err
 		}
 		var cacheErr error
 		if opts.Move {
-			cacheErr = c.Move(pair.Src, h)
+			cacheErr = c.Move(ctx, pair.Src, h)
 		} else {
-			cacheErr = c.Store(pair.Src, h)
+			cacheErr = c.Store(ctx, pair.Src, h)
 		}
 		if cacheErr != nil {
 			return fmt.Errorf("import %s: %w", pair.Src, cacheErr)

@@ -96,11 +96,11 @@ func (a App) Add(ctx context.Context, paths []string) (err error) {
 func prepareAddFiles(ctx context.Context, c cache.Cache, files []string, workers int) []addPrepared {
 	out := make([]addPrepared, len(files))
 	runIndexed(ctx, len(files), workers, func(i int) error {
-		h, err := hash.File(files[i])
+		h, err := hash.File(ctx, files[i])
 		if err != nil {
 			return err
 		}
-		if err := c.Store(files[i], h); err != nil {
+		if err := c.Store(ctx, files[i], h); err != nil {
 			return fmt.Errorf("store %s: %w", files[i], err)
 		}
 		out[i].Hash = h

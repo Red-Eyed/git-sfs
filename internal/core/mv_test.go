@@ -29,7 +29,7 @@ func TestMvRewritesRelativeTarget(t *testing.T) {
 	dst := filepath.Join(repo, "nested", "sub", "blob.bin")
 	h, _, err := sfspath.ParseGitSymlink(repo, dst)
 	require.NoError(t, err, "destination is not a valid git-sfs symlink")
-	require.NoError(t, hash.VerifyFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
+	require.NoError(t, hash.VerifyFile(context.Background(), filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
 	// Verify the symlink resolves through the cache indirection.
 	got, err := os.ReadFile(dst)
 	require.NoError(t, err)

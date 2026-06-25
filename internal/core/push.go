@@ -38,7 +38,7 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 	hashes := uniqueHashesFromTracked(links)
 	relPaths := make([]string, 0, len(hashes))
 	for _, h := range hashes {
-		if !c.HasValid(h) {
+		if !c.HasValid(ctx, h) {
 			return fmt.Errorf("%w: %s", errs.ErrMissingCachedFile, h)
 		}
 		relPaths = append(relPaths, hash.Algorithm+"/"+h.Prefix()+"/"+h.String())

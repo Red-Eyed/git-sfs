@@ -36,7 +36,7 @@ func TestAddAndVerify(t *testing.T) {
 		require.NotZero(t, info.Mode()&os.ModeSymlink, "%s is not a symlink", rel)
 		h, _, err := sfspath.ParseGitSymlink(repo, path)
 		require.NoError(t, err)
-		require.NoError(t, hash.VerifyFile(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
+		require.NoError(t, hash.VerifyFile(context.Background(), filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String()), h))
 	}
 }
 

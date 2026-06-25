@@ -11,6 +11,7 @@ Reliability requirements that follow from this:
 - Prefer failing loudly with a clear error over proceeding with incomplete state.
 - Atomic writes (temp file + rename) are mandatory wherever a partial file would be worse than no file.
 - Cache files are write-once and read-only after storage; treat them as immutable.
+- Long-running operations must be cancelable and safe. Thread `context.Context` into every byte-moving loop (hash, copy, download) and check it each chunk so Ctrl-C (SIGINT) stops work promptly. Cancellation must leave state consistent: never publish a partial file (rely on temp + rename), and surface the interrupt as a clean cancellation, not a corrupt result.
 
 Project direction:
 

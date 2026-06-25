@@ -1,6 +1,7 @@
 package materialize
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,11 +26,11 @@ func TestLinkAndUnlink(t *testing.T) {
 	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := hash.File(src)
+	h, err := hash.File(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Store(src, h); err != nil {
+	if err := c.Store(context.Background(), src, h); err != nil {
 		t.Fatal(err)
 	}
 	if err := Link(repo, c, h); err != nil {

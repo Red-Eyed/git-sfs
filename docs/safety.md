@@ -19,6 +19,17 @@ into place.
 
 This avoids publishing partial files as final cache entries.
 
+## Cancellation
+
+Long-running operations are cancelable with `Ctrl-C` (SIGINT). The hash, copy,
+and download loops check for cancellation on every chunk, so an interrupt stops
+work promptly instead of running to completion.
+
+Cancellation is safe: in-progress writes go to a temporary file that is only
+renamed into place once complete, so an interrupted `add`, `import`, or `pull`
+never publishes a partial cache file. Rerun the command to resume — already-valid
+files are skipped.
+
 ## Remote Writes
 
 Remote writes should upload to a temporary remote path and then publish to the

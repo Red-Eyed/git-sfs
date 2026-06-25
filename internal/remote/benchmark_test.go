@@ -77,7 +77,7 @@ esac
 	if err := os.WriteFile(srcFile, payload, 0o644); err != nil {
 		b.Fatal(err)
 	}
-	h, err := hash.File(srcFile)
+	h, err := hash.File(context.Background(), srcFile)
 	if err != nil {
 		b.Fatal(err)
 	}

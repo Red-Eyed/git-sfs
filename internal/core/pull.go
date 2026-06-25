@@ -51,7 +51,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 	pullErrs := make([]error, len(hashes))
 	runIndexed(ctx, len(hashes), a.jobs(cfg, len(hashes)), func(i int) error {
 		h := hashes[i]
-		if err := c.Protect(h); err != nil {
+		if err := c.Protect(ctx, h); err != nil {
 			return err
 		}
 		return materialize.Link(repo, c, h)
@@ -64,7 +64,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int) error {
 	var missing []hash.Hash
 	for _, h := range hashes {
-		if !c.HasValid(h) {
+		if !c.HasValid(ctx, h) {
 			missing = append(missing, h)
 		}
 	}

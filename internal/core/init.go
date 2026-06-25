@@ -96,8 +96,8 @@ func (a App) Setup(ctx context.Context) (err error) {
 	setupErrs := make([]error, len(hashes))
 	runIndexed(ctx, len(hashes), a.jobs(cfg, len(hashes)), func(i int) error {
 		h := hashes[i]
-		if c.HasValid(h) {
-			if err := c.Protect(h); err != nil {
+		if c.HasValid(ctx, h) {
+			if err := c.Protect(ctx, h); err != nil {
 				return err
 			}
 			if err := materialize.Link(repo, c, h); err != nil {

@@ -32,7 +32,7 @@ func TestPushPullRoundTrip(t *testing.T) {
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		require.NoError(t, os.Remove(cacheFile))
 		require.NoError(t, app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"))
-		require.NoError(t, hash.VerifyFile(cacheFile, h))
+		require.NoError(t, hash.VerifyFile(context.Background(), cacheFile, h))
 	})
 }
 
@@ -57,9 +57,9 @@ func TestPushPullRoundTripWithLocalRcloneRemote(t *testing.T) {
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		require.NoError(t, os.Remove(cacheFile))
 		require.NoError(t, app(&bytes.Buffer{}).Pull(context.Background(), "", "data/blob"))
-		require.NoError(t, hash.VerifyFile(cacheFile, h))
+		require.NoError(t, hash.VerifyFile(context.Background(), cacheFile, h))
 		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
-		require.NoError(t, hash.VerifyFile(remoteFile, h))
+		require.NoError(t, hash.VerifyFile(context.Background(), remoteFile, h))
 	})
 }
 
@@ -85,7 +85,7 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 		require.NoError(t, os.Remove(cacheOne))
 		require.NoError(t, os.Remove(cacheTwo))
 		require.NoError(t, a.Pull(context.Background(), "", "data/one.bin"))
-		require.NoError(t, hash.VerifyFile(cacheOne, h1))
+		require.NoError(t, hash.VerifyFile(context.Background(), cacheOne, h1))
 		_, err = os.Stat(cacheTwo)
 		require.True(t, os.IsNotExist(err), "unselected cache file was restored")
 	})
@@ -112,10 +112,10 @@ func TestPullWithMixedPresentAndMissingCacheFiles(t *testing.T) {
 		cacheTwo := filepath.Join(cacheDir, "files", hash.Algorithm, h2.Prefix(), h2.String())
 		require.NoError(t, os.Remove(cacheTwo))
 		require.NoError(t, a.Pull(context.Background(), "", "data/"))
-		require.NoError(t, hash.VerifyFile(cacheOne, h1))
-		require.NoError(t, hash.VerifyFile(cacheTwo, h2))
+		require.NoError(t, hash.VerifyFile(context.Background(), cacheOne, h1))
+		require.NoError(t, hash.VerifyFile(context.Background(), cacheTwo, h2))
 		require.NoError(t, a.Pull(context.Background(), "", "data/one.bin"))
-		require.NoError(t, hash.VerifyFile(cacheOne, h1))
+		require.NoError(t, hash.VerifyFile(context.Background(), cacheOne, h1))
 	})
 }
 

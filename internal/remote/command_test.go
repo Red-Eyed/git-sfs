@@ -96,7 +96,7 @@ esac
 	if err := os.WriteFile(srcFile, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := hash.File(srcFile)
+	h, err := hash.File(context.Background(), srcFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ esac
 	if err := r.CopyFromRemote(ctx, dstFilesDir, []string{relPath}); err != nil {
 		t.Fatal(err)
 	}
-	if err := hash.VerifyFile(filepath.Join(dstFilesDir, relPath), h); err != nil {
+	if err := hash.VerifyFile(context.Background(), filepath.Join(dstFilesDir, relPath), h); err != nil {
 		t.Fatal(err)
 	}
 	log, err := os.ReadFile(configLog)
