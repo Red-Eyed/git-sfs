@@ -46,15 +46,16 @@ type fileRecord struct {
 func (a App) Status(ctx context.Context, remoteName string, asJSON bool, path string) (err error) {
 	a.debugf("status: start remote=%s path=%s", remoteName, path)
 	defer a.debugDone("status", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 
 	checkRemote := remoteName != ""
 	var r remote.Remote
 	if checkRemote {
-		r, err = a.selectRemote(repo, cfg, remoteName)
+		r, err = a.selectRemote(s, remoteName)
 		if err != nil {
 			return err
 		}

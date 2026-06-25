@@ -71,10 +71,11 @@ func (a App) Init(ctx context.Context, force bool) (err error) {
 func (a App) Setup(ctx context.Context) (err error) {
 	a.debugf("setup: start")
 	defer a.debugDone("setup", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
 	}

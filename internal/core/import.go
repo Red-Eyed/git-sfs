@@ -45,10 +45,11 @@ func (a App) Import(ctx context.Context, srcPath, dstPath string) error {
 func (a App) ImportWithOptions(ctx context.Context, srcPath, dstPath string, opts ImportOptions) (err error) {
 	a.debugf("import: start src=%s dst=%s follow_symlinks=%t", srcPath, dstPath, opts.FollowSymlinks)
 	defer a.debugDone("import", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
 	}

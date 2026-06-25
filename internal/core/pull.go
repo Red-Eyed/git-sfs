@@ -21,10 +21,11 @@ import (
 func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 	a.debugf("pull: start remote=%s path=%s", remoteName, path)
 	defer a.debugDone("pull", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 	if err := c.Init(); err != nil {
 		return err
 	}
@@ -33,7 +34,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 		return err
 	}
 	defer l.Release()
-	r, err := a.selectRemote(repo, cfg, remoteName)
+	r, err := a.selectRemote(s, remoteName)
 	if err != nil {
 		return err
 	}

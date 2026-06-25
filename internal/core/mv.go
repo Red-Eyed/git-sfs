@@ -14,10 +14,11 @@ import (
 func (a App) Mv(src, dst string) (err error) {
 	a.debugf("mv: start src=%s dst=%s", src, dst)
 	defer a.debugDone("mv", &err)
-	repo, _, _, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo := s.repo
 	srcAbs := absFromRepo(repo, src)
 	dstAbs := absFromRepo(repo, dst)
 

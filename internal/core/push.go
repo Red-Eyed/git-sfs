@@ -15,16 +15,17 @@ import (
 func (a App) Push(ctx context.Context, name string) (err error) {
 	a.debugf("push: start remote=%s", name)
 	defer a.debugDone("push", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 	l, err := lock.Acquire(ctx, c.LocksDir(), "push")
 	if err != nil {
 		return err
 	}
 	defer l.Release()
-	r, err := a.selectRemote(repo, cfg, name)
+	r, err := a.selectRemote(s, name)
 	if err != nil {
 		return err
 	}

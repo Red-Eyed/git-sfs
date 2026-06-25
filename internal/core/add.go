@@ -26,10 +26,11 @@ type addPrepared struct {
 func (a App) Add(ctx context.Context, paths []string) (err error) {
 	a.debugf("add: start paths=%d", len(paths))
 	defer a.debugDone("add", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 	if err := localstate.InitGitSFS(repo); err != nil {
 		return err
 	}

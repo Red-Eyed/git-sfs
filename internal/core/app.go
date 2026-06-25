@@ -34,35 +34,45 @@ func (a App) resolvedConfigPath(repo string) string {
 	return filepath.Join(repo, a.ConfigPath)
 }
 
-func (a App) open() (string, cache.Cache, config.Config, error) {
+// session is the resolved working context every command operates on: the repo
+// root, its bound cache, and the loaded config. open() returns it as one value
+// so callers (and selectRemote) take a single argument instead of threading the
+// three separately.
+type session struct {
+	repo  string
+	cache cache.Cache
+	cfg   config.Config
+}
+
+func (a App) open() (session, error) {
 	repo, err := localstate.ResolveRepo()
 	if err != nil {
-		return "", cache.Cache{}, config.Config{}, err
+		return session{}, err
 	}
 	cfg, err := config.Load(a.resolvedConfigPath(repo))
 	if err != nil {
-		return "", cache.Cache{}, config.Config{}, err
+		return session{}, err
 	}
 	if min := cfg.Settings.MinGitSFSVersion; min != "" {
 		if err := config.CheckGitSFSVersion(version.Version, min); err != nil {
-			return "", cache.Cache{}, config.Config{}, err
+			return session{}, err
 		}
 	}
 	c, err := localstate.ResolveCache(repo, a.CacheFlag)
 	if err != nil {
-		return "", cache.Cache{}, config.Config{}, err
+		return session{}, err
 	}
 	if err := localstate.BindCache(repo, c); err != nil {
-		return "", cache.Cache{}, config.Config{}, err
+		return session{}, err
 	}
-	return repo, c, cfg, nil
+	return session{repo: repo, cache: c, cfg: cfg}, nil
 }
 
-func (a App) selectRemote(repo string, cfg config.Config, name string) (remote.Remote, error) {
+func (a App) selectRemote(s session, name string) (remote.Remote, error) {
 	if name == "" {
 		name = "default"
 	}
-	rc, ok := cfg.Remotes[name]
+	rc, ok := s.cfg.Remotes[name]
 	if !ok {
 		return nil, fmt.Errorf("remote %q is not configured", name)
 	}
@@ -76,7 +86,14 @@ func (a App) selectRemote(repo string, cfg config.Config, name string) (remote.R
 	if !a.Quiet {
 		progress = a.Stderr
 	}
-	return remote.NewWithOptions(rc, remote.Options{Debug: debug, Progress: progress, ConfigDir: filepath.Dir(a.resolvedConfigPath(repo)), RetryMax: cfg.Settings.RetryMax})
+	return remote.NewWithOptions(rc, remote.Options{
+		Debug:     debug,
+		Progress:  progress,
+		ConfigDir: filepath.Dir(a.resolvedConfigPath(s.repo)),
+		RetryMax:  s.cfg.Settings.RetryMax,
+		// Keep rclone's scratch on the cache filesystem, not /tmp.
+		TempDir: filepath.Join(s.cache.TmpDir(), "rclone_temp"),
+	})
 }
 
 func (a App) jobs(cfg config.Config, n int) int {

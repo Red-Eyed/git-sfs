@@ -52,10 +52,11 @@ var issueKinds = []string{
 func (a App) Verify(ctx context.Context, remoteName string, checkRemote, withIntegrity bool, path string) (err error) {
 	a.debugf("verify: start")
 	defer a.debugDone("verify", &err)
-	repo, c, cfg, err := a.open()
+	s, err := a.open()
 	if err != nil {
 		return err
 	}
+	repo, c, cfg := s.repo, s.cache, s.cfg
 
 	var r remote.Remote
 	if checkRemote {
@@ -64,7 +65,7 @@ func (a App) Verify(ctx context.Context, remoteName string, checkRemote, withInt
 			printReport(a.Stdout, report)
 			return fmt.Errorf("verify failed with %d issue(s)", len(report.Issues))
 		}
-		r, err = a.selectRemote(repo, cfg, remoteName)
+		r, err = a.selectRemote(s, remoteName)
 		if err != nil {
 			report := statusReport{Issues: []issue{{Kind: "invalid config", Detail: err.Error()}}}
 			printReport(a.Stdout, report)
