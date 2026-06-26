@@ -22,13 +22,13 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
-      - name: Install rclone
-        run: |
-          GIT_SFS_INSTALL_DIR="$RUNNER_TEMP/bin" \
-          GIT_SFS_INSTALL_RCLONE=1 \
-          GIT_SFS_VERSION=latest \
-          sh scripts/install.sh
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Install rclone (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y rclone
+
+      - name: Install rclone (macOS)
+        if: runner.os == 'macOS'
+        run: brew install rclone
 
       - name: Format check
         run: test -z "$(gofmt -l .)"
