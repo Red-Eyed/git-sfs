@@ -469,11 +469,8 @@ func DetectRcloneVersion(ctx context.Context, rcloneConfig string) (string, erro
 	}
 	for _, line := range strings.SplitAfter(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "rclone v") {
-			// line looks like "rclone v1.67.0"
-			ver := strings.TrimPrefix(line, "rclone v")
-			ver = strings.Fields(ver)[0] // strip any trailing text
-			return ver, nil
+		if ver, ok := strings.CutPrefix(line, "rclone v"); ok {
+			return strings.Fields(ver)[0], nil
 		}
 	}
 	return "", fmt.Errorf("could not parse rclone version from output: %q", out)
@@ -518,4 +515,53 @@ func (r rcloneRemote) FileSize(ctx context.Context, h hash.Hash) (int64, error) 
 		return -1, nil // treat rclone error as "not found"
 	}
 	return parseLSJSONSize(out)
+}
+
+// FileSizes returns the byte sizes of all requested hashes in a single
+// recursive listing call. This avoids one rclone process per file when
+// checking multiple files — e.g. the pre-pull disk-space check. Hashes not
+// found on the remote are omitted from the returned map.
+func (r rcloneRemote) FileSizes(ctx context.Context, hashes []hash.Hash) (map[hash.Hash]int64, error) {
+	if len(hashes) == 0 {
+		return nil, nil
+	}
+	out, err := r.runOutput(ctx, "lsjson", "--recursive", r.filesURL())
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if isRemotePathNotFound(strings.ToLower(err.Error())) {
+			return make(map[hash.Hash]int64), nil
+		}
+		return nil, err
+	}
+	return parseFileSizesJSON(out, hashes)
+}
+
+// parseFileSizesJSON extracts sizes for the requested hashes from a
+// rclone lsjson --recursive listing. Each entry's Name field is the
+// filename, which equals the hash string for git-sfs cache files.
+func parseFileSizesJSON(out string, hashes []hash.Hash) (map[hash.Hash]int64, error) {
+	want := make(map[string]hash.Hash, len(hashes))
+	for _, h := range hashes {
+		want[h.String()] = h
+	}
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" || trimmed == "[]" {
+		return make(map[hash.Hash]int64), nil
+	}
+	var items []struct {
+		Name string `json:"Name"`
+		Size int64  `json:"Size"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+		return nil, fmt.Errorf("parse rclone lsjson: %w", err)
+	}
+	result := make(map[hash.Hash]int64, len(hashes))
+	for _, item := range items {
+		if h, ok := want[item.Name]; ok {
+			result[h] = item.Size
+		}
+	}
+	return result, nil
 }

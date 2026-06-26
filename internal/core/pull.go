@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"syscall"
 
 	"git-sfs/internal/cache"
@@ -49,7 +47,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 		return err
 	}
 	hashes := uniqueHashesFromTracked(links)
-	if err := pullMissingFiles(ctx, c, r, hashes, a.jobs(cfg, len(hashes)), a.say); err != nil {
+	if err := pullMissingFiles(ctx, c, r, hashes, a.say); err != nil {
 		return err
 	}
 	pullErrs := make([]error, len(hashes))
@@ -65,7 +63,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 	return errors.Join(pullErrs...)
 }
 
-func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int, sayFn func(string)) error {
+func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, sayFn func(string)) error {
 	var missing []hash.Hash
 	for _, h := range hashes {
 		if !c.HasValid(ctx, h) {
@@ -75,7 +73,7 @@ func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashe
 	if len(missing) == 0 {
 		return nil
 	}
-	if err := checkDiskSpace(ctx, c, r, missing, workers); err != nil {
+	if err := checkDiskSpace(ctx, c, r, missing); err != nil {
 		return err
 	}
 	// Remove any corrupt/partial local files so --ignore-existing doesn't skip them.
@@ -94,33 +92,19 @@ func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashe
 }
 
 // checkDiskSpace estimates total bytes needed for the missing hashes and fails
-// if the cache volume has less than 110% of that available.
-func checkDiskSpace(ctx context.Context, c cache.Cache, r remote.Remote, missing []hash.Hash, workers int) error {
-	var total atomic.Int64
-	var mu sync.Mutex
-	var firstErr error
-	errs := make([]error, len(missing))
-	runIndexed(ctx, len(missing), workers, func(i int) error {
-		size, err := r.FileSize(ctx, missing[i])
-		if err != nil {
-			return err
-		}
-		if size > 0 {
-			total.Add(size)
-		}
-		return nil
-	}, func(i int, err error) {
-		mu.Lock()
-		if firstErr == nil {
-			firstErr = err
-		}
-		errs[i] = err
-		mu.Unlock()
-	})
-	if firstErr != nil {
-		return firstErr
+// if the cache volume has less than 110% of that available. It fetches all
+// sizes in one remote listing call instead of one call per file.
+func checkDiskSpace(ctx context.Context, c cache.Cache, r remote.Remote, missing []hash.Hash) error {
+	sizes, err := r.FileSizes(ctx, missing)
+	if err != nil {
+		return err
 	}
-	needed := total.Load()
+	var needed int64
+	for _, h := range missing {
+		if size := sizes[h]; size > 0 {
+			needed += size
+		}
+	}
 	if needed <= 0 {
 		return nil
 	}

@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.15.0
+
+### Changed
+- `git-sfs pull` disk-space pre-flight now fetches all missing file sizes in **one** `rclone lsjson --recursive` call instead of one call per file. Previously each file required a separate rclone process, causing a visible stall on pulls with many missing files.
+
+### Fixed
+- `rclone` version detection simplified to use `strings.CutPrefix`.
+
+### Internal
+- CLI dispatch test (`TestCommandDispatch`) now uses a real rclone local backend instead of a shell stub, ensuring the test exercises the same code path as production.
+
+---
+
 ## v1.14.0
 
 ### Added

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,6 +74,9 @@ func TestUnknownCommandFails(t *testing.T) {
 }
 
 func TestCommandDispatch(t *testing.T) {
+	if _, err := exec.LookPath("rclone"); err != nil {
+		t.Skip("rclone not on PATH")
+	}
 	repo := t.TempDir()
 	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -83,53 +87,14 @@ func TestCommandDispatch(t *testing.T) {
 			t.Fatal(err)
 		}
 		remoteDir := filepath.Join(t.TempDir(), "remote")
-		bin := t.TempDir()
-		if err := os.WriteFile(filepath.Join(bin, "rclone"), []byte(`#!/bin/sh
-set -eu
-while [ "${1:-}" = "--config" ] || [ "${1:-}" = "--temp-dir" ] || [ "${1:-}" = "--progress" ] || [ "${1:-}" = "--stats" ] || [ "${1:-}" = "--stats-one-line" ]; do
-  case "$1" in
-    --config) shift 2 ;;
-    --temp-dir) shift 2 ;;
-    --progress) shift ;;
-    --stats) shift 2 ;;
-    --stats-one-line) shift ;;
-  esac
-done
-cmd="${1:-}"
-map_path() {
-  case "$1" in
-    localtest:*) printf '%s%s\n' "$RCLONE_TEST_ROOT" "${1#localtest:}" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
-}
-case "$cmd" in
-  copy)
-    ignore_existing=false; files_from=""; shift
-    while [ "$#" -gt 2 ]; do
-      case "$1" in
-        --ignore-existing) ignore_existing=true; shift ;;
-        --files-from) files_from="$2"; shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    src_base="$(map_path "$1")"; dst_base="$(map_path "$2")"
-    while IFS= read -r rel; do
-      [ -z "$rel" ] && continue
-      src_file="${src_base}/${rel}"; dst_file="${dst_base}/${rel}"
-      if $ignore_existing && [ -e "$dst_file" ]; then continue; fi
-      mkdir -p "$(dirname "$dst_file")"
-      cp "$src_file" "$dst_file"
-    done < "$files_from" ;;
-  lsjson) src="$(map_path "$2")"; if [ -e "$src" ]; then printf '[{"Path":"%s"}]\n' "$(basename "$src")"; else printf '[]\n'; fi ;;
-  lsd) src="$(map_path "$2")"; if [ -d "$src" ]; then exit 0; else printf 'directory not found: %s\n' "$src" >&2; exit 1; fi ;;
-  *) exit 2 ;;
-esac
-`), 0o755); err != nil {
+		if err := os.MkdirAll(remoteDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-		t.Setenv("RCLONE_TEST_ROOT", remoteDir)
-		dataset := "version = 1\n\n[remotes.default]\nbackend = localtest\n\n[settings]\nalgorithm = sha256\n"
+		rcloneCfg := filepath.Join(t.TempDir(), "rclone.conf")
+		if err := os.WriteFile(rcloneCfg, []byte("[local]\ntype = local\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dataset := "version = 1\n\n[remotes.default]\nbackend = local\npath = " + remoteDir + "\nconfig = " + rcloneCfg + "\n\n[settings]\nalgorithm = sha256\n"
 		if err := os.WriteFile(filepath.Join(repo, ".git-sfs/config.toml"), []byte(dataset), 0o644); err != nil {
 			t.Fatal(err)
 		}

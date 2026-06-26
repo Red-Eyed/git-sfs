@@ -152,8 +152,12 @@ func TestPullFailsWhenDiskSpaceInsufficient(t *testing.T) {
 	// reaches the copy path because checkDiskSpace returns an error first.
 	bin := t.TempDir()
 	writeTool(t, filepath.Join(bin, "rclone"), `set -eu
-if [ "${1:-}" = "--config" ]; then shift 2; fi
-if [ "${1:-}" = "--progress" ]; then shift; fi
+while [ "${1:-}" = "--config" ] || [ "${1:-}" = "--progress" ] || [ "${1:-}" = "--stats" ] || [ "${1:-}" = "--stats-one-line" ]; do
+  case "$1" in
+    --config|--stats) shift 2 ;;
+    *) shift ;;
+  esac
+done
 cmd="${1:-}"
 map_path() {
   case "$1" in
@@ -163,13 +167,34 @@ map_path() {
 }
 case "$cmd" in
   lsjson)
-    src="$(map_path "$2")"
-    if [ -f "$src" ]; then
-      printf '[{"Path":"%s","Size":999999999999999}]\n' "$(basename "$src")"
-    elif [ -e "$src" ]; then
-      printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+    shift
+    recursive=false
+    if [ "${1:-}" = "--recursive" ]; then recursive=true; shift; fi
+    src="$(map_path "${1:-}")"
+    if $recursive; then
+      if [ -d "$src" ]; then
+        tmp="$(mktemp)"
+        find "$src" -type f > "$tmp" 2>/dev/null || true
+        out='['
+        sep=''
+        while IFS= read -r f; do
+          name="$(basename "$f")"
+          out="${out}${sep}{\"Name\":\"${name}\",\"Size\":999999999999999}"
+          sep=','
+        done < "$tmp"
+        rm -f "$tmp"
+        printf '%s]\n' "${out}"
+      else
+        printf '[]\n'
+      fi
     else
-      printf 'directory not found: %s\n' "$src" >&2; exit 1
+      if [ -f "$src" ]; then
+        printf '[{"Path":"%s","Size":999999999999999}]\n' "$(basename "$src")"
+      elif [ -e "$src" ]; then
+        printf '[{"Path":"%s","Size":0}]\n' "$(basename "$src")"
+      else
+        printf 'directory not found: %s\n' "$src" >&2; exit 1
+      fi
     fi ;;
   lsd)
     src="$(map_path "$2")"

@@ -24,6 +24,9 @@ type Remote interface {
 	CheckFile(ctx context.Context, h hash.Hash) (bool, error)
 	// FileSize returns the byte size of the remote file for h, or -1 if not found.
 	FileSize(ctx context.Context, h hash.Hash) (int64, error)
+	// FileSizes returns the byte sizes of all requested hashes in one remote
+	// listing call. Hashes absent from the remote are omitted from the map.
+	FileSizes(ctx context.Context, hashes []hash.Hash) (map[hash.Hash]int64, error)
 	// CopyToRemote uploads files listed by relPaths (relative to cacheFilesDir)
 	// to the remote files directory. Existing remote files are never overwritten.
 	CopyToRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error
