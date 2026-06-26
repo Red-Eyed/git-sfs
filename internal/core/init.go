@@ -63,6 +63,11 @@ func (a App) Init(ctx context.Context, force bool) (err error) {
 		return err
 	}
 	a.say("initialized git-sfs repository")
+	a.say("")
+	a.say("next steps:")
+	a.say("  1. edit .git-sfs/config.toml — set backend, path, and config for your rclone remote")
+	a.say("  2. run: git-sfs doctor     — verify rclone connectivity")
+	a.say("  3. run: git-sfs add <path> — start tracking large files")
 	return nil
 }
 

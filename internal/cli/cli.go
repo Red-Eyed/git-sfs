@@ -24,12 +24,12 @@ type grammar struct {
 	Quiet   bool   `help:"quiet output"`
 
 	Init    initCmd    `cmd:"" help:"initialize git-sfs in this repository"`
-	Setup   setupCmd   `cmd:"" help:"materialize symlinks for already-cached files"`
+	Setup   setupCmd   `cmd:"" help:"bind local cache and restore symlinks (run after clone)"`
 	Add     addCmd     `cmd:"" help:"cache files and replace them with symlinks"`
 	Mv      mvCmd      `cmd:"" help:"move a tracked file and its symlink"`
-	Import  importCmd  `cmd:"" help:"copy external files into the cache"`
-	Verify  verifyCmd  `cmd:"" help:"check local cache and remote integrity"`
-	Status  statusCmd  `cmd:"" help:"show tracked file sizes and cache/remote presence"`
+	Import  importCmd  `cmd:"" help:"bring files from outside the repository into git-sfs tracking"`
+	Verify  verifyCmd  `cmd:"" help:"check integrity and exit non-zero on failure (use in CI)"`
+	Status  statusCmd  `cmd:"" help:"show file sizes and cache/remote presence (always exits 0)"`
 	Remotes remotesCmd `cmd:"" help:"list configured remotes"`
 	Push    pushCmd    `cmd:"" help:"upload referenced cache files to the remote"`
 	Pull    pullCmd    `cmd:"" help:"download missing files from the remote"`
@@ -62,8 +62,8 @@ type importCmd struct {
 }
 
 type verifyCmd struct {
-	RemoteName    string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
-	CheckRemote   bool   `name:"remote" negatable:"" default:"true" help:"check remote files"`
+	RemoteName    string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
+	CheckRemote   bool   `name:"check-remote" negatable:"" default:"true" help:"check remote files"`
 	WithIntegrity bool   `name:"with-integrity" help:"recalculate hashes for local cache and remote files"`
 	Path          string `arg:"" optional:"" default:"." help:"path to verify"`
 }
@@ -79,16 +79,16 @@ type remotesCmd struct {
 }
 
 type pushCmd struct {
-	RemoteName string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+	RemoteName string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
 }
 
 type pullCmd struct {
-	RemoteName string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+	RemoteName string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
 	Path       string `arg:"" optional:"" default:"." help:"path to pull"`
 }
 
 type doctorCmd struct {
-	RemoteName string `short:"r" name:"remote-name" help:"remote name (default: \"default\")"`
+	RemoteName string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
 }
 
 type helpCmd struct{}
@@ -210,12 +210,12 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  add     <path>...")
 	fmt.Fprintln(w, "  mv      <src> <dst>")
 	fmt.Fprintln(w, "  import  [--move] [-L] <src> <dst>")
-	fmt.Fprintln(w, "  verify  [-r remote] [--no-remote] [--with-integrity] [path]")
-	fmt.Fprintln(w, "  status  [--remote NAME] [--json] [path]")
+	fmt.Fprintln(w, "  verify  [-r NAME] [--no-check-remote] [--with-integrity] [path]")
+	fmt.Fprintln(w, "  status  [-r NAME] [--json] [path]")
 	fmt.Fprintln(w, "  remotes [--json]")
-	fmt.Fprintln(w, "  push    [-r remote]")
-	fmt.Fprintln(w, "  pull    [-r remote] [path]")
-	fmt.Fprintln(w, "  doctor  [-r remote]")
+	fmt.Fprintln(w, "  push    [-r NAME]")
+	fmt.Fprintln(w, "  pull    [-r NAME] [path]")
+	fmt.Fprintln(w, "  doctor  [-r NAME]")
 	fmt.Fprintln(w, "  help")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "run 'git-sfs <command> --help' for command-specific flags")

@@ -137,6 +137,7 @@ git-sfs verify
 git-sfs verify data/train-000.tar.zst
 git-sfs verify data/validation/
 git-sfs verify --with-integrity data/validation/
+git-sfs verify --no-check-remote
 git-sfs verify -r backup
 ```
 

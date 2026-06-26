@@ -285,7 +285,7 @@ scenario_rclone_workflow() {
     git add data
     git commit -qm "track data for rclone"
     git_sfs push >/dev/null
-    git_sfs verify --remote >/dev/null
+    git_sfs verify >/dev/null
   )
 
   # The clone path mirrors the documented user workflow: clone with Git, bind a

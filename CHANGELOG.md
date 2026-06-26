@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.13.0
+
+### Changed
+- All remote-selecting flags now use `-r`/`--remote` consistently. Previously `push`, `pull`, `verify`, and `doctor` used `--remote-name`; `status` alone used `--remote`. Scripts using `--remote-name` must be updated to `--remote`.
+- `git-sfs verify`'s flag to skip remote checking is renamed from `--no-remote` to `--no-check-remote`, freeing `--remote` for the remote name on that command.
+- `git-sfs status` detail lines no longer include the SHA-256 hash by default. Pass `--verbose` to see hashes.
+- `git-sfs setup` one-liner now reads "bind local cache and restore symlinks (run after clone)".
+- `git-sfs import` one-liner now reads "bring files from outside the repository into git-sfs tracking".
+- `git-sfs verify` one-liner now reads "check integrity and exit non-zero on failure (use in CI)".
+- `git-sfs status` one-liner now reads "show file sizes and cache/remote presence (always exits 0)".
+
+### Added
+- `git-sfs init` now prints a three-step next-steps guide pointing users to edit `config.toml`, run `doctor`, and then `add`.
+- Default `config.toml` now uses clearly-labeled placeholder values (`YOUR_RCLONE_REMOTE`, `your/remote/path`) instead of values that looked like real configuration.
+- README quick-start now includes a prerequisite callout for rclone.
+
+### Fixed
+- Removed the "Clean Unused Local Cache Files" workflow section that documented `git-sfs gc`, a command that does not yet exist.
+
+---
+
 ## v1.12.0
 
 ### Fixed

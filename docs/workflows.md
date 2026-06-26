@@ -170,20 +170,6 @@ git-sfs setup
 
 `setup` repairs the local cache binding and leaves cached bytes in place.
 
-## Clean Unused Local Cache Files
-
-First inspect:
-
-```sh
-git-sfs gc --dry-run
-```
-
-Then remove unreferenced cached files:
-
-```sh
-git-sfs gc --files
-```
-
 ## Work With An rclone Remote
 
 Define the remote in rclone's config, then reference it by name in

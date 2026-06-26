@@ -88,8 +88,8 @@ func TestWriteDefaultCreatesEditableStarterConfig(t *testing.T) {
 	text := string(content)
 	for _, want := range []string{
 		"# git-sfs project config",
-		"backend = \"myremote\"",
-		"path = \"datasets/project\"",
+		"backend = \"YOUR_RCLONE_REMOTE\"",
+		"path = \"your/remote/path\"",
 		"config = \"rclone.conf\"",
 		"algorithm = \"sha256\"",
 		"n_jobs = 0",

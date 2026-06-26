@@ -130,8 +130,8 @@ version = 1
 # The default remote is used by git-sfs push and git-sfs pull when no remote is named.
 # "backend" must match a remote name defined in your rclone config.
 [remotes.default]
-backend = "myremote"
-path = "datasets/project"
+backend = "YOUR_RCLONE_REMOTE"   # replace with a remote name from your rclone config
+path = "your/remote/path"        # replace with the path within that remote
 # Relative paths are resolved from .git-sfs.
 # Do not commit rclone configs that contain secrets or tokens.
 config = "rclone.conf"

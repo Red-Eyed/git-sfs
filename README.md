@@ -44,6 +44,9 @@ go build ./cmd/git-sfs
 
 ## Quick start
 
+> **Prerequisites:** `rclone` installed and configured with at least one remote.
+> See [docs/remotes.md](docs/remotes.md) for setup instructions.
+
 ```sh
 git-sfs init                    # create .git-sfs/config.toml
 # edit config.toml: set remote backend, path, rclone config

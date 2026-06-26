@@ -80,7 +80,7 @@ func (a App) Status(ctx context.Context, remoteName string, asJSON bool, path st
 	if asJSON {
 		return writeStatusJSON(a.Stdout, records, checkRemote)
 	}
-	writeStatusText(a.Stdout, records, checkRemote)
+	writeStatusText(a.Stdout, records, checkRemote, a.Verbose)
 	return nil
 }
 
@@ -188,7 +188,7 @@ func writeStatusJSON(w io.Writer, records []fileRecord, checkRemote bool) error 
 	return enc.Encode(out)
 }
 
-func writeStatusText(w io.Writer, records []fileRecord, checkRemote bool) {
+func writeStatusText(w io.Writer, records []fileRecord, checkRemote, verbose bool) {
 	s := newSummary(records, checkRemote)
 	fmt.Fprintf(w, "tracked symlinks: %d\n", len(records))
 	fmt.Fprintf(w, "unique files: %d\n", s.unique)
@@ -204,7 +204,7 @@ func writeStatusText(w io.Writer, records []fileRecord, checkRemote bool) {
 	}
 	fmt.Fprintln(w, "details:")
 	for _, rec := range records {
-		fmt.Fprintln(w, formatStatusLine(rec, checkRemote))
+		fmt.Fprintln(w, formatStatusLine(rec, checkRemote, verbose))
 	}
 }
 
@@ -214,7 +214,7 @@ func writeStatusText(w io.Writer, records []fileRecord, checkRemote bool) {
 // single phrase (e.g. a file cached nowhere but present remotely reads as
 // "local=missing remote=present", never "missing on remote"). Size is "-" when
 // unknown — not cached and not found on a consulted remote.
-func formatStatusLine(rec fileRecord, checkRemote bool) string {
+func formatStatusLine(rec fileRecord, checkRemote, verbose bool) string {
 	size := "-"
 	if rec.State.Size != sizeUnknown {
 		size = progress.HumanizeBytes(rec.State.Size)
@@ -223,7 +223,10 @@ func formatStatusLine(rec fileRecord, checkRemote bool) string {
 	if checkRemote {
 		line += " remote=" + remoteWord(rec.State.Remote)
 	}
-	return line + " " + rec.State.Hash.String()
+	if verbose {
+		line += " " + rec.State.Hash.String()
+	}
+	return line
 }
 
 func localWord(cached bool) string {
