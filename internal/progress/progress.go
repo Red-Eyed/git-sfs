@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 const barWidth = 20
@@ -144,6 +145,77 @@ func HumanizeBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// Spinner is an indeterminate progress indicator for operations where the
+// total work is unknown — typically a single remote metadata call. It prints
+// elapsed seconds so the terminal does not look frozen.
+//
+// On a TTY it redraws in place with a carriage return every second. On a
+// non-TTY it emits a log line every 10 seconds so long-running CI jobs stay
+// visibly alive. Fast operations (< 1 s) produce no output at all.
+type Spinner struct {
+	enabled bool
+	isTTY   bool
+	label   string
+	w       io.Writer
+	done    chan struct{}
+	wg      sync.WaitGroup
+}
+
+// NewSpinner starts and returns a running spinner. Call Stop when the
+// operation finishes.
+func NewSpinner(w io.Writer, label string, quiet bool) *Spinner {
+	s := &Spinner{label: label, w: w, done: make(chan struct{})}
+	s.enabled = !quiet && w != nil
+	if !s.enabled {
+		return s
+	}
+	s.isTTY = isTerminal(w)
+	s.wg.Add(1)
+	go s.run()
+	return s
+}
+
+func (s *Spinner) run() {
+	defer s.wg.Done()
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	var secs int
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-tick.C:
+			secs++
+			s.render(secs)
+		}
+	}
+}
+
+func (s *Spinner) render(secs int) {
+	line := fmt.Sprintf("%s... (%ds)", s.label, secs)
+	if s.isTTY {
+		fmt.Fprint(s.w, "\r"+line)
+		return
+	}
+	if secs%10 == 0 {
+		fmt.Fprintln(s.w, line)
+	}
+}
+
+// Stop terminates the spinner. On a TTY the spinner line is erased so the
+// next output starts on a clean line.
+func (s *Spinner) Stop() {
+	if !s.enabled {
+		return
+	}
+	close(s.done)
+	s.wg.Wait()
+	if s.isTTY {
+		blank := strings.Repeat(" ", len(s.label)+12)
+		fmt.Fprint(s.w, "\r"+blank+"\r")
+	}
 }
 
 // isTerminal reports whether w is a character device (a terminal). It avoids a

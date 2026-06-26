@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.17.0
+
+### Changed
+- All remote operations now display feedback while running. Metadata calls (`lsjson`, `CheckFile`) show a live spinner with elapsed seconds — `connecting to remote... (3s)`, `querying remote... (2s)`, `verifying remote file... (1s)` — so the terminal no longer looks frozen. Transfer calls (`push`, `pull`) already showed rclone's live transfer bar and are unchanged. Fast operations (< 1 s) produce no spinner output. On non-TTY (CI logs) a line is emitted every 10 s.
+- Spinner feedback is implemented as a `progressRemote` decorator in the remote layer — no business-logic code was changed to support it.
+
+---
+
 ## v1.16.0
 
 ### Fixed

@@ -86,13 +86,17 @@ func (a App) selectRemote(s session, name string) (remote.Remote, error) {
 	if !a.Quiet {
 		progress = a.Stderr
 	}
-	return remote.NewWithOptions(rc, remote.Options{
+	r, err := remote.NewWithOptions(rc, remote.Options{
 		Debug:     debug,
 		Progress:  progress,
 		ConfigDir: filepath.Dir(a.resolvedConfigPath(s.repo)),
 		RetryMax:  s.cfg.Settings.RetryMax,
 		TempDir:   s.cache.TmpDir(),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return remote.WithProgress(r, a.Stderr, a.Quiet), nil
 }
 
 func (a App) jobs(cfg config.Config, n int) int {
