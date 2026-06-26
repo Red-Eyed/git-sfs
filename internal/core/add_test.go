@@ -17,7 +17,7 @@ import (
 func TestAddAndVerify(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))
@@ -42,7 +42,7 @@ func TestAddAndVerify(t *testing.T) {
 
 func TestAddReportsByteProgress(t *testing.T) {
 	repo := newRepo(t)
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))    // 3 bytes
 	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("hello!")) // 6 bytes
@@ -60,7 +60,7 @@ func TestAddReportsByteProgress(t *testing.T) {
 
 func TestVerboseAddOutputsDebug(t *testing.T) {
 	repo := newRepo(t)
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 
@@ -78,7 +78,7 @@ func TestVerboseAddOutputsDebug(t *testing.T) {
 
 func TestAddWithCancelledContextLeavesFilesIntact(t *testing.T) {
 	repo := newRepo(t)
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	mustWrite(t, filepath.Join(repo, "data", "a.bin"), []byte("aaa"))
 	mustWrite(t, filepath.Join(repo, "data", "b.bin"), []byte("bbb"))
@@ -99,7 +99,7 @@ func TestAddWithCancelledContextLeavesFilesIntact(t *testing.T) {
 func TestAddWithCacheDirReadOnly(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	filesDir := filepath.Join(cacheDir, "files")
 	require.NoError(t, os.MkdirAll(filesDir, 0o755))

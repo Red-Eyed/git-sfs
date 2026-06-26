@@ -38,6 +38,7 @@ type Options struct {
 	ConfigDir    string
 	RcloneConfig string
 	RetryMax     int
+	TempDir      string
 }
 
 func New(cfg config.RemoteConfig) (Remote, error) {

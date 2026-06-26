@@ -4,10 +4,8 @@ seed_filesystem_repo() {
   local repo="$1"
   local remote="$2"
   mkdir -p "$remote"
-  export RCLONE_TEST_ROOT="$remote"
-  install_fake_rclone
   init_repo "$repo" "$3"
-  write_filesystem_config "$repo"
+  write_local_remote_config "$repo" "$remote"
   (
     cd "$repo"
     # Start from a normal repo state so later clones exercise the same tracked
@@ -228,10 +226,8 @@ scenario_import_workflows() {
   local src_hash
 
   mkdir -p "$remote" "$outside"
-  export RCLONE_TEST_ROOT="$remote"
-  install_fake_rclone
   init_repo "$repo" "$cache"
-  write_filesystem_config "$repo"
+  write_local_remote_config "$repo" "$remote"
   (
     cd "$repo"
     git add .git-sfs/config.toml .gitignore
@@ -274,21 +270,10 @@ scenario_rclone_workflow() {
   local cache="$WORK/cache-rclone"
   local clone_cache="$WORK/cache-rclone-clone"
   local remote_root="$REMOTE_ROOT/rclone"
-  local rclone_conf="$WORK/rclone.conf"
 
   mkdir -p "$remote_root"
-  export RCLONE_TEST_ROOT="$remote_root"
-  # Keep the workflow black-box from git-sfs's perspective while avoiding any
-  # network or cloud account dependency in CI.
-  install_fake_rclone
   init_repo "$repo" "$cache"
-
-  cat > "$rclone_conf" <<EOF
-[testremote]
-type = local
-EOF
-
-  write_rclone_config "$repo" "testremote" "dataset" "$rclone_conf"
+  write_local_remote_config "$repo" "$remote_root"
   (
     cd "$repo"
     git add .git-sfs/config.toml .gitignore

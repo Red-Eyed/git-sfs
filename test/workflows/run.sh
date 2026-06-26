@@ -48,8 +48,16 @@ export PATH="$TEST_BIN_DIR:$INSTALL_DIR:$(dirname "$(command -v go)"):$PATH"
 . "$ROOT/test/workflows/lib/repo.sh"
 . "$ROOT/test/workflows/lib/scenarios.sh"
 
+require_rclone() {
+  if ! command -v rclone >/dev/null 2>&1; then
+    echo "rclone is required for the workflow suite" >&2
+    exit 1
+  fi
+}
+
 main() {
   assert_repo_root_clean
+  require_rclone
   build_release_fixture
   install_from_fixture
   scenario_filesystem_workflows

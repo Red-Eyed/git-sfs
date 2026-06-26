@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 
-write_filesystem_config() {
-  # Callers must set RCLONE_TEST_ROOT to the remote directory and install the
-  # fake rclone binary before calling this.  Files land at
-  # $RCLONE_TEST_ROOT/files/sha256/...
+write_local_remote_config() {
+  # Writes a git-sfs config that uses rclone's built-in local backend.
+  # rclone treats "local:" as a named remote, so we also write a minimal
+  # rclone.conf that registers [local] as type = local.
   local repo="$1"
-  cat > "$repo/.git-sfs/config.toml" <<'EOF'
+  local remote="$2"
+  local rclone_cfg="$WORK/rclone-local.conf"
+  printf '[local]\ntype = local\n' > "$rclone_cfg"
+  cat > "$repo/.git-sfs/config.toml" <<EOF
 version = 1
 
 [remotes.default]
-backend = "testremote"
+backend = "local"
+path = "$remote"
+config = "$rclone_cfg"
 
 [settings]
 algorithm = "sha256"
@@ -62,9 +67,9 @@ if [ "${1:-}" = "--version" ]; then
   echo "rclone v0.0.0-test"
   exit 0
 fi
-if [ "${1:-}" = "--config" ]; then
-  shift 2
-fi
+if [ "${1:-}" = "--config" ]; then shift 2; fi
+if [ "${1:-}" = "--temp-dir" ]; then shift 2; fi
+if [ "${1:-}" = "--progress" ]; then shift; fi
 cmd="${1:-}"
 map_path() {
   # `testremote:` resolves inside the test-owned fake remote root. Any other

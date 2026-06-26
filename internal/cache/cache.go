@@ -37,6 +37,15 @@ func (c Cache) Init() error {
 	return nil
 }
 
+// PurgeTmp removes all files from the temp staging directory and recreates it.
+// Pull calls this on start to discard leftover files from interrupted downloads.
+func (c Cache) PurgeTmp() error {
+	if err := os.RemoveAll(c.TmpDir()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("purge cache tmp: %w", err)
+	}
+	return os.MkdirAll(c.TmpDir(), 0o755)
+}
+
 // HasValid reports whether h is present in the cache and intact.
 // A read-only file at the content-addressed path is sufficient proof: write
 // protection is set by Protect only after hash verification, so the file cannot

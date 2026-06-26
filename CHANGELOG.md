@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.12.0
+
+### Fixed
+- `git-sfs pull` no longer fails with an opaque "no space left on device" error when the OS temp directory is on a separate, full partition. All temporary files created during a pull — rclone's download staging area and the path-list file passed via `--files-from` — are now written to `cache/tmp`, which sits on the same filesystem as the cache itself. The existing pre-pull disk-space check therefore covers temp file creation automatically.
+- Leftover staging files from an interrupted `pull` are cleaned up at the start of the next `pull` run. Previously they accumulated in `cache/tmp` indefinitely.
+
+---
+
 ## v1.11.1
 
 ### Fixed

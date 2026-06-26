@@ -51,7 +51,9 @@ func TestVerifyUsesParallelRemoteChecks(t *testing.T) {
 func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("large bytes"))
 
@@ -80,7 +82,9 @@ func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 func TestVerifyDetectsWrongCachePermissions(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	stdout := &bytes.Buffer{}
@@ -101,7 +105,9 @@ func TestVerifyDetectsWrongCachePermissions(t *testing.T) {
 func TestVerifyOrphanHint(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	stdout := &bytes.Buffer{}
@@ -122,7 +128,9 @@ func TestVerifyOrphanHint(t *testing.T) {
 func TestVerifyReportsInvalidConfig(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
@@ -138,7 +146,8 @@ func TestVerifyReportsRemoteProblems(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeDataset(t, repo, remoteDir)
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 	inDir(t, repo, func() {
@@ -165,7 +174,8 @@ func TestVerifyPathScopesChecksToSelectedSubtree(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeDataset(t, repo, remoteDir)
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))
@@ -194,7 +204,8 @@ func TestVerifyWithoutIntegritySkipsCorruptionChecks(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeDataset(t, repo, remoteDir)
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 

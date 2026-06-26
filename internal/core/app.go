@@ -91,6 +91,7 @@ func (a App) selectRemote(s session, name string) (remote.Remote, error) {
 		Progress:  progress,
 		ConfigDir: filepath.Dir(a.resolvedConfigPath(s.repo)),
 		RetryMax:  s.cfg.Settings.RetryMax,
+		TempDir:   s.cache.TmpDir(),
 	})
 }
 

@@ -29,6 +29,9 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 	if err := c.Init(); err != nil {
 		return err
 	}
+	if err := c.PurgeTmp(); err != nil {
+		return err
+	}
 	l, err := lock.Acquire(ctx, c.LocksDir(), "pull")
 	if err != nil {
 		return err

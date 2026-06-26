@@ -16,7 +16,7 @@ import (
 func TestMvRewritesRelativeTarget(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob.bin"), []byte("content"))
 	inDir(t, repo, func() {
@@ -39,7 +39,7 @@ func TestMvRewritesRelativeTarget(t *testing.T) {
 func TestMvIntoDirectory(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob.bin"), []byte("content"))
 	require.NoError(t, os.MkdirAll(filepath.Join(repo, "dest"), 0o755))
@@ -55,7 +55,7 @@ func TestMvIntoDirectory(t *testing.T) {
 func TestMvDirectory(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(repo, "data", "sub", "two.bin"), []byte("two"))
@@ -79,7 +79,7 @@ func TestMvDirectory(t *testing.T) {
 func TestMvDirectoryIntoExisting(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 	require.NoError(t, os.MkdirAll(filepath.Join(repo, "archive"), 0o755))
@@ -96,7 +96,7 @@ func TestMvDirectoryIntoExisting(t *testing.T) {
 func TestMvWorksOnBrokenSymlinks(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob.bin"), []byte("content"))
 	inDir(t, repo, func() {
@@ -116,7 +116,7 @@ func TestMvWorksOnBrokenSymlinks(t *testing.T) {
 func TestMvDirectoryWorksOnBrokenSymlinks(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "a.bin"), []byte("a"))
 	mustWrite(t, filepath.Join(repo, "data", "sub", "b.bin"), []byte("b"))
@@ -137,7 +137,7 @@ func TestMvDirectoryWorksOnBrokenSymlinks(t *testing.T) {
 
 func TestMvRejectsNonSymlink(t *testing.T) {
 	repo := newRepo(t)
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	writeLocalRemote(t, repo, filepath.Join(t.TempDir(), "remote"))
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	mustWrite(t, filepath.Join(repo, "data", "plain.txt"), []byte("hello"))
 	inDir(t, repo, func() {

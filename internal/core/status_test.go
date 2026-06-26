@@ -36,7 +36,9 @@ type statusReportJSON struct {
 func TestStatusLocalOnlyReportsSizesWithoutRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload-bytes"))
 
@@ -61,7 +63,8 @@ func TestStatusSizesMissingLocalFileFromRemote(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	remoteDir := filepath.Join(t.TempDir(), "remote")
-	writeDataset(t, repo, remoteDir)
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload-bytes"))
 
@@ -90,7 +93,9 @@ func TestStatusSizesMissingLocalFileFromRemote(t *testing.T) {
 func TestStatusReportsUnpushedFile(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("never-pushed"))
 
@@ -110,7 +115,9 @@ func TestStatusReportsUnpushedFile(t *testing.T) {
 func TestStatusJSONIncludesRemoteWhenChecked(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 
@@ -141,7 +148,9 @@ func TestStatusJSONIncludesRemoteWhenChecked(t *testing.T) {
 func TestStatusJSONOmitsRemoteWhenLocalOnly(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
 
@@ -165,7 +174,9 @@ func TestStatusJSONOmitsRemoteWhenLocalOnly(t *testing.T) {
 func TestStatusPathScopesToSubtree(t *testing.T) {
 	repo := newRepo(t)
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	writeDataset(t, repo, filepath.Join(t.TempDir(), "remote"))
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
 	writeLocal(t, repo, cacheDir)
 	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
 	mustWrite(t, filepath.Join(repo, "data", "nested", "two.bin"), []byte("two"))

@@ -20,6 +20,7 @@ import (
 type rcloneRemote struct {
 	url      string
 	config   string
+	tempDir  string
 	debug    io.Writer
 	progress io.Writer
 	retryMax int
@@ -52,6 +53,7 @@ func newRcloneRemote(url string, opts Options) rcloneRemote {
 	return rcloneRemote{
 		url:      strings.TrimRight(url, "/"),
 		config:   opts.RcloneConfig,
+		tempDir:  opts.TempDir,
 		debug:    opts.Debug,
 		progress: opts.Progress,
 		retryMax: opts.RetryMax,
@@ -176,9 +178,15 @@ func (r rcloneRemote) HasFile(ctx context.Context, h hash.Hash) (bool, error) {
 }
 
 func (r rcloneRemote) CheckFile(ctx context.Context, h hash.Hash) (bool, error) {
-	tmp, err := os.CreateTemp("", "git-sfs-rclone-check-*")
+	dir := r.tempDir
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return false, fmt.Errorf("create rclone temp dir: %w", err)
+		}
+	}
+	tmp, err := os.CreateTemp(dir, "git-sfs-rclone-check-*")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("create temp file for verification: %w", err)
 	}
 	name := tmp.Name()
 	tmp.Close()
@@ -200,15 +208,25 @@ func (r rcloneRemote) filesURL() string {
 	return r.url + "/files"
 }
 
-// writeTempPathList writes one relative path per line to a temp file and returns its name.
-func writeTempPathList(paths []string) (string, error) {
-	f, err := os.CreateTemp("", "git-sfs-files-*.txt")
+// writeTempPathList writes one relative path per line to a temp file in
+// r.tempDir (or the OS temp dir when unset) and returns the file name.
+func (r rcloneRemote) writeTempPathList(paths []string) (string, error) {
+	dir := r.tempDir
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create rclone temp dir: %w", err)
+		}
+	}
+	f, err := os.CreateTemp(dir, "git-sfs-files-*.txt")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create rclone transfer list: %w", err)
 	}
 	defer f.Close()
 	for _, p := range paths {
-		fmt.Fprintln(f, p)
+		if _, err := fmt.Fprintln(f, p); err != nil {
+			os.Remove(f.Name())
+			return "", fmt.Errorf("write rclone transfer list: %w", err)
+		}
 	}
 	return f.Name(), nil
 }
@@ -217,7 +235,7 @@ func (r rcloneRemote) CopyToRemote(ctx context.Context, cacheFilesDir string, re
 	if len(relPaths) == 0 {
 		return nil
 	}
-	list, err := writeTempPathList(relPaths)
+	list, err := r.writeTempPathList(relPaths)
 	if err != nil {
 		return err
 	}
@@ -226,35 +244,42 @@ func (r rcloneRemote) CopyToRemote(ctx context.Context, cacheFilesDir string, re
 	// partial uploads (wrong size → re-upload) without relying on modtime,
 	// which many SFTP servers do not support. --ignore-existing would silently
 	// skip corrupt partial uploads left by an interrupted transfer.
-	return r.runCopy(ctx, "copy", "--size-only", "--files-from", list, cacheFilesDir, r.filesURL())
+	args := append(r.globalFlags(), "copy", "--size-only", "--files-from", list, cacheFilesDir, r.filesURL())
+	return runCopyWithRetry(ctx, r.streamTarget(), r.debug, r.retryMax, "rclone", args...)
 }
 
 func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, relPaths []string) error {
 	if len(relPaths) == 0 {
 		return nil
 	}
-	list, err := writeTempPathList(relPaths)
+	list, err := r.writeTempPathList(relPaths)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(list)
-	return r.runCopy(ctx, "copy", "--ignore-existing", "--files-from", list, r.filesURL(), cacheFilesDir)
+	// --temp-dir routes rclone's download staging through cache/tmp so it sits on
+	// the same filesystem as the final cache files. This makes the final rename
+	// atomic and keeps disk-space accounting consistent with the preflight check.
+	globals := r.globalFlags()
+	if r.tempDir != "" {
+		globals = append(globals, "--temp-dir", r.tempDir)
+	}
+	args := append(globals, "copy", "--ignore-existing", "--files-from", list, r.filesURL(), cacheFilesDir)
+	return runCopyWithRetry(ctx, r.streamTarget(), r.debug, r.retryMax, "rclone", args...)
 }
 
-// runCopy runs a rclone copy command, streaming rclone's stderr (including its
-// own --progress bar) to the user whenever output is not silenced, so transfer
-// stats are visible during push and pull. --progress is added when the progress
-// writer is set (i.e. not --quiet). For silenced runs stderr is buffered for
-// error messages.
-func (r rcloneRemote) runCopy(ctx context.Context, args ...string) error {
-	extra := []string{}
+// globalFlags returns the rclone global flags for this remote in a stable
+// order. --config must appear before any remote access; --progress is
+// display-only and order-independent.
+func (r rcloneRemote) globalFlags() []string {
+	var flags []string
 	if r.config != "" {
-		extra = append(extra, "--config", r.config)
+		flags = append(flags, "--config", r.config)
 	}
 	if r.progress != nil {
-		extra = append(extra, "--progress")
+		flags = append(flags, "--progress")
 	}
-	return runCopyWithRetry(ctx, r.streamTarget(), r.debug, r.retryMax, "rclone", append(extra, args...)...)
+	return flags
 }
 
 // streamTarget is where rclone's stderr (and its --progress bar) is sent during
