@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"sort"
-	"sync"
-
 	"git-sfs/internal/cache"
 	"git-sfs/internal/hash"
 	"git-sfs/internal/progress"
 	"git-sfs/internal/remote"
+	"io"
+	"os"
+	"sort"
 )
 
 // sizeUnknown marks a file whose byte size could not be determined without
@@ -70,9 +68,7 @@ func (a App) Status(ctx context.Context, remoteName string, asJSON bool, path st
 	}
 	hashes := uniqueHashesFromTracked(links)
 
-	bar := progress.New(a.Stderr, "status", len(hashes), !checkRemote || a.Quiet)
-	states := inspectFiles(ctx, c, r, hashes, checkRemote, a.jobs(cfg, len(hashes)), bar.Step)
-	bar.Close()
+	states := inspectFiles(ctx, c, r, hashes, checkRemote)
 
 	records := make([]fileRecord, len(links))
 	for i, l := range links {
@@ -88,9 +84,8 @@ func (a App) Status(ctx context.Context, remoteName string, asJSON bool, path st
 }
 
 // inspectFiles computes the state of every unique hash. Local cache stats are
-// cheap and done inline; remote metadata lookups are network calls, so they run
-// across the configured worker pool exactly like verify's remote checks.
-func inspectFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, checkRemote bool, workers int, onStep func()) map[hash.Hash]fileState {
+// cheap and done inline; remote metadata is fetched in one batch listing call.
+func inspectFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, checkRemote bool) map[hash.Hash]fileState {
 	states := make(map[hash.Hash]fileState, len(hashes))
 	for _, h := range hashes {
 		states[h] = localState(c, h)
@@ -98,16 +93,17 @@ func inspectFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []
 	if !checkRemote {
 		return states
 	}
-	var mu sync.Mutex
-	runIndexed(ctx, len(hashes), workers, func(i int) error {
-		st := states[hashes[i]]
-		applyRemoteState(ctx, r, &st)
-		mu.Lock()
-		states[hashes[i]] = st
-		mu.Unlock()
-		onStep()
-		return nil
-	}, func(int, error) {})
+	sizes, _ := r.FileSizes(ctx, hashes) // on error treat all as absent
+	for _, h := range hashes {
+		st := states[h]
+		size, found := sizes[h]
+		present := found && size >= 0
+		st.Remote = &present
+		if !st.Cached && present {
+			st.Size = size
+		}
+		states[h] = st
+	}
 	return states
 }
 
@@ -121,24 +117,6 @@ func localState(c cache.Cache, h hash.Hash) fileState {
 		st.Size = info.Size()
 	}
 	return st
-}
-
-// applyRemoteState records whether the file is on the remote and fills in a size
-// that the local cache could not provide. FileSize returns -1 when the file is
-// absent, which doubles as the presence signal — one rclone metadata call, no
-// bytes transferred.
-func applyRemoteState(ctx context.Context, r remote.Remote, st *fileState) {
-	size, err := r.FileSize(ctx, st.Hash)
-	if err != nil {
-		present := false
-		st.Remote = &present
-		return
-	}
-	present := size >= 0
-	st.Remote = &present
-	if !st.Cached && present {
-		st.Size = size
-	}
 }
 
 type statusFileJSON struct {

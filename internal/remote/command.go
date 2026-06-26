@@ -270,38 +270,22 @@ func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, 
 
 // globalFlags returns the rclone global flags for this remote in a stable
 // order. --config must appear before any remote access. When a progress writer
-// is set (i.e. output is not suppressed with --quiet), rclone progress flags
-// are added: --progress on a real TTY (animated bar + per-file speed) or
-// --stats 1s --stats-one-line on non-TTY (one text line per second, suitable
-// for CI logs and pipes).
+// is set (i.e. output is not suppressed with --quiet), --progress is added.
+// rclone detects TTY on its own stderr fd: on a real terminal it renders an
+// animated bar; on a pipe or CI log it prints a static summary at the end.
+// We do not do our own TTY check here — delegating to rclone avoids the case
+// where the Go io.Writer wraps the fd in a way that defeats stat-based
+// detection, and ensures non-TTY users always see at least a final summary
+// (--stats 1s --stats-one-line emits nothing when a transfer finishes in < 1s).
 func (r rcloneRemote) globalFlags() []string {
 	var flags []string
 	if r.config != "" {
 		flags = append(flags, "--config", r.config)
 	}
 	if r.progress != nil {
-		if isTerminalWriter(r.progress) {
-			flags = append(flags, "--progress")
-		} else {
-			flags = append(flags, "--stats", "1s", "--stats-one-line")
-		}
+		flags = append(flags, "--progress")
 	}
 	return flags
-}
-
-// isTerminalWriter reports whether w is backed by a character device (a
-// terminal). Used to choose between rclone's --progress (TTY) and
-// --stats/--stats-one-line (non-TTY) flag sets.
-func isTerminalWriter(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // streamTarget is where rclone's stderr is sent during a copy. Verbose debug
@@ -338,10 +322,19 @@ func runCopyWithRetry(ctx context.Context, streamTo, logTo io.Writer, retryMax i
 	})
 }
 
-// runStream runs a command, streaming its stderr to streamTo (when non-nil)
-// instead of buffering it. Stdout is discarded. logTo (when non-nil) receives
-// our own "run:" command echo. Used for rclone copy where captured output is
-// not needed but live progress output is desirable.
+// runStream runs a command, streaming its output to streamTo (when non-nil)
+// instead of buffering it. logTo (when non-nil) receives our own "run:" echo.
+// Used for rclone copy where captured output is not needed but live progress
+// output is desirable.
+//
+// Both stdout and stderr are routed to streamTo. rclone's --progress writes its
+// final summary to stdout and its animated bar to stderr; routing both ensures
+// the user sees the full output regardless of which fd rclone chooses.
+//
+// When streamTo is backed by a real *os.File, we pass the underlying fd so the
+// child process inherits the file descriptor directly. This lets rclone detect
+// a TTY on its own (via isatty on the fd), which controls whether it renders
+// the animated bar or a static summary.
 func runStream(ctx context.Context, streamTo, logTo io.Writer, name string, args ...string) error {
 	if logTo != nil {
 		fmt.Fprintln(logTo, "run:", shellQuote(append([]string{name}, args...)))
@@ -349,12 +342,11 @@ func runStream(ctx context.Context, streamTo, logTo io.Writer, name string, args
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
 	if streamTo != nil {
-		// Pass the underlying *os.File when available so the child process
-		// inherits the real file descriptor. rclone detects a TTY via the fd
-		// and renders the --progress bar; an io.Writer pipe suppresses it.
 		if f, ok := streamTo.(*os.File); ok {
+			cmd.Stdout = f
 			cmd.Stderr = f
 		} else {
+			cmd.Stdout = streamTo
 			cmd.Stderr = streamTo
 		}
 	} else {

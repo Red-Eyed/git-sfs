@@ -263,31 +263,37 @@ func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, 
 func checkRemoteFiles(ctx context.Context, r remote.Remote, tracked []trackedLink, withIntegrity bool, workers int, onStep func()) (map[hash.Hash]remoteStatus, error) {
 	hashes := uniqueHashesFromTracked(tracked)
 	out := make(map[hash.Hash]remoteStatus, len(hashes))
+
+	if !withIntegrity {
+		// One batch listing instead of one rclone process per file.
+		sizes, err := r.FileSizes(ctx, hashes)
+		if err != nil {
+			return out, err
+		}
+		for _, h := range hashes {
+			_, found := sizes[h]
+			out[h] = remoteStatus{OK: found}
+			onStep()
+		}
+		return out, nil
+	}
+
+	// Integrity check must download and hash-verify each file individually.
 	var mu sync.Mutex
 	var firstErr error
 	var once sync.Once
 	runHashes(ctx, hashes, workers, func(h hash.Hash) remoteStatus {
-		var (
-			ok  bool
-			err error
-		)
-		if withIntegrity {
-			ok, err = r.CheckFile(ctx, h)
-		} else {
-			ok, err = r.HasFile(ctx, h)
-		}
+		ok, err := r.CheckFile(ctx, h)
 		return remoteStatus{OK: ok, Err: err}
 	}, func(err error) bool {
-		return !(withIntegrity && errors.Is(err, errs.ErrCorruptRemoteFile))
+		return !errors.Is(err, errs.ErrCorruptRemoteFile)
 	}, func(h hash.Hash, status remoteStatus) {
 		mu.Lock()
 		out[h] = status
 		mu.Unlock()
 		onStep()
-		if status.Err != nil && !(withIntegrity && errors.Is(status.Err, errs.ErrCorruptRemoteFile)) {
-			once.Do(func() {
-				firstErr = status.Err
-			})
+		if status.Err != nil && !errors.Is(status.Err, errs.ErrCorruptRemoteFile) {
+			once.Do(func() { firstErr = status.Err })
 		}
 	})
 	return out, firstErr

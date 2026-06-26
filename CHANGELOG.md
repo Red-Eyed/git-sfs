@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.16.0
+
+### Fixed
+- `git-sfs push` and `git-sfs pull` now show rclone's live transfer progress. rclone writes its `--progress` output (the animated bar with live MiB/s, ETA, and file counts on a real terminal; a static summary on non-TTY) to **stdout**, but `runStream` left `cmd.Stdout` nil so all of it was silently discarded. Both stdout and stderr from rclone are now forwarded to the user.
+- rclone progress no longer requires TTY detection on the git-sfs side. `--progress` is always passed; rclone detects TTY on its inherited stdout fd itself and renders the animated bar on a real terminal or a clean static summary otherwise. The previous `--stats 1s --stats-one-line` non-TTY path produced no visible output when transfers finished in under one second.
+
+### Changed
+- `git-sfs status --remote` and `git-sfs verify --remote` (presence-only) now fetch all remote file metadata in **one** `rclone lsjson --recursive` call instead of one call per tracked file. Previously each file required a separate rclone process, so checking 100 files meant 100 rclone invocations.
+- `git-sfs verify --remote --with-integrity` still uses a per-file `CheckFile` call because each file must be downloaded and hash-verified individually.
+
+### Internal
+- Removed the now-obsolete `TestVerifyUsesParallelRemoteChecks` test and its `writeTimedRcloneTool` / `assertParallelStarts` helpers; the batch code path is covered by `TestVerifyReportsRemoteProblems`.
+
+---
+
 ## v1.15.0
 
 ### Changed

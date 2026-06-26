@@ -6,47 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"git-sfs/internal/hash"
 	"git-sfs/internal/sfspath"
 )
-
-func TestVerifyUsesParallelRemoteChecks(t *testing.T) {
-	repo := newRepo(t)
-	cacheDir := filepath.Join(t.TempDir(), "cache")
-	remoteRoot := filepath.Join(t.TempDir(), "remote")
-	logPath := filepath.Join(t.TempDir(), "rclone.log")
-	bin := filepath.Join(t.TempDir(), "bin")
-	require.NoError(t, os.Mkdir(bin, 0o755))
-	writeTimedRcloneTool(t, filepath.Join(bin, "rclone"))
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("RCLONE_TEST_ROOT", remoteRoot)
-	t.Setenv("RCLONE_TEST_LOG", logPath)
-	writeRcloneDataset(t, repo, "testremote", "dataset")
-	writeLocal(t, repo, cacheDir)
-	mustWrite(t, filepath.Join(repo, "data", "one.bin"), []byte("one"))
-	mustWrite(t, filepath.Join(repo, "data", "two.bin"), []byte("two"))
-
-	inDir(t, repo, func() {
-		a := app(&bytes.Buffer{})
-		require.NoError(t, a.Add(context.Background(), []string{"data"}))
-		for _, rel := range []string{"data/one.bin", "data/two.bin"} {
-			h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, rel))
-			require.NoError(t, err)
-			src := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
-			dst := filepath.Join(remoteRoot, "dataset", "files", hash.Algorithm, h.Prefix(), h.String())
-			mustCopy(t, src, dst)
-		}
-		start := time.Now()
-		require.NoError(t, a.Verify(context.Background(), "", true, false, "data"))
-		require.Less(t, time.Since(start), 3200*time.Millisecond, "verify took too long to be parallel")
-	})
-
-	assertParallelStarts(t, logPath, "remote checks")
-}
 
 func TestVerifyReportsUnconvertedAndCorruptCache(t *testing.T) {
 	repo := newRepo(t)
