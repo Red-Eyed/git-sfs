@@ -139,6 +139,8 @@ git-sfs verify data/validation/
 git-sfs verify --with-integrity data/validation/
 git-sfs verify --no-check-remote
 git-sfs verify -r backup
+git-sfs verify --rehash
+git-sfs verify --rehash --rehash-sample 500
 ```
 
 Returns non-zero on failure.
@@ -154,6 +156,12 @@ Remote checks use `[settings].n_jobs` when it is set. `0` means auto.
 `--with-integrity` additionally recalculates hashes for local cache files and
 remote files. This is slower, but it catches corruption instead of checking only
 presence.
+
+`--rehash` re-hashes every file in the local cache directory (not just
+symlink-tracked files) to detect silent bit rot. It ignores the path argument and
+walks all of `cache/files/sha256/`. Use `--rehash-sample N` to check only `N`
+randomly chosen cache files — useful for periodic spot-checks on large caches
+where re-hashing everything is too slow.
 
 On failure, `git-sfs verify` prints stable category counts followed by a
 `details:` section for each problem.
@@ -222,7 +230,10 @@ git-sfs push -r backup
 
 `-r remote` pushes to a named remote instead of `default`.
 
-`git-sfs push` skips files that already exist remotely and verify correctly.
+`git-sfs push` skips files that are already present on the remote with a
+matching checksum. It uses rclone's `--checksum` flag, which compares against
+the backend's native hash (e.g. MD5 on S3/GCS) where available, so a corrupt
+but same-size remote file is detected and re-uploaded.
 It uses `[settings].n_jobs` worker slots when configured.
 
 ## git-sfs pull

@@ -12,6 +12,15 @@ import (
 	"git-sfs/internal/hash"
 )
 
+// removeOnErr removes path if it exists, logging failures to stderr but not
+// overriding the original error. Used to roll back a published file after a
+// failed integrity check.
+func removeOnErr(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "git-sfs: warning: could not remove %s during rollback: %v\n", path, err)
+	}
+}
+
 type Cache struct {
 	Root string
 }
@@ -64,7 +73,10 @@ func (c Cache) HasValid(ctx context.Context, h hash.Hash) bool {
 	if hash.VerifyFile(ctx, path, h) != nil {
 		return false
 	}
-	os.Chmod(path, readOnly(info.Mode()))
+	if err := os.Chmod(path, readOnly(info.Mode())); err != nil {
+		fmt.Fprintf(os.Stderr, "git-sfs: warning: could not protect cached file %s: %v\n", path, err)
+		return false
+	}
 	return true
 }
 
@@ -91,24 +103,27 @@ func (c Cache) Protect(ctx context.Context, h hash.Hash) error {
 }
 
 // Store copies src into the cache only after naming it by its expected hash.
-// The final file is accepted only if its bytes still match h.
+// The final file is accepted only if its bytes still match h. AtomicCopy sets
+// the read-only mode on the temp file before rename, so no chmod is needed
+// after the rename. On verification failure the published file is removed so
+// HasValid cannot later trust a corrupt entry.
 func (c Cache) Store(ctx context.Context, src string, h hash.Hash) error {
 	st, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
-	mode := readOnly(st.Mode())
 	dst := c.FilePath(h)
 	if c.HasValid(ctx, h) {
-		return os.Chmod(dst, mode)
+		return nil
 	}
-	if err := fsutil.AtomicCopy(ctx, src, dst, mode); err != nil {
+	if err := fsutil.AtomicCopy(ctx, src, dst, readOnly(st.Mode())); err != nil {
 		return err
 	}
 	if err := hash.VerifyFile(ctx, dst, h); err != nil {
+		removeOnErr(dst) // don't leave a corrupt file where HasValid will trust it
 		return err
 	}
-	return os.Chmod(dst, mode)
+	return nil
 }
 
 // Move moves src into the cache, verifies it by hash, then publishes the final immutable object.
@@ -154,10 +169,11 @@ func (c Cache) Move(ctx context.Context, src string, h hash.Hash) error {
 	if err := os.Chmod(tmp, mode); err != nil {
 		return err
 	}
+	// Rename atomically publishes the file; mode is already set on the temp file.
 	if err := os.Rename(tmp, dst); err != nil {
 		return fmt.Errorf("publish cached file %s: %w", dst, err)
 	}
-	return os.Chmod(dst, mode)
+	return nil
 }
 
 func isCrossDeviceRename(err error) bool {

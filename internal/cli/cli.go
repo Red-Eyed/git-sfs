@@ -65,6 +65,8 @@ type verifyCmd struct {
 	RemoteName    string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
 	CheckRemote   bool   `name:"check-remote" negatable:"" default:"true" help:"check remote files"`
 	WithIntegrity bool   `name:"with-integrity" help:"recalculate hashes for local cache and remote files"`
+	Rehash        bool   `name:"rehash" help:"re-hash every file in the local cache to detect bit rot (ignores path arg)"`
+	RehashSample  int    `name:"rehash-sample" help:"limit --rehash to N randomly chosen cache files (0 = all)" placeholder:"N"`
 	Path          string `arg:"" optional:"" default:"." help:"path to verify"`
 }
 
@@ -165,6 +167,9 @@ func dispatch(ctx context.Context, app core.App, g grammar, cmd string, stdout i
 		opts := core.ImportOptions{FollowSymlinks: g.Import.FollowSymlinks, Move: g.Import.Move}
 		return app.ImportWithOptions(ctx, g.Import.Source, g.Import.Dest, opts)
 	case "verify":
+		if g.Verify.Rehash {
+			return app.RehashCache(ctx, g.Verify.RehashSample)
+		}
 		return app.Verify(ctx, g.Verify.RemoteName, g.Verify.CheckRemote, g.Verify.WithIntegrity, g.Verify.Path)
 	case "status":
 		return app.Status(ctx, g.Status.Remote, g.Status.JSON, g.Status.Path)

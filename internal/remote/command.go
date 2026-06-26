@@ -240,11 +240,12 @@ func (r rcloneRemote) CopyToRemote(ctx context.Context, cacheFilesDir string, re
 		return err
 	}
 	defer os.Remove(list)
-	// --size-only: skip files whose byte count already matches. This catches
-	// partial uploads (wrong size → re-upload) without relying on modtime,
-	// which many SFTP servers do not support. --ignore-existing would silently
-	// skip corrupt partial uploads left by an interrupted transfer.
-	args := append(r.globalFlags(), "copy", "--size-only", "--files-from", list, cacheFilesDir, r.filesURL())
+	// --checksum: skip files whose remote checksum matches (uses the backend's
+	// own hash if supported, e.g. MD5/SHA1 on S3/GCS; falls back to size+modtime
+	// on backends that don't expose checksums). This is strictly better than
+	// --size-only because a corrupt but same-size remote file will have a
+	// different checksum and will be re-uploaded, preventing silent corruption.
+	args := append(r.globalFlags(), "copy", "--checksum", "--files-from", list, cacheFilesDir, r.filesURL())
 	return runCopyWithRetry(ctx, r.streamTarget(), r.debug, r.retryMax, "rclone", args...)
 }
 
@@ -260,6 +261,10 @@ func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, 
 	// --temp-dir routes rclone's download staging through cache/tmp so it sits on
 	// the same filesystem as the final cache files. This makes the final rename
 	// atomic and keeps disk-space accounting consistent with the preflight check.
+	// An empty tempDir means the App was not constructed correctly; warn loudly.
+	if r.tempDir == "" {
+		fmt.Fprintf(os.Stderr, "git-sfs: warning: rclone temp dir not configured; downloads may not be atomic if /tmp is on a different filesystem\n")
+	}
 	globals := r.globalFlags()
 	if r.tempDir != "" {
 		globals = append(globals, "--temp-dir", r.tempDir)

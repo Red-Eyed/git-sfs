@@ -58,6 +58,15 @@ Repair local cache binding with `git-sfs setup`.
 ## Cache Corruption
 
 If a cached file is corrupt, `git-sfs verify --with-integrity` reports it.
+This re-hashes every cache file referenced by a tracked symlink.
+
+For cache-wide bit rot detection (including orphaned files not referenced by any
+symlink), use `--rehash`:
+
+```sh
+git-sfs verify --rehash               # re-hash every file in the cache
+git-sfs verify --rehash --rehash-sample 500  # spot-check 500 random files
+```
 
 If the remote still has a valid copy, remove the corrupt cached file and pull:
 

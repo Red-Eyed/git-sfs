@@ -2,6 +2,7 @@ package fsutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -89,7 +90,9 @@ func RelSymlink(target, link string) error {
 	if err != nil {
 		return err
 	}
-	_ = os.Remove(link)
+	if err := os.Remove(link); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return os.Symlink(rel, link)
 }
 
@@ -98,7 +101,9 @@ func AbsoluteSymlink(target, link string) error {
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 		return err
 	}
-	_ = os.Remove(link)
+	if err := os.Remove(link); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return os.Symlink(target, link)
 }
 

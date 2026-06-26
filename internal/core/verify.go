@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -363,6 +364,79 @@ func formatIssue(item issue) string {
 		out += ": " + item.Detail
 	}
 	return out
+}
+
+// RehashCache re-hashes every file in the local cache to detect silent
+// corruption (bit rot). When sample > 0, only that many randomly chosen files
+// are checked — useful for periodic spot-checks at terabyte scale.
+func (a App) RehashCache(ctx context.Context, sample int) (err error) {
+	a.debugf("rehash: start sample=%d", sample)
+	defer a.debugDone("rehash", &err)
+	s, err := a.open()
+	if err != nil {
+		return err
+	}
+	c := s.cache
+	root := filepath.Join(c.Root, "files", hash.Algorithm)
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		a.say("rehash: cache is empty")
+		return nil
+	}
+
+	var paths []string
+	if err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		paths = append(paths, p)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("rehash: walk cache: %w", err)
+	}
+
+	if sample > 0 && sample < len(paths) {
+		rand.Shuffle(len(paths), func(i, j int) { paths[i], paths[j] = paths[j], paths[i] })
+		paths = paths[:sample]
+	}
+
+	if len(paths) == 0 {
+		a.say("rehash: no cache files found")
+		return nil
+	}
+
+	cfg := s.cfg
+	workers := jobsFromSettings(cfg.Settings.Jobs, len(paths))
+	bar := progress.New(a.Stderr, "rehash", len(paths), a.Quiet)
+
+	var mu sync.Mutex
+	var mismatches []string
+	runIndexed(ctx, len(paths), workers, func(i int) error {
+		p := paths[i]
+		name := filepath.Base(p)
+		h, parseErr := hash.Parse(name)
+		if parseErr != nil {
+			// Not a hash-named file; skip silently.
+			bar.Step()
+			return nil
+		}
+		if verifyErr := hash.VerifyFile(ctx, p, h); verifyErr != nil {
+			mu.Lock()
+			mismatches = append(mismatches, p+": "+verifyErr.Error())
+			mu.Unlock()
+		}
+		bar.Step()
+		return nil
+	}, func(_ int, _ error) {})
+	bar.Close()
+
+	for _, msg := range mismatches {
+		fmt.Fprintln(a.Stdout, "CORRUPT: "+msg)
+	}
+	if len(mismatches) > 0 {
+		return fmt.Errorf("rehash: %d corrupt cache file(s) detected", len(mismatches))
+	}
+	a.say(fmt.Sprintf("rehash ok: %d file(s) verified", len(paths)))
+	return nil
 }
 
 func pluralKind(kind string) string {

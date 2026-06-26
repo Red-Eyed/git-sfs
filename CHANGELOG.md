@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.18.0
+
+### Fixed
+
+- **Cache immutability invariant hardened.** `Store` now sets the read-only mode on the temp file *before* the final rename, so the file arrives in the cache already protected. Previously, `Chmod` was called after the rename — a killed process or a failed `Chmod` between the two steps left a writable file in the cache that `HasValid` would later trust unconditionally.
+- **`Store` now rolls back a corrupt cache entry.** If `VerifyFile` fails after `AtomicCopy`, the file at the final path is immediately removed so a future `HasValid` call cannot mistake it for a valid entry. Previously the corrupt file was left in place.
+- **`Move` trailing `Chmod` removed.** `Move` called `os.Chmod(dst, mode)` after the atomic rename of an already-read-only temp file, which was redundant and left a window where the file was in the cache with write bits between rename and chmod. The mode is now set on the temp file before rename and the post-rename chmod is gone.
+- **`HasValid` legacy migration no longer silently drops `Chmod` errors.** When protecting a legacy (writable) cache file after hash verification, a failed `Chmod` is now reported to stderr and the function returns `false` so the file is re-verified on the next access rather than being silently trusted as immutable.
+- **`RelSymlink` and `AbsoluteSymlink` now propagate `os.Remove` errors.** Both functions previously called `_ = os.Remove(link)` before creating the new symlink. If the removal failed for any reason other than `ErrNotExist` (e.g. permission denied, link is a directory), the error was silently dropped and `os.Symlink` then failed with an opaque "file exists" message. The remove error is now returned directly.
+- **Pull no longer silently skips un-removable corrupt cache files.** Before re-downloading a missing file, pull removes any corrupt partial file at the cache path so rclone's `--ignore-existing` does not skip it. If `os.Remove` failed, the error was previously dropped and rclone silently left the corrupt file in place while reporting success. The remove error is now propagated and the pull aborts with a clear message.
+- **Disk-space guard failure is now visible.** When `statfs` fails (e.g. on a network-mounted cache), the pre-pull disk-space check was silently bypassed with no user-visible signal. A warning is now printed to stderr so the user knows the guard did not run.
+- **Push now uses `--checksum` instead of `--size-only`.** `CopyToRemote` previously passed `--size-only` to rclone, which skips a remote file if its byte count matches — meaning a corrupt file of the correct size was never re-uploaded and silently poisoned every subsequent pull. Switching to `--checksum` uses the remote backend's own hash (e.g. MD5 on S3/GCS) where available; if a backend does not support checksums, rclone falls back to size+modtime, which is no worse than before.
+- **`CopyFromRemote` warns when `tempDir` is not configured.** Without a `--temp-dir`, rclone stages downloads in the OS temp directory (`/tmp`), which may be on a different filesystem from the cache. This would make rclone's final rename cross filesystems — either an error or a non-atomic copy+delete. A warning is now emitted to stderr if `tempDir` is empty when `CopyFromRemote` is called.
+
+### Added
+
+- **`git-sfs verify --rehash [--rehash-sample N]`** — new flag for on-demand cache-wide integrity auditing. Unlike `--with-integrity`, which re-hashes only cache files referenced by tracked symlinks, `--rehash` walks every file under `cache/files/sha256/` (including orphaned objects) and verifies each one by re-hashing and comparing against the hash embedded in its filename. Use `--rehash-sample N` to limit the check to `N` randomly chosen files — suitable for periodic spot-checks on caches too large to re-hash in full.
+
+---
+
 ## v1.17.0
 
 ### Changed

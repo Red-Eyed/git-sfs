@@ -80,7 +80,9 @@ func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashe
 	for _, h := range missing {
 		p := c.FilePath(h)
 		if _, err := os.Stat(p); err == nil {
-			os.Remove(p)
+			if err := os.Remove(p); err != nil {
+				return fmt.Errorf("remove corrupt cache file before re-download %s: %w", p, err)
+			}
 		}
 	}
 	relPaths := make([]string, len(missing))
@@ -110,7 +112,8 @@ func checkDiskSpace(ctx context.Context, c cache.Cache, r remote.Remote, missing
 	}
 	avail, err := availableBytes(c.Root)
 	if err != nil {
-		return nil // skip guard if we can't stat
+		fmt.Fprintf(os.Stderr, "git-sfs: warning: could not check available disk space (%v); proceeding without guard\n", err)
+		return nil
 	}
 	// Require at least 110% of needed bytes to leave a safety margin.
 	if uint64(needed)*110/100 > avail {
