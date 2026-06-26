@@ -269,23 +269,45 @@ func (r rcloneRemote) CopyFromRemote(ctx context.Context, cacheFilesDir string, 
 }
 
 // globalFlags returns the rclone global flags for this remote in a stable
-// order. --config must appear before any remote access; --progress is
-// display-only and order-independent.
+// order. --config must appear before any remote access. When a progress writer
+// is set (i.e. output is not suppressed with --quiet), rclone progress flags
+// are added: --progress on a real TTY (animated bar + per-file speed) or
+// --stats 1s --stats-one-line on non-TTY (one text line per second, suitable
+// for CI logs and pipes).
 func (r rcloneRemote) globalFlags() []string {
 	var flags []string
 	if r.config != "" {
 		flags = append(flags, "--config", r.config)
 	}
 	if r.progress != nil {
-		flags = append(flags, "--progress")
+		if isTerminalWriter(r.progress) {
+			flags = append(flags, "--progress")
+		} else {
+			flags = append(flags, "--stats", "1s", "--stats-one-line")
+		}
 	}
 	return flags
 }
 
-// streamTarget is where rclone's stderr (and its --progress bar) is sent during
-// a copy. Verbose debug output takes precedence; otherwise the progress writer
-// (set when not --quiet) receives it. A nil result means stderr is buffered and
-// surfaced only on failure.
+// isTerminalWriter reports whether w is backed by a character device (a
+// terminal). Used to choose between rclone's --progress (TTY) and
+// --stats/--stats-one-line (non-TTY) flag sets.
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// streamTarget is where rclone's stderr is sent during a copy. Verbose debug
+// output takes precedence; otherwise the progress writer (set when not
+// --quiet) receives it. A nil result means stderr is buffered and surfaced
+// only on failure.
 func (r rcloneRemote) streamTarget() io.Writer {
 	if r.debug != nil {
 		return r.debug

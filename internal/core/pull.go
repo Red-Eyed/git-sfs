@@ -49,7 +49,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 		return err
 	}
 	hashes := uniqueHashesFromTracked(links)
-	if err := pullMissingFiles(ctx, c, r, hashes, a.jobs(cfg, len(hashes))); err != nil {
+	if err := pullMissingFiles(ctx, c, r, hashes, a.jobs(cfg, len(hashes)), a.say); err != nil {
 		return err
 	}
 	pullErrs := make([]error, len(hashes))
@@ -65,7 +65,7 @@ func (a App) Pull(ctx context.Context, remoteName, path string) (err error) {
 	return errors.Join(pullErrs...)
 }
 
-func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int) error {
+func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, workers int, sayFn func(string)) error {
 	var missing []hash.Hash
 	for _, h := range hashes {
 		if !c.HasValid(ctx, h) {
@@ -89,6 +89,7 @@ func pullMissingFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashe
 	for i, h := range missing {
 		relPaths[i] = hash.Algorithm + "/" + h.Prefix() + "/" + h.String()
 	}
+	sayFn(fmt.Sprintf("pull: downloading %d file(s) from remote", len(missing)))
 	return r.CopyFromRemote(ctx, filepath.Join(c.Root, "files"), relPaths)
 }
 

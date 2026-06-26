@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.14.0
+
+### Added
+- `git-sfs add` and `git-sfs import` show a byte-mode progress bar while hashing and copying files into the cache.
+- `git-sfs verify` shows a count-mode progress bar for the local integrity pass and, when `--remote` is given, a second bar for the remote pass.
+- `git-sfs status --remote` shows a count-mode progress bar while fetching remote metadata.
+- `git-sfs setup` shows a count-mode progress bar while materializing symlinks.
+- `git-sfs push` prints "push: uploading N file(s) to remote" before handing off to rclone.
+- `git-sfs pull` prints "pull: downloading N file(s) from remote" before handing off to rclone.
+- rclone transfer progress is now TTY-aware: on a real terminal `--progress` renders an animated bar with per-file speed and ETA; in non-TTY environments (CI, pipes) `--stats 1s --stats-one-line` emits one updating text line per second instead.
+
+---
+
 ## v1.13.0
 
 ### Changed

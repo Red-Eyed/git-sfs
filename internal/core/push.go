@@ -44,6 +44,8 @@ func (a App) Push(ctx context.Context, name string) (err error) {
 		}
 		relPaths = append(relPaths, hash.Algorithm+"/"+h.Prefix()+"/"+h.String())
 	}
-	a.debugf("push: uploading %d file(s)", len(relPaths))
+	if len(relPaths) > 0 {
+		a.say(fmt.Sprintf("push: uploading %d file(s) to remote", len(relPaths)))
+	}
 	return r.CopyToRemote(ctx, filepath.Join(c.Root, "files"), relPaths)
 }

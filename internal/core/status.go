@@ -69,7 +69,10 @@ func (a App) Status(ctx context.Context, remoteName string, asJSON bool, path st
 		return err
 	}
 	hashes := uniqueHashesFromTracked(links)
-	states := inspectFiles(ctx, c, r, hashes, checkRemote, a.jobs(cfg, len(hashes)))
+
+	bar := progress.New(a.Stderr, "status", len(hashes), !checkRemote || a.Quiet)
+	states := inspectFiles(ctx, c, r, hashes, checkRemote, a.jobs(cfg, len(hashes)), bar.Step)
+	bar.Close()
 
 	records := make([]fileRecord, len(links))
 	for i, l := range links {
@@ -87,7 +90,7 @@ func (a App) Status(ctx context.Context, remoteName string, asJSON bool, path st
 // inspectFiles computes the state of every unique hash. Local cache stats are
 // cheap and done inline; remote metadata lookups are network calls, so they run
 // across the configured worker pool exactly like verify's remote checks.
-func inspectFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, checkRemote bool, workers int) map[hash.Hash]fileState {
+func inspectFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []hash.Hash, checkRemote bool, workers int, onStep func()) map[hash.Hash]fileState {
 	states := make(map[hash.Hash]fileState, len(hashes))
 	for _, h := range hashes {
 		states[h] = localState(c, h)
@@ -102,6 +105,7 @@ func inspectFiles(ctx context.Context, c cache.Cache, r remote.Remote, hashes []
 		mu.Lock()
 		states[hashes[i]] = st
 		mu.Unlock()
+		onStep()
 		return nil
 	}, func(int, error) {})
 	return states

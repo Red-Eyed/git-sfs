@@ -14,6 +14,7 @@ import (
 	"git-sfs/internal/config"
 	"git-sfs/internal/errs"
 	"git-sfs/internal/hash"
+	"git-sfs/internal/progress"
 	"git-sfs/internal/remote"
 	"git-sfs/internal/sfspath"
 )
@@ -76,7 +77,7 @@ func (a App) Verify(ctx context.Context, remoteName string, checkRemote, withInt
 		}
 	}
 
-	report, err := scan(ctx, repo, path, c, cfg, r, checkRemote, withIntegrity)
+	report, err := scan(ctx, repo, path, c, cfg, r, checkRemote, withIntegrity, a.Stderr, a.Quiet)
 	if err != nil {
 		return err
 	}
@@ -115,7 +116,7 @@ func nameOrDefault(name string) string {
 	return name
 }
 
-func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Config, r remote.Remote, checkRemote, withIntegrity bool) (statusReport, error) {
+func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Config, r remote.Remote, checkRemote, withIntegrity bool, stderr io.Writer, quiet bool) (statusReport, error) {
 	var report statusReport
 	root := absFromRepo(repo, path)
 	var tracked []trackedLink
@@ -158,7 +159,14 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 	for _, item := range tracked {
 		report.TrackedHashes[item.Hash.String()] = struct{}{}
 	}
-	cacheStatus := checkCacheFiles(ctx, c, tracked, withIntegrity, jobsFromSettings(cfg.Settings.Jobs, len(tracked)))
+
+	workers := jobsFromSettings(cfg.Settings.Jobs, len(tracked))
+	hashes := uniqueHashesFromTracked(tracked)
+
+	localBar := progress.New(stderr, "verify local", len(hashes), quiet)
+	cacheStatus := checkCacheFiles(ctx, c, tracked, withIntegrity, workers, localBar.Step)
+	localBar.Close()
+
 	for _, item := range tracked {
 		status := cacheStatus[item.Hash]
 		switch {
@@ -187,7 +195,10 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 	if !checkRemote {
 		return report, nil
 	}
-	remStatus, err := checkRemoteFiles(ctx, r, tracked, withIntegrity, jobsFromSettings(cfg.Settings.Jobs, len(tracked)))
+
+	remoteBar := progress.New(stderr, "verify remote", len(hashes), quiet)
+	remStatus, err := checkRemoteFiles(ctx, r, tracked, withIntegrity, workers, remoteBar.Step)
+	remoteBar.Close()
 	if err != nil {
 		return report, err
 	}
@@ -214,7 +225,7 @@ func scan(ctx context.Context, repo, path string, c cache.Cache, cfg config.Conf
 	return report, nil
 }
 
-func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, withIntegrity bool, workers int) map[hash.Hash]remoteStatus {
+func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, withIntegrity bool, workers int, onStep func()) map[hash.Hash]remoteStatus {
 	hashes := uniqueHashesFromTracked(tracked)
 	out := make(map[hash.Hash]remoteStatus, len(hashes))
 	var mu sync.Mutex
@@ -244,11 +255,12 @@ func checkCacheFiles(ctx context.Context, c cache.Cache, tracked []trackedLink, 
 		mu.Lock()
 		out[h] = status
 		mu.Unlock()
+		onStep()
 	})
 	return out
 }
 
-func checkRemoteFiles(ctx context.Context, r remote.Remote, tracked []trackedLink, withIntegrity bool, workers int) (map[hash.Hash]remoteStatus, error) {
+func checkRemoteFiles(ctx context.Context, r remote.Remote, tracked []trackedLink, withIntegrity bool, workers int, onStep func()) (map[hash.Hash]remoteStatus, error) {
 	hashes := uniqueHashesFromTracked(tracked)
 	out := make(map[hash.Hash]remoteStatus, len(hashes))
 	var mu sync.Mutex
@@ -271,6 +283,7 @@ func checkRemoteFiles(ctx context.Context, r remote.Remote, tracked []trackedLin
 		mu.Lock()
 		out[h] = status
 		mu.Unlock()
+		onStep()
 		if status.Err != nil && !(withIntegrity && errors.Is(status.Err, errs.ErrCorruptRemoteFile)) {
 			once.Do(func() {
 				firstErr = status.Err
