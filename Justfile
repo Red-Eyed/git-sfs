@@ -30,5 +30,8 @@ check: fmt test build workflows
 release-snapshot:
     env GO={{go}} GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} sh scripts/build-release.sh snapshot dist
 
+gen-llms-txt:
+    uv run scripts/gen_llms_txt.py
+
 clean:
     rm -rf dist git-sfs coverage.out

@@ -37,6 +37,7 @@ type grammar struct {
 	Pull    pullCmd    `cmd:"" help:"download missing files from the remote"`
 	Doctor  doctorCmd  `cmd:"" help:"diagnose configuration and remote problems"`
 	Self    selfCmd    `cmd:"" help:"manage the git-sfs installation"`
+	LLMsTxt llmsTxtCmd `cmd:"" name:"llms-txt" help:"print LLM-friendly reference document"`
 	Help    helpCmd    `cmd:"" help:"show usage"`
 }
 
@@ -101,6 +102,8 @@ type pullCmd struct {
 type doctorCmd struct {
 	RemoteName string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
 }
+
+type llmsTxtCmd struct{}
 
 type helpCmd struct{}
 
@@ -192,6 +195,8 @@ func dispatch(ctx context.Context, app core.App, g grammar, cmd string, stdout i
 		return app.Doctor(ctx, g.Doctor.RemoteName)
 	case "self update":
 		return selfUpdate(ctx, stdout, app.Stderr, app.Quiet)
+	case "llms-txt":
+		return printLLMsTxt(stdout)
 	case "help":
 		usage(stdout)
 		return nil
@@ -245,6 +250,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  pull    [-r NAME] [path]")
 	fmt.Fprintln(w, "  doctor       [-r NAME]")
 	fmt.Fprintln(w, "  self update")
+	fmt.Fprintln(w, "  llms-txt")
 	fmt.Fprintln(w, "  help")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "run 'git-sfs <command> --help' for command-specific flags")
