@@ -26,6 +26,14 @@ download() {
   fi
 }
 
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 
@@ -58,7 +66,18 @@ rm -rf "$tmp"
 mkdir -p "$tmp" "$install_dir"
 trap 'rm -rf "$tmp"' EXIT
 
+download "$release_base_url/$version/SHA256SUMS" -o "$tmp/SHA256SUMS"
 download "$url" -o "$tmp/$asset"
+expected="$(grep "  $asset$" "$tmp/SHA256SUMS" | awk '{print $1}')"
+if [ -z "$expected" ]; then
+  echo "SHA256SUMS has no entry for $asset" >&2
+  exit 1
+fi
+actual="$(sha256 "$tmp/$asset" | awk '{print $1}')"
+if [ "$expected" != "$actual" ]; then
+  echo "SHA256 mismatch for $asset: expected $expected, got $actual" >&2
+  exit 1
+fi
 tar -xzf "$tmp/$asset" -C "$tmp"
 install "$tmp/git-sfs" "$install_dir/git-sfs"
 
@@ -79,6 +98,13 @@ if [ "$install_rclone" != "0" ]; then
   rclone_zip="rclone-$rclone_version-$rclone_os-$arch.zip"
   rclone_url="$rclone_base_url/$rclone_version/$rclone_zip"
   download "$rclone_url" -o "$tmp/$rclone_zip"
+  download "$rclone_url.sha256" -o "$tmp/$rclone_zip.sha256"
+  rclone_expected="$(awk '{print $1}' "$tmp/$rclone_zip.sha256")"
+  rclone_actual="$(sha256 "$tmp/$rclone_zip" | awk '{print $1}')"
+  if [ "$rclone_expected" != "$rclone_actual" ]; then
+    echo "SHA256 mismatch for $rclone_zip" >&2
+    exit 1
+  fi
   unzip -q "$tmp/$rclone_zip" -d "$tmp"
   install "$tmp"/rclone-*-*/rclone "$install_dir/rclone"
   rclone_installed_version="$("$install_dir/rclone" --version | awk 'NR==1 {print $2; exit}')"

@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -143,10 +145,23 @@ func updateGitSFS(ctx context.Context, client *http.Client, env selfEnv, destPat
 	asset := fmt.Sprintf("git-sfs-%s-%s-%s.tar.gz", latest, runtime.GOOS, runtime.GOARCH)
 	url := env.releaseBaseURL + "/" + latest + "/" + asset
 
+	sumsURL := env.releaseBaseURL + "/" + latest + "/SHA256SUMS"
+	sumsData, err := fetchBody(ctx, client, sumsURL, "verifying git-sfs", stderr, quiet)
+	if err != nil {
+		return fmt.Errorf("git-sfs: cannot fetch SHA256SUMS: %w", err)
+	}
+	expectedHash, err := parseSHA256Sums(sumsData, asset)
+	if err != nil {
+		return fmt.Errorf("git-sfs: %w", err)
+	}
+
 	label := fmt.Sprintf("downloading git-sfs %s", latest)
 	data, err := fetchBody(ctx, client, url, label, stderr, quiet)
 	if err != nil {
 		return fmt.Errorf("git-sfs: download failed (%s): %w", url, err)
+	}
+	if err := verifySHA256(data, expectedHash); err != nil {
+		return fmt.Errorf("git-sfs: %w", err)
 	}
 
 	binary, err := extractFromTar(data, "git-sfs")
@@ -181,10 +196,22 @@ func updateRclone(ctx context.Context, client *http.Client, env selfEnv, destPat
 	asset := fmt.Sprintf("rclone-%s-%s-%s.zip", latest, rcloneOS, runtime.GOARCH)
 	url := env.rcloneBaseURL + "/" + latest + "/" + asset
 
+	hashData, err := fetchBody(ctx, client, url+".sha256", "verifying rclone", stderr, quiet)
+	if err != nil {
+		return fmt.Errorf("rclone: cannot fetch .sha256: %w", err)
+	}
+	hashFields := strings.Fields(string(hashData))
+	if len(hashFields) == 0 {
+		return fmt.Errorf("rclone: empty .sha256 file")
+	}
+
 	label := fmt.Sprintf("downloading rclone %s", latest)
 	data, err := fetchBody(ctx, client, url, label, stderr, quiet)
 	if err != nil {
 		return fmt.Errorf("rclone: download failed (%s): %w", url, err)
+	}
+	if err := verifySHA256(data, hashFields[0]); err != nil {
+		return fmt.Errorf("rclone: %w", err)
 	}
 
 	binary, err := extractFromZip(data, "rclone")
@@ -409,6 +436,27 @@ func atomicReplace(destPath string, data []byte) error {
 		return fmt.Errorf("closing: %w", err)
 	}
 	return os.Rename(tmpPath, destPath)
+}
+
+// parseSHA256Sums parses a sha256sum-format file and returns the hash for filename.
+func parseSHA256Sums(data []byte, filename string) (string, error) {
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[1] == filename {
+			return fields[0], nil
+		}
+	}
+	return "", fmt.Errorf("no entry for %s in SHA256SUMS", filename)
+}
+
+// verifySHA256 returns an error if the SHA256 of data does not match expected (hex string).
+func verifySHA256(data []byte, expected string) error {
+	sum := sha256.Sum256(data)
+	got := hex.EncodeToString(sum[:])
+	if got != expected {
+		return fmt.Errorf("SHA256 mismatch: expected %s, got %s", expected, got)
+	}
+	return nil
 }
 
 // resolveExe returns the real path of the running executable with symlinks resolved.

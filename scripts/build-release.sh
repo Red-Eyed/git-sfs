@@ -16,3 +16,5 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
   tar -C "$out/$name" -czf "$out/$name.tar.gz" git-sfs
   rm -rf "$out/$name"
 done
+
+(cd "$out" && sha256sum *.tar.gz > SHA256SUMS)

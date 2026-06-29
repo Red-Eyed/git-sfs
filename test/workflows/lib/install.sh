@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
 build_release_fixture() {
   local release_dir="$FIXTURE_ROOT/releases/download/$VERSION"
   local latest_dir="$FIXTURE_ROOT/releases/latest"
@@ -13,6 +21,7 @@ build_release_fixture() {
     go build -trimpath -ldflags="-s -w -X git-sfs/internal/version.Version=$VERSION" \
     -o "$staging/git-sfs" "$ROOT/cmd/git-sfs"
   tar -C "$staging" -czf "$release_dir/$asset" git-sfs
+  (cd "$release_dir" && _sha256 "$asset" > SHA256SUMS)
   : > "$latest_dir/$VERSION"
 }
 

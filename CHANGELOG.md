@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.20.0
+
+### Security
+
+- **Binary integrity verification in `self update`.** Both `git-sfs` and `rclone` downloads are now verified against a SHA256 checksum before the binary is written to disk. For `git-sfs`, the release `SHA256SUMS` file is fetched from the same release and the downloaded archive is checked against it. For `rclone`, the per-asset `.sha256` file that rclone publishes is used. A hash mismatch aborts the update with a clear error; the running binary is never replaced with an unverified download.
+- **Checksum verification in `install.sh`.** The install script now downloads `SHA256SUMS` from the release and verifies the `git-sfs` archive before extraction. For `rclone`, rclone's own per-asset `.sha256` file is fetched and verified. Both checks use a portable `sha256` helper that prefers `sha256sum` and falls back to `shasum -a 256` for macOS compatibility.
+- **`SHA256SUMS` published with every release.** `scripts/build-release.sh` now generates a `SHA256SUMS` file over all platform archives after the build, and the release workflow uploads it alongside the tarballs and `install.sh`.
+- **GitHub Actions pinned to commit SHAs.** `actions/checkout`, `actions/setup-go`, and `actions/cache` are now pinned to immutable commit SHAs in both `ci.yml` and `release.yml`, eliminating the supply-chain risk of mutable version tags.
+
+---
+
 ## v1.19.0
 
 ### Added
