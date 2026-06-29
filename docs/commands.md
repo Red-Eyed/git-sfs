@@ -284,3 +284,41 @@ Then for each configured remote (or the selected remote):
 
 `git-sfs doctor` exits non-zero if any check fails, so it can be used in CI setup scripts to verify the environment before running a workflow.
 
+## git-sfs self update
+
+Update the `git-sfs` binary and `rclone` to their latest releases:
+
+```sh
+git-sfs self update
+```
+
+Both binaries are updated in the directory where the running `git-sfs` executable lives (resolved through any symlinks). Each binary is replaced atomically — a temp file is written and renamed over the existing binary, so a partial download never leaves a broken installation. On Linux and macOS this is safe even while the binary is running, because the kernel holds the old inode open until the process exits.
+
+Output while running:
+
+```
+checking git-sfs version... (1s)
+downloading git-sfs v1.19.0  [##########----------]  18.3 MiB/36.1 MiB
+git-sfs v1.18.0 → v1.19.0
+checking rclone version... (1s)
+rclone v1.68.2 already up to date
+```
+
+If a binary is already at the latest version it is left untouched. If the download or install step fails the error is reported explicitly with the URL and reason.
+
+### Corporate environments
+
+`git-sfs self update` honors the same env vars as the installer:
+
+| Variable | Effect |
+|----------|--------|
+| `GIT_SFS_SSL_CERT_FILE` | Path to a custom CA bundle (highest priority) |
+| `SSL_CERT_FILE` | Path to a custom CA bundle (fallback) |
+| `CURL_CA_BUNDLE` | Path to a custom CA bundle (fallback) |
+| `GIT_SFS_INSECURE_TLS=1` | Disable TLS verification (last resort; prints a warning) |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | Standard proxy vars, honored automatically |
+| `GIT_SFS_REPO` | Override GitHub repo (default: `Red-Eyed/git-sfs`) |
+| `GIT_SFS_RELEASE_BASE_URL` | Override release download base URL |
+| `GIT_SFS_RELEASE_LATEST_URL` | Override latest-release redirect URL |
+| `GIT_SFS_RCLONE_BASE_URL` | Override rclone download base URL |
+

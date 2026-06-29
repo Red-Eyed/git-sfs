@@ -64,6 +64,16 @@ Skip TLS verification entirely (last resort):
 curl -kLsSf .../install.sh | GIT_SFS_INSECURE_TLS=1 sh
 ```
 
+## Updating
+
+Once installed, update both `git-sfs` and `rclone` with:
+
+```sh
+git-sfs self update
+```
+
+This downloads the latest release of each binary and replaces it atomically in the same directory as the running `git-sfs` executable. Honors the same env vars as the installer — see [Corporate environments](commands.md#corporate-environments) for proxy and custom CA options.
+
 ## Supported targets
 
 ```text

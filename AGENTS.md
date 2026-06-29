@@ -33,6 +33,22 @@ Core model:
 - Cache files live at `<cache>/files/sha256/<prefix>/<hash>`.
 - Cache path is local state and must never be committed.
 
+## Dependencies
+
+Production dependencies (`go.mod`):
+
+| Package | Purpose |
+|---------|---------|
+| `github.com/alecthomas/kong` | CLI argument parsing — maps `argv` onto typed Go structs |
+
+Test-only:
+
+| Package | Purpose |
+|---------|---------|
+| `github.com/stretchr/testify` | Assertions and test helpers |
+
+Everything else — progress bars, spinner, hashing, remote invocation — is hand-rolled in `internal/`. Before reaching for a new dependency, check whether the standard library or an existing `internal/` package already covers the need.
+
 ## Commands
 
 Use a sandbox-writable Go cache when running here:

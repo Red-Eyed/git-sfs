@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.19.0
+
+### Added
+
+- **`git-sfs self update`** — new subcommand that updates both the `git-sfs` binary and `rclone` to their latest releases. Each binary is replaced atomically (temp file + rename) and reports its old and new version, or "already up to date" if no change is needed. Progress is shown with a byte-mode bar when the server sends `Content-Length`, or a spinner otherwise. Honors the same env vars as `install.sh` for corporate environments with TLS interception or custom CA bundles (`GIT_SFS_SSL_CERT_FILE`, `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `GIT_SFS_INSECURE_TLS`); HTTP proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) are picked up automatically.
+
+---
+
 ## v1.18.0
 
 ### Fixed

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 
+	"strings"
+
 	"github.com/alecthomas/kong"
 
 	"git-sfs/internal/core"
@@ -34,8 +36,15 @@ type grammar struct {
 	Push    pushCmd    `cmd:"" help:"upload referenced cache files to the remote"`
 	Pull    pullCmd    `cmd:"" help:"download missing files from the remote"`
 	Doctor  doctorCmd  `cmd:"" help:"diagnose configuration and remote problems"`
+	Self    selfCmd    `cmd:"" help:"manage the git-sfs installation"`
 	Help    helpCmd    `cmd:"" help:"show usage"`
 }
+
+type selfCmd struct {
+	Update selfUpdateCmd `cmd:"" help:"update git-sfs and rclone to the latest release"`
+}
+
+type selfUpdateCmd struct{}
 
 type initCmd struct {
 	Force bool `help:"overwrite an existing config"`
@@ -133,7 +142,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return parseErr
 	}
 
-	cmd := kctx.Selected().Name
+	cmd := commandPath(kctx.Command())
 	if g.Verbose {
 		fmt.Fprintf(stderr, "debug: command=%s\n", cmd)
 	}
@@ -181,12 +190,26 @@ func dispatch(ctx context.Context, app core.App, g grammar, cmd string, stdout i
 		return app.Pull(ctx, g.Pull.RemoteName, g.Pull.Path)
 	case "doctor":
 		return app.Doctor(ctx, g.Doctor.RemoteName)
+	case "self update":
+		return selfUpdate(ctx, stdout, app.Stderr, app.Quiet)
 	case "help":
 		usage(stdout)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// commandPath strips positional-arg placeholders from kctx.Command() output
+// (e.g. "add <path>" → "add", "self update" → "self update").
+func commandPath(full string) string {
+	var parts []string
+	for _, p := range strings.Fields(full) {
+		if !strings.HasPrefix(p, "<") {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func has(args []string, want string) bool {
@@ -220,7 +243,8 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "  remotes [--json]")
 	fmt.Fprintln(w, "  push    [-r NAME]")
 	fmt.Fprintln(w, "  pull    [-r NAME] [path]")
-	fmt.Fprintln(w, "  doctor  [-r NAME]")
+	fmt.Fprintln(w, "  doctor       [-r NAME]")
+	fmt.Fprintln(w, "  self update")
 	fmt.Fprintln(w, "  help")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "run 'git-sfs <command> --help' for command-specific flags")
