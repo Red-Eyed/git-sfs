@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  RCLONE_VERSION: v1.68.2
+  __RCLONE_VERSION: v1.68.2
 
 jobs:
   test:
@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/rclone
-          key: rclone-${{ env.RCLONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          key: rclone-${{ env.__RCLONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install rclone
         if: steps.cache-rclone.outputs.cache-hit != 'true'

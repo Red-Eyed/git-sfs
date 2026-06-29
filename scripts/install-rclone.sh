@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
 # Downloads and installs the rclone binary to ~/.local/bin.
-# Reads RCLONE_VERSION from the environment (e.g. v1.68.2).
+# Reads __RCLONE_VERSION from the environment (e.g. v1.68.2).
 # Detects OS and arch from uname; supports Linux/macOS x86_64/arm64.
 set -eu
 
-: "${RCLONE_VERSION:?RCLONE_VERSION must be set}"
+: "${__RCLONE_VERSION:?__RCLONE_VERSION must be set}"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
@@ -21,7 +21,7 @@ case "$arch" in
   *) echo "unsupported arch: $arch" >&2; exit 1 ;;
 esac
 
-url="https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-${os}-${arch}.zip"
+url="https://downloads.rclone.org/${__RCLONE_VERSION}/rclone-${__RCLONE_VERSION}-${os}-${arch}.zip"
 
 mkdir -p "$HOME/.local/bin"
 curl -fsSL "$url" -o rclone.zip
