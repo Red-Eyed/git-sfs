@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  RCLONE_VERSION: v1.68.2
+
 jobs:
   test:
     name: Go ${{ matrix.go }} on ${{ matrix.os }}
@@ -22,13 +25,19 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
 
-      - name: Install rclone (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y rclone
+      - name: Cache rclone
+        id: cache-rclone
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/rclone
+          key: rclone-${{ env.RCLONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
 
-      - name: Install rclone (macOS)
-        if: runner.os == 'macOS'
-        run: brew install rclone
+      - name: Install rclone
+        if: steps.cache-rclone.outputs.cache-hit != 'true'
+        run: bash scripts/install-rclone.sh
+
+      - name: Add rclone to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Format check
         run: test -z "$(gofmt -l .)"
