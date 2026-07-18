@@ -685,17 +685,37 @@ discovering it.
 It is the only thing standing between an aggressive rewrite and silent data
 corruption in a tool whose users cannot tolerate it.
 
-**Bit rot has no policy — genuinely open.** failure-modes §2 notes that
-`--rehash` is opt-in, manual, and unscheduled, that nothing re-verifies a
-protected file on read, and that at TB scale sampling is the only realistic mode.
-For archival datasets sitting untouched for years this is the slow failure.
+**Bit rot — resolved: not git-sfs's to solve.** The tool holds no redundancy of
+its own, so it can *detect* rot and never *repair* it. Detection without a repair
+source is only a more precise obituary, and no scheduling policy changes that.
+Storage-level integrity — ZFS, btrfs, RAID, a backend with its own checksumming —
+is the actual mechanism, and reimplementing it would violate the project's own
+framing as a layer over Git, the filesystem, and well-known movers.
 
-There is no obviously correct default: automatic rehashing costs hours of I/O on
-data the user is not touching, and declaring it the user's responsibility is how
-bit rot wins. Candidate directions — a sampled rehash on some existing command, a
-non-zero `--rehash-sample` default in `verify`, a documented cron recipe, or an
-explicit statement that the storage layer owns it — but this needs a decision,
-not a recommendation. **Unresolved; does not block Phase 0.**
+What git-sfs *does* own is detection plus knowing which tier holds a good copy —
+and replication already supplies the repair source:
+
+| Situation | Remedy |
+|---|---|
+| Local object rots, present on remote | `pull` repairs it |
+| Remote object rots, still cached locally | `push` repairs it |
+| Both rot, or never pushed | Unrecoverable — only storage-level protection would have helped |
+
+This is the same replicated/unpushed split that governs reclamation (§7): one
+copy means rot is fatal, two means it is repairable. One concept covers both.
+
+Consequences for v2:
+
+- Keep `--rehash` and `--rehash-sample` as opt-in detection. Do not schedule
+  them, do not enable them by default; hours of I/O over untouched data is a real
+  cost and it buys detection, not protection.
+- When rehash finds a corrupt object, **say whether a good copy exists** — repair
+  from the other tier if replicated, and state plainly that the data is gone if
+  not. Reporting corruption without saying which is the failure of §13.3 in a
+  different costume.
+- Document the storage-level requirement rather than approximating it. A cache on
+  a filesystem with no integrity checking and no backups is a risk the tool
+  should name at `setup` (§7b) and then stop pretending to manage.
 
 **Platform scope.** Unix-only (linux, darwin) is an explicit non-goal for
 Windows, matching v1. Windows *path* handling survives only where it affects

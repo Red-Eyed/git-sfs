@@ -133,6 +133,12 @@ willingness to keep the bit.
 - [ ] **Bit rot after protection.** Nothing re-verifies a protected file on read.
       `--rehash` exists but is opt-in and manual; there is no schedule, no reminder,
       and at terabyte scale the sampling mode is the only realistic option.
+      **Scope note:** git-sfs holds no redundancy of its own, so it can detect rot
+      but never repair it — storage-level integrity (ZFS, btrfs, RAID, a
+      checksumming backend) is the actual mechanism. What the tool owes the user
+      is saying *whether a good copy still exists*: a replicated object is
+      repairable from the other tier, an unpushed one is gone. Reporting
+      corruption without saying which is §4's failure in another costume.
 
 **Never go there:** don't let a mode bit be the sole carrier of a correctness claim on a
 filesystem you didn't choose. `doctor` should probe whether the cache filesystem actually
