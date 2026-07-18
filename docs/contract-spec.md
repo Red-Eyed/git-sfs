@@ -278,9 +278,8 @@ Adopting the `toml` crate is still the right call (a hand-rolled parser is worse
 in every other respect), but it is a deliberate, documented divergence rather
 than an accident. Required mitigations:
 
-1. Require a `min_git_sfs_version >= 2.0.0` floor on every config v2 reads, and
-   resolve older configs through an explicit `migrate` that parses with v1
-   semantics. See §6.5 — this is the load-bearing one.
+1. Parse with both the `toml` crate and the v1 line scanner, and error when the
+   two readings differ. See §6.5 — this is the load-bearing one.
 2. Keep the closed-schema validation of §6.2 — `serde`'s `deny_unknown_fields`
    plus explicit checks. Real TOML parsing must not silently widen what is
    accepted.
@@ -292,49 +291,48 @@ than an accident. Required mitigations:
 Two separate populations need two separate mechanisms. They are complementary,
 not alternatives.
 
-**The floor is the whole mechanism.** v2 requires
-`min_git_sfs_version >= 2.0.0` in every config it operates on:
+**v2 parses every config with both parsers and compares.**
 
-- A **v1 binary** meeting that floor refuses to run, so it can never misparse a
-  v2-era config. Enforced at `app.go:56`, after load and before command work, so
-  it fires before a misparsed remote path can be used.
-- A **v2 binary** meeting a config *without* the floor refuses too, and directs
-  the user to `git-sfs migrate`.
+| Outcome | Action |
+|---|---|
+| Both succeed, identical result | Use it — the overwhelmingly common case |
+| Both succeed, results differ | **Error.** Report the field and both readings |
+| TOML fails, v1 succeeds | Use v1's reading — v1-only syntax |
+| Both fail | Error |
 
-The second half is what closes the gap. `min_git_sfs_version` gates the binary
-reading a config; it cannot retroactively gate configs written before the field
-was set. Requiring it — rather than tolerating its absence — means **"legacy
-config" ceases to exist from v2's perspective.** Every config v2 operates on has
-been explicitly migrated.
+The mechanism keys on **disagreement, not failure**, and that distinction is the
+whole design.
 
-**Migration reads with v1 semantics.** `migrate` parses using the v1 line scanner
-— truncation at `#`, `Trim`-based unquoting and all — because that is what the
-file actually meant to the tool that wrote it. It then writes canonical TOML with
-the floor set. v2 therefore retains the v1 parser, but confined to `migrate` and
-never in the normal read path.
+A fallback chain — try TOML, fall back to v1 on error — does not work, because
+the dangerous case is not an error. Given `path = "run#1"`, TOML yields `run#1`
+and v1 yields `run`; **both succeed.** A fallback would silently take TOML's
+answer, address a location that has never existed, and present as a vanished
+dataset. The failure mode of a fallback is precisely the scenario the rule exists
+to prevent.
 
-This resolves the §6.3 divergence once, visibly, at a moment the user chose. It
-covers every divergence rather than an enumerated subset, and it avoids a
-permanent validation rule that could only ever list the cases someone
-anticipated.
+Comparison catches it because it does not ask "did parsing work?" but "do the two
+readings agree?" — which is the actual question.
 
-Consider a committed `path = "run#1"`. v1 truncates it to `run` and always has,
-so the user's data physically resides at `run/`. Parsing it "correctly" as
-`run#1` would address a location that never existed — **v2 being right would
-break a working setup.** Migration reproduces v1's reading, writes the
-unambiguous equivalent, and the file means one thing thereafter.
+On disagreement, error rather than silently preferring v1. The config is
+genuinely ambiguous and the tool cannot know which reading was intended.
+Reporting both (`run` vs `run#1`) lets the user resolve it in a single edit.
+Silently preferring v1 would preserve behavior but leave a file whose plain text
+means something different from what the tool does with it — a trap for the next
+human or program to read it.
 
-**Two notes on the mechanism:**
+**Consequences:**
 
+- **No forced version floor.** v1 and v2 coexist on unambiguous configs, which is
+  effectively all of them. No partial-adoption partition. (§14 item 4 therefore
+  stands as originally written: leave `min_git_sfs_version` commented out.)
+- **No `migrate` command.** Nothing to add to the CLI surface.
+- **Zero friction** for configs without `#`, escape sequences, or irregular
+  quoting.
+- v2 retains the v1 line scanner in the normal read path, not quarantined. Cost
+  is double-parsing a file of a few hundred bytes — negligible.
 - v2's *written* configs stay within the v1-parseable subset. The schema is all
-  simple `key = "value"` scalars with no arrays or multi-line fields, so this
-  costs nothing — but emitting exotic TOML would make v1 report
-  `invalid config line` instead of a clean upgrade prompt, since it errors on the
-  first bad line before reaching the version guard.
-- **Accepted cost: partial-adoption partition.** One person running v2 `init` and
-  committing hard-blocks every v1 colleague on that repo. Deliberate — migration
-  friction traded for the guarantee that no config is ever read two ways
-  (reverses §14 item 4).
+  simple `key = "value"` scalars, so this costs nothing and keeps v1 able to read
+  what v2 writes.
 
 ### 6.4 Defaulting
 
@@ -701,19 +699,19 @@ containment check. v2 must not port the bug along with the function.
 
 | # | Issue | Recommendation |
 |---|---|---|
-| 1 | ~~`#`-in-value parsing~~ | **Resolved (§6.5):** v2 requires a `>= 2.0.0` floor on every config it reads; older configs go through `git-sfs migrate`, which parses with v1 semantics and rewrites canonical TOML. Adds one command to the surface |
+| 1 | ~~`#`-in-value parsing~~ | **Resolved (§6.5):** parse with both `toml` and the v1 scanner; error only when the readings differ. No version floor, no migrate command, no friction on unambiguous configs |
 | 2 | Duplicate keys: v1 last-wins, TOML errors | Accept the stricter TOML behavior; document it |
 | 3 | v1 accepts unterminated/mismatched quotes via `Trim` | Accept stricter behavior |
-| 4 | `min_git_sfs_version` vs. a `2.x` binary | **Reversed — v2 now writes `2.0.0` deliberately (§6.5)**, locking v1 out of v2-initialized repos so it cannot misparse them. Migration friction accepted in exchange for parsing correctness. v2 must still keep the *written* config within the v1-parseable subset so the guard reports "upgrade" rather than "invalid config line" |
+| 4 | `min_git_sfs_version` vs. a `2.x` binary | `2.0.0 > 1.x` passes the existing comparison; no change needed. v2 MUST NOT write a `2.x` floor into new configs — §6.5's comparison makes it unnecessary, and setting it would lock v1 out of repos it can read correctly. Leave the field commented out, as v1 does |
 | 5 | `status --json` cannot express "remote unknown" (§10.1) | Add a nullable `remote_error` field — additive, existing consumers unaffected. **Blocks Phase 4** |
 | 6 | `verify` correctness fixes change exit `0` → `3` (§9.2) | Accept as bug fix; enumerate each case so the harness expects it |
 | 7 | ~~Orphan reaping advertised but unimplemented~~ | **Resolved:** v2 ships `trash` (move, recoverable), never `gc` (unlink). Design in rust-rewrite-plan §7; layout in §4 |
 | 8 | `countOrphans` derives "unreferenced" from a single repo while the cache serves many (`verify.go:315-331`) | **Open.** v2 requires explicit `--repo` scoping for unreferenced-object reclamation and defaults `trash` to the remote-replicated class instead. Whether to additionally record repo backlinks in the cache is undecided — see below |
 
-Item 4 was previously the opposite recommendation — leave the field commented out
-so v1 retains access. That reasoning held only while v2 parsed configs the same
-way v1 does. Once v2 adopts real TOML, a shared config is a config two binaries
-may read *differently*, and locking v1 out becomes the safer option. See §6.5.
+Item 4 is subtle and worth restating: writing a v2-minimum into a freshly
+initialized config would make the repo unreadable to v1 for no benefit. The
+comparison rule in §6.5 already guarantees no config is ever read two different
+ways, so the floor buys nothing and costs every v1 colleague their access.
 
 ### On item 8 — repo backlinks
 
