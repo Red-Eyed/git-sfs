@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""A recording, fault-injecting stand-in for rclone.
+
+Serves the two needs of contract-spec 5 and rust-rewrite-plan 5.2b with one
+tool. git-sfs reaches every remote exclusively through rclone subprocesses, so
+its complete observable remote behavior *is* its rclone argv stream:
+
+  record   append each invocation to $RCLONE_ARGV_LOG, canonicalized, so two
+           binaries' remote behavior can be diffed the way trees are
+  replay    return scripted failures from $RCLONE_FAULTS, so error paths a real
+           backend never produces locally (403, rate limit, expired
+           credentials) become testable
+
+Between faults it really moves bytes, because recording is only useful if the
+workflow under test actually completes.
+
+Subcommands implemented are exactly those v1 invokes -- lsd, lsjson, copyto,
+copy, version (internal/remote/command.go). Anything else exits 2 loudly rather
+than pretending to succeed: a silent no-op here would look like a passing test.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+FAKE_VERSION = "v1.99.0-fake"
+
+# Substituted into the log so a run-to-run random suffix does not read as a
+# difference. The list file's *contents* are recorded instead of its path --
+# which hashes move is the payload, the temp path is noise.
+TMPFILE_PLACEHOLDER = "{TMPFILE}"
+FILELIST_PLACEHOLDER = "{FILELIST}"
+
+FLAGS_WITH_VALUE = {"--config", "--temp-dir", "--files-from"}
+
+
+def map_path(remote: str) -> Path:
+    """Map an rclone remote string onto a local path.
+
+    Mirrors rclone's own local backend: everything up to the first ':' names the
+    backend and is dropped, so `local:/srv/data` addresses `/srv/data`. Keeping
+    this identical to the real thing is what lets one scenario run against
+    either the fake or real rclone unchanged.
+    """
+    _, separator, path = remote.partition(":")
+    return Path(path if separator else remote)
+
+
+def split_args(argv: list[str]) -> tuple[list[str], str, list[str]]:
+    """Split argv into (global flags, subcommand, operands)."""
+    globals_: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if not arg.startswith("--"):
+            break
+        globals_.append(arg)
+        if arg in FLAGS_WITH_VALUE and index + 1 < len(argv):
+            globals_.append(argv[index + 1])
+            index += 1
+        index += 1
+    if index >= len(argv):
+        return globals_, "", []
+    return globals_, argv[index], argv[index + 1 :]
+
+
+def canonicalize(argv: list[str]) -> list[str]:
+    """Replace run-specific temp paths with stable placeholders."""
+    result: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--files-from" and index + 1 < len(argv):
+            result += [arg, FILELIST_PLACEHOLDER]
+            index += 2
+            continue
+        if "git-sfs-rclone-check-" in arg:
+            result.append(TMPFILE_PLACEHOLDER)
+            index += 1
+            continue
+        result.append(arg)
+        index += 1
+    return result
+
+
+def positional(operands: list[str]) -> list[str]:
+    """Operands that are not flags, skipping the values flags consume.
+
+    A naive "does not start with --" filter silently promotes `--files-from`'s
+    path to positional and misaddresses the whole copy, so the flag table has to
+    be consulted here too.
+    """
+    result: list[str] = []
+    index = 0
+    while index < len(operands):
+        arg = operands[index]
+        if arg.startswith("--"):
+            index += 2 if arg in FLAGS_WITH_VALUE else 1
+            continue
+        result.append(arg)
+        index += 1
+    return result
+
+
+def read_file_list(argv: list[str]) -> list[str]:
+    """The relative paths a copy was asked to move, sorted for determinism.
+
+    Ordering is an implementation detail of how the caller assembled the list,
+    not part of the contract, so sorting here keeps a legitimate difference in
+    scheduling from reading as a divergence.
+    """
+    if "--files-from" not in argv:
+        return []
+    path = Path(argv[argv.index("--files-from") + 1])
+    if not path.is_file():
+        return []
+    return sorted(line for line in path.read_text().splitlines() if line)
+
+
+def log_invocation(argv: list[str]) -> None:
+    destination = os.environ.get("RCLONE_ARGV_LOG")
+    if not destination:
+        return
+    entry = " ".join(canonicalize(argv))
+    listed = read_file_list(argv)
+    lines = [entry] + [f"    {path}" for path in listed]
+    with open(destination, "a") as handle:
+        handle.write("\n".join(lines) + "\n")
+
+
+def matching_fault(subcommand: str, occurrence: int, argv: list[str]) -> dict | None:
+    """First fault rule matching this invocation.
+
+    Rules live one JSON object per line in $RCLONE_FAULTS:
+        {"subcommand": "copyto", "nth": 1, "exit": 1, "stderr": "403 Forbidden"}
+
+    "nth" (1-based, per subcommand) and "contains" (substring of the full argv)
+    are both optional and both narrow the match. `contains` is what makes the
+    interesting failures reachable: git-sfs runs a connectivity preflight before
+    per-object queries, so a fault matching every `lsjson` is caught by the
+    preflight and never exercises the per-object path where errors collapse into
+    "not found" (contract-spec 13.3). Targeting `/files/sha256/` reaches it.
+    """
+    source = os.environ.get("RCLONE_FAULTS")
+    if not source or not Path(source).is_file():
+        return None
+    joined = " ".join(argv)
+    for line in Path(source).read_text().splitlines():
+        if not line.strip():
+            continue
+        rule = json.loads(line)
+        if rule.get("subcommand") != subcommand:
+            continue
+        if "nth" in rule and rule["nth"] != occurrence:
+            continue
+        if "contains" in rule and rule["contains"] not in joined:
+            continue
+        return rule
+    return None
+
+
+def count_invocation(subcommand: str) -> int:
+    """Return this invocation's 1-based number for the subcommand."""
+    log = os.environ.get("RCLONE_ARGV_LOG")
+    if not log or not Path(log).is_file():
+        return 1
+    seen = 0
+    for line in Path(log).read_text().splitlines():
+        if line.startswith(" "):
+            continue
+        _, subcmd, _ = split_args(line.split())
+        if subcmd == subcommand:
+            seen += 1
+    return seen
+
+
+def describe(path: Path, name: str) -> dict:
+    return {
+        "Path": name,
+        "Name": name,
+        "Size": path.stat().st_size if path.is_file() else -1,
+        "IsDir": path.is_dir(),
+    }
+
+
+def do_lsjson(operands: list[str]) -> int:
+    recursive = "--recursive" in operands
+    targets = positional(operands)
+    if not targets:
+        return fail("lsjson: no target")
+    target = map_path(targets[0])
+
+    if not target.exists():
+        return fail(f"directory not found: {target}")
+    if target.is_file():
+        print(json.dumps([describe(target, target.name)]))
+        return 0
+
+    entries = []
+    if recursive:
+        for path in sorted(target.rglob("*")):
+            entries.append(describe(path, str(path.relative_to(target))))
+    else:
+        for path in sorted(target.iterdir()):
+            entries.append(describe(path, path.name))
+    print(json.dumps(entries))
+    return 0
+
+
+def do_lsd(operands: list[str]) -> int:
+    if not operands:
+        return fail("lsd: no target")
+    target = map_path(operands[0])
+    if not target.is_dir():
+        return fail(f"directory not found: {target}")
+    return 0
+
+
+def do_copyto(operands: list[str]) -> int:
+    if len(operands) < 2:
+        return fail("copyto: need source and destination")
+    source = map_path(operands[0])
+    destination = map_path(operands[1])
+    if not source.is_file():
+        return fail(f"object not found: {source}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return 0
+
+
+def do_copy(operands: list[str], argv: list[str]) -> int:
+    ignore_existing = "--ignore-existing" in operands
+    roots = positional(operands)
+    if len(roots) < 2:
+        return fail("copy: need source and destination")
+    source_root = map_path(roots[0])
+    destination_root = map_path(roots[1])
+
+    for relative in read_file_list(argv):
+        source = source_root / relative
+        destination = destination_root / relative
+        if not source.is_file():
+            return fail(f"object not found: {source}")
+        if ignore_existing and destination.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        # Real rclone writes destination objects with default permissions
+        # rather than mirroring the source's read-only cache bits.
+        destination.chmod(0o644)
+    return 0
+
+
+def fail(message: str) -> int:
+    print(message, file=sys.stderr)
+    return 1
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    log_invocation(argv)
+    _, subcommand, operands = split_args(argv)
+
+    fault = matching_fault(subcommand, count_invocation(subcommand), argv)
+    if fault is not None:
+        if fault.get("stderr"):
+            print(fault["stderr"], file=sys.stderr)
+        if fault.get("stdout"):
+            print(fault["stdout"])
+        return int(fault.get("exit", 1))
+
+    if subcommand == "version":
+        print(f"rclone {FAKE_VERSION}")
+        print("- os/version: fake")
+        return 0
+    if subcommand == "lsjson":
+        return do_lsjson(operands)
+    if subcommand == "lsd":
+        return do_lsd(operands)
+    if subcommand == "copyto":
+        return do_copyto(operands)
+    if subcommand == "copy":
+        return do_copy(operands, argv)
+
+    print(f"fake-rclone: unsupported subcommand: {subcommand!r}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

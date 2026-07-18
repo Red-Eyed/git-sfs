@@ -99,6 +99,7 @@ def execute(scenario: Scenario, binary: Binary, work: Path) -> str:
 
     env = os.environ | {
         "GIT_SFS": str(binary.path.resolve()),
+        "HARNESS_DIR": str(HARNESS_DIR),
         "WORK": str(work),
         "REPO": str(repo),
         "CACHE": str(cache),
@@ -124,11 +125,27 @@ def execute(scenario: Scenario, binary: Binary, work: Path) -> str:
     sections = [
         ("scenario exit", f"{completed.returncode}\n"),
         ("outcomes", outcomes.read_text()),
+        # Remote behavior has no tree to diff, but every remote operation is an
+        # rclone invocation -- so the argv stream is its equivalent artifact
+        # (rust-rewrite-plan 5.2b). Absent unless a scenario opts into the fake.
+        ("rclone argv", _argv_log(work / "rclone-argv.log", replacements)),
         ("repo", _manifest(repo, replacements)),
         ("cache", _manifest(cache, replacements)),
         ("remote", _manifest(remote, replacements)),
     ]
     return compose_report(sections)
+
+
+def _unmet_precondition(work: Path) -> str:
+    """Text of any precondition a scenario reported as failed, else empty."""
+    sentinel = work / "precondition-failed"
+    return sentinel.read_text() if sentinel.is_file() else ""
+
+
+def _argv_log(path: Path, replacements: list[tuple[bytes, bytes]]) -> str:
+    if not path.is_file():
+        return "(not recorded)\n"
+    return snapshot.normalize(path.read_bytes(), replacements).decode()
 
 
 def _manifest(root: Path, replacements: list[tuple[bytes, bytes]]) -> str:
@@ -181,6 +198,17 @@ def main() -> None:
                 reports[binary.name] = execute(scenario, binary, work)
 
             base = args.binary[0]
+            # Agreement is not correctness: a broken fixture fails identically
+            # for every binary and would otherwise read as green. Scenarios are
+            # written to complete cleanly, so an unmet precondition is a harness
+            # fault regardless of whether the binaries agreed.
+            unmet = _unmet_precondition(root / scenario.name / base.name)
+            if unmet:
+                failures += 1
+                print(f"ERROR {scenario.name}: precondition failed under {base.name}")
+                print(f"       {unmet.strip()}")
+                continue
+
             for other in args.binary[1:]:
                 delta = diff_reports(
                     base, other, reports[base.name], reports[other.name]

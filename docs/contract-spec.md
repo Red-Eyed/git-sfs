@@ -728,19 +728,25 @@ regression.
 - `verify` prints `run git-sfs gc to reclaim` (`verify.go:343`) — **`git-sfs gc`
   does not exist.** Human output is free under contract-only parity, so v2 simply
   must not advertise a command it does not ship.
-- **A freshly initialized repo cannot run `verify` at all.** The `init` template
-  writes `config = "rclone.conf"` (`config.go:125-151`), which resolves to
-  `.git-sfs/rclone.conf` — a file `init` never creates. Plain `verify` resolves
-  the remote even when doing no remote work, so `init` → `setup` → `add` →
-  `verify` exits **2** with `rclone config file not found` on the default path a
-  new user takes. A false red in the CI-facing command, reached without the user
-  configuring anything. v2 must not resolve a remote for an operation that does
-  not use one.
+- **A freshly initialized repo cannot run `verify` at all.** Two defaults
+  combine: `verify`'s `--check-remote` is a negatable bool defaulting to **true**
+  (`cli.go:76`), and the `init` template writes `config = "rclone.conf"`
+  (`config.go:125-151`), which resolves to `.git-sfs/rclone.conf` — a file `init`
+  never creates. So `init` → `setup` → `add` → `verify` exits **2** with
+  `rclone config file not found`, on the default path a new user takes, having
+  configured nothing. `verify --no-check-remote` succeeds.
 
-  Found by the differential harness rather than by the shell suite, which never
+  A false red in the CI-facing command, and §9.2 already establishes where that
+  leads: a check that cries wolf gets `|| true`'d, and then it protects nothing.
+  v2 should not have a fresh repo fail its own verify — either default the remote
+  check off, or treat an unconfigured remote as "not checked" rather than as an
+  error.
+
+  Found by the differential harness, not by the shell suite, which never
   exercises the default config — every scenario writes a working remote config
-  first (`test/workflows/lib/repo.sh:write_local_remote_config`). Worth noting as
-  a class: **defaults go untested when every fixture overrides them.**
+  first (`test/workflows/lib/repo.sh:write_local_remote_config`). Worth recording
+  as a class: **defaults go untested when every fixture overrides them**, and
+  both halves of this defect are defaults.
 
 ### 13.4 Trusting the mover
 

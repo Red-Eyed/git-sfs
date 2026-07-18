@@ -13,12 +13,15 @@ printf 'train payload\n' > "$REPO/data/duplicate.bin"
 
 (
   cd "$REPO"
-  record add git_sfs add data
+  require add git_sfs add data
 )
 commit_all "track dataset"
 
 (
   cd "$REPO"
   record status git_sfs status
-  record verify git_sfs verify data
+  record verify_local git_sfs verify --no-check-remote data
+  # --check-remote defaults to true, so this fails with no remote
+  # configured -- see contract-spec 13.3.
+  record verify_default git_sfs verify data
 )

@@ -11,7 +11,7 @@ printf 'original payload\n' > "$REPO/data/blob.bin"
 
 (
   cd "$REPO"
-  record add git_sfs add data
+  require add git_sfs add data
 )
 commit_all "track dataset"
 

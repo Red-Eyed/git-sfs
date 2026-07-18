@@ -46,10 +46,11 @@ Exits non-zero when any pair diverges, printing a unified diff of the manifests.
 ## Layout
 
 ```
-snapshot.py    tree -> canonical manifest. Reusable on its own.
-run.py         driver: run scenarios, snapshot, diff
-lib.sh         helpers available to every scenario
-scenarios/     one scenario per file
+snapshot.py       tree -> canonical manifest. Reusable on its own.
+run.py            driver: run scenarios, snapshot, diff
+lib.sh            helpers available to every scenario
+scenarios/        one scenario per file
+fake-rclone/      recording, fault-injecting stand-in for rclone
 ```
 
 `snapshot.py` keeps a functional core (`normalize`, `render_manifest`, and each
@@ -76,6 +77,52 @@ Use `record <label> <command...>` rather than calling `git_sfs` directly for
 anything whose success matters. It captures the exit status into the manifest
 **without aborting the scenario**, which is what lets the harness compare the
 tree left behind by a *failing* command — often the more interesting case.
+
+Use `require` instead for setup whose failure would hollow out the scenario.
+The distinction is load-bearing; see "Agreement is not correctness" below.
+
+## The remote half
+
+The remote has no tree to diff, but every remote operation is an rclone
+subprocess, so the **argv stream is the equivalent artifact**. A scenario calling
+`use_fake_rclone` gets `fake-rclone/rclone` ahead of the real one on `PATH`, and
+its invocations become a manifest section that diffs like everything else.
+
+`--files-from` points at a temp file whose name is random per run; the recorder
+logs the file's **contents** and discards its path, because which objects move is
+the payload and the path is noise. `copyto`'s temp destination is canonicalized
+the same way.
+
+The fake also injects failures a local directory can never produce:
+
+```sh
+inject_fault '{"subcommand": "lsjson", "contains": "/files/sha256/",
+               "exit": 1, "stderr": "403 Forbidden"}'
+```
+
+`contains` matters more than it looks. git-sfs runs a connectivity preflight
+before per-object queries, so a fault matching *every* `lsjson` is caught by the
+preflight and never reaches the per-object path — which is exactly where
+contract-spec §13.3's defect lives. Scenario 05 uses it to pin that baseline: a
+403 on object queries makes `status --remote` **exit 0** and report a
+successfully pushed object as `remote=missing`.
+
+## Agreement is not correctness
+
+The harness compares binaries against each other, so **a broken fixture fails
+identically on both sides and reads as green.** This is not hypothetical: the
+first version of the fake mis-parsed `--files-from`, every `copy` failed, and all
+scenarios passed.
+
+Two things guard against it, and neither is optional:
+
+- `require` for preconditions, which writes a sentinel the driver checks. It
+  writes a file rather than just calling `exit`, because `require` normally runs
+  inside a `( cd "$REPO"; ... )` subshell where `exit` ends only the subshell and
+  the scenario would carry on as though the precondition had held.
+- Reading the manifests when adding a scenario. A section reading `(not
+  recorded)` or an outcome of `2` where `0` was intended compares equal to itself
+  perfectly well.
 
 ## Determinism
 

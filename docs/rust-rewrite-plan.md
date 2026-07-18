@@ -263,10 +263,17 @@ git-sfs has two halves with different testing shapes: local filesystem work, and
 remote work that goes **exclusively** through rclone subprocesses.
 
 **The remote half has no filesystem to diff — but it has an equivalent.** Every
-remote operation is an rclone invocation; v1 uses exactly four subcommands
-(`lsjson`, `copyto`, `copy`, `version`). So the tool's complete observable remote
-behavior *is* its rclone argv stream. Capture it from v1, capture it from v2,
-diff it.
+remote operation is an rclone invocation; v1 uses exactly five subcommands —
+`lsd`, `lsjson`, `copyto`, `copy`, `version` (`command.go:124`, `141`, `170`,
+`195`, `248`, `272`, `459`, `507`, `525`). So the tool's complete observable
+remote behavior *is* its rclone argv stream. Capture it from v1, capture it from
+v2, diff it.
+
+Two argv details are not incidental. `copy` passes `--files-from <tempfile>`, so
+*which* objects move lives in a file whose path is random per run — the recorder
+must log the file's contents and discard its path, or the most important part of
+a push becomes invisible while noise makes the stream nondeterministic. `copyto`
+likewise targets a randomly named temp file, which is canonicalized away.
 
 | Half | Differential artifact |
 |---|---|
@@ -383,7 +390,7 @@ Nothing else starts until this lands.
 - [x] Decouple `test/workflows/` from `go build` via `GIT_SFS_BIN`
 - [x] Loosen `scenarios.sh:215` to a structural assertion
 - [x] Build the tree-diff harness; prove it green **Go against Go**
-- [ ] Build the fake-rclone recorder; capture v1's argv stream as the baseline
+- [x] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [ ] Build the cross-binary lock-contention harness
 - [ ] Build the SIGINT driver and mode fault-injection hook; prove against v1
 - [ ] Capture v1 performance baselines (§9b)
@@ -592,9 +599,9 @@ is additive and migration-safe. Recorded in contract-spec §4.
 
 ### On the remote: trash-shaped if ever, but not in v2
 
-**Today the remote is append-only.** git-sfs invokes exactly four rclone
-subcommands — `lsjson`, `copyto`, `copy`, `version` — and has no deletion path of
-any kind. That is a strong safety property and v2 should keep it.
+**Today the remote is append-only.** git-sfs invokes exactly five rclone
+subcommands — `lsd`, `lsjson`, `copyto`, `copy`, `version` — and has no deletion
+path of any kind. That is a strong safety property and v2 should keep it.
 
 If remote reclamation is ever added it must be trash-shaped, not delete-shaped.
 But the remote case is materially harder than the local one, in four ways that do

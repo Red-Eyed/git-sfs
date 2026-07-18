@@ -11,14 +11,14 @@ printf 'replicated payload\n' > "$REPO/data/blob.bin"
 
 (
   cd "$REPO"
-  record add git_sfs add data
+  require add git_sfs add data
 )
 commit_all "track dataset"
 
 (
   cd "$REPO"
-  record push git_sfs push
-  record status_remote git_sfs status --remote
+  require push git_sfs push
+  record status_remote git_sfs status --remote default
 )
 
 # Remove every cached object, leaving the symlinks dangling, so pull has to

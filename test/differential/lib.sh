@@ -15,6 +15,30 @@ git_sfs() {
   "$GIT_SFS" --quiet "$@" </dev/null
 }
 
+# Runs a command that MUST succeed for the rest of the scenario to mean
+# anything, recording its status and aborting if it fails.
+#
+# The distinction from `record` is load-bearing. A differential harness compares
+# binaries against each other, so a broken fixture makes both sides fail
+# identically and reads as green -- it verifies agreement, not correctness. Use
+# `require` for setup whose failure would hollow out the scenario, and `record`
+# only where the outcome is itself under test.
+require() {
+  local label="$1"
+  shift
+  local status=0
+  "$@" >/dev/null 2>&1 || status=$?
+  printf '%s=%s\n' "$label" "$status" >> "$OUTCOMES"
+  if [ "$status" -ne 0 ]; then
+    echo "scenario precondition failed: $label exited $status" >&2
+    # A sentinel file, not just `exit`: require is normally called inside a
+    # `( cd "$REPO"; ... )` subshell, where exit ends only the subshell and the
+    # scenario would carry on as though the precondition had held.
+    printf '%s exited %s\n' "$label" "$status" >> "$WORK/precondition-failed"
+    exit "$status"
+  fi
+}
+
 # Runs a command, recording its exit status instead of aborting the scenario.
 # Error paths are part of what the harness compares, so a failing command has to
 # leave the run alive -- otherwise the tree after a failure is never captured.
@@ -58,4 +82,20 @@ EOF
 commit_all() {
   git -C "$REPO" add -A
   git -C "$REPO" commit -qm "$1"
+}
+
+# Puts the recording fake rclone ahead of the real one on PATH. Scenarios that
+# call this get the rclone argv stream captured into the manifest, and can
+# inject failures a local directory would never produce.
+use_fake_rclone() {
+  export PATH="$HARNESS_DIR/fake-rclone:$PATH"
+  export RCLONE_ARGV_LOG="$WORK/rclone-argv.log"
+  : > "$RCLONE_ARGV_LOG"
+}
+
+# Appends one fault rule, e.g.
+#   inject_fault '{"subcommand": "lsjson", "exit": 1, "stderr": "403 Forbidden"}'
+inject_fault() {
+  export RCLONE_FAULTS="$WORK/rclone-faults.jsonl"
+  printf '%s\n' "$1" >> "$RCLONE_FAULTS"
 }
