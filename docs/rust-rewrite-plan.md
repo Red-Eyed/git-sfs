@@ -256,6 +256,53 @@ Snapshots of human output are useless here by construction. What replaces them:
 5. **`insta` snapshots of v2's own output** — regression tests, *not* parity
    checks, now that `status --json` is unfrozen (spec §10.1).
 
+### 5.2b Test architecture — the local/remote split
+
+git-sfs has two halves with different testing shapes: local filesystem work, and
+remote work that goes **exclusively** through rclone subprocesses.
+
+**The remote half has no filesystem to diff — but it has an equivalent.** Every
+remote operation is an rclone invocation; v1 uses exactly four subcommands
+(`lsjson`, `copyto`, `copy`, `version`). So the tool's complete observable remote
+behavior *is* its rclone argv stream. Capture it from v1, capture it from v2,
+diff it.
+
+| Half | Differential artifact |
+|---|---|
+| Local | Filesystem tree — symlink targets, cache paths, modes, content hashes |
+| Remote | rclone argv stream — commands, flags, path lists, ordering |
+
+That remote access is *only* via rclone is what makes this work: a narrow,
+capturable interface rather than a diffuse one. The argv diff also pins the
+frozen remote layout (contract-spec §5) exactly, which matters because that
+layout is shared across users and versions, not just across our two binaries.
+
+#### Five layers
+
+| Layer | Uses | What only it can test |
+|---|---|---|
+| Pure `plan` tests | No I/O | Planning, dedup, orphan classification, config ambiguity |
+| `Remote` trait fake | In-process | exec orchestration, retry, cancellation, event emission |
+| **Fake `rclone` on `PATH`** | Subprocess, canned output | **Argv construction, output parsing, error classification** |
+| Real rclone → local dir | Subprocess, real backend | Byte movement, real `lsjson` shapes. *Exists today* |
+| Real rclone → cloud | Network | Nothing routine. Optional smoke, credentials-gated |
+
+**Layer 3 is missing today and is the important addition.** The existing suite
+runs real rclone against a local directory (`scenarios.sh:266`), which is
+hermetic and fast but *cannot fail interestingly* — a local directory never
+returns a 403, a rate limit, expired credentials, or truncated `lsjson`. That is
+precisely where contract-spec §13.3's defects live: remote errors collapsing into
+"not found", and `isRemotePathNotFound` classifying by grepping English for
+`"directory not found"` while bailing on `"config"`.
+
+A fake rclone binary on `PATH` that records argv and emits scripted stdout and
+exit codes provides both halves of the need: **record** for the argv diff,
+**replay** for error injection. One tool, two uses.
+
+Layer 5 stays optional. Real cloud backends are slow, flaky, and credential-bound;
+nothing in the contract requires them beyond confirming that a real backend
+behaves like the local one, which is a smoke test rather than a suite.
+
 ### 5.3 The net is now filesystem state, essentially alone
 
 Worth stating plainly, because it narrowed three times in a row: human output was
@@ -265,11 +312,23 @@ state plus whether the command succeeded.**
 
 That is defensible — for a data tool, what ends up on disk *is* the product, and
 the freed surfaces are exactly the ones where v1 was demonstrably wrong (spec
-§9.2, §10.1). But it means the tree-diff harness is no longer the most important
-check; it is very close to the only one. Phase 0 should be resourced on that
-basis, and anything the tree diff cannot see — error classification, remote
-state reporting, cancellation behavior — needs its own deliberate tests rather
-than riding along on differential comparison.
+§9.2, §10.1). Adding the argv stream (§5.2b) restores a second strict artifact,
+so the differential net is tree diff plus argv diff, not tree diff alone.
+
+What neither one sees still needs deliberately written tests:
+
+- **Cancellation** — SIGINT mid-transfer; assert no partial file is published and
+  the exit is a clean cancellation, not a corrupt result.
+- **Mode preservation** (spec §4.1) — requires a real filesystem, layer 4.
+- **Cross-binary lock contention** (spec §8) — two real processes, v1 and v2,
+  each holding against the other.
+- **Filesystems that do not preserve modes** — hard to reproduce portably;
+  fault-injection at the mode-setting boundary is more practical than mounting
+  exFAT in CI.
+
+These are the tests most likely to be skipped, because each needs bespoke
+scaffolding rather than another row in a table-driven suite. They are also the
+ones covering the failure modes that lose data.
 
 The 3,098 lines of Go tests are a **specification to read, not code to
 translate.** They test seams that will not exist. Mine them during Phase 0 for
@@ -290,6 +349,7 @@ Nothing else starts until this lands.
 - [ ] Decouple `test/workflows/` from `go build` via `GIT_SFS_BIN`
 - [ ] Loosen `scenarios.sh:215` to a structural assertion
 - [ ] Build the tree-diff harness; prove it green **Go against Go**
+- [ ] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [ ] Build the cross-binary lock-contention harness
 - [ ] Encode each §13 divergence as a positive assertion (§5.1)
 
