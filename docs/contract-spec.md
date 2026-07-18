@@ -278,12 +278,50 @@ Adopting the `toml` crate is still the right call (a hand-rolled parser is worse
 in every other respect), but it is a deliberate, documented divergence rather
 than an accident. Required mitigations:
 
-1. Reject or warn on any config value containing `#`, `\`, or an interior quote,
-   where v1 and TOML semantics disagree.
+1. Reject on any config value containing `#`, `\`, or an interior quote, where v1
+   and TOML semantics disagree. See §6.5 — this is the load-bearing one.
 2. Keep the closed-schema validation of §6.2 — `serde`'s `deny_unknown_fields`
    plus explicit checks. Real TOML parsing must not silently widen what is
    accepted.
 3. Cover the divergent cases in the differential test suite explicitly.
+
+### 6.5 Version floor and legacy configs
+
+Two separate populations need two separate mechanisms. They are complementary,
+not alternatives.
+
+**New configs — raise the floor.** v2's `init` writes
+`min_git_sfs_version = "2.0.0"`, so a v1 binary refuses rather than misparsing.
+The guard is enforced at `app.go:56`, after `config.Load()` succeeds and before
+any command work, so it fires before a misparsed remote path can be used.
+
+Two constraints on this:
+
+- **v2 MUST keep writing the v1-parseable subset.** v1 scans line by line and
+  errors on the first bad line, *then* evaluates the version guard. Emitting
+  arrays, multi-line strings, or inline tables makes v1 fail with
+  `invalid config line` instead of a clean upgrade prompt. It fails closed, so it
+  is safe, but it misdiagnoses the problem. Full TOML is a **read** capability;
+  writing stays conservative.
+- **Accepted cost: partial-adoption partition.** One person running v2 `init` and
+  committing hard-blocks every v1 colleague on that repo. For a tool built around
+  sharing datasets, this bites hardest exactly during migration. This is a
+  deliberate trade of migration friction for parsing correctness (reverses the
+  earlier recommendation in §14 item 4).
+
+**Existing configs — detect and refuse.** The floor cannot protect repos written
+before v2 existed, and that is where the real hazard lives.
+
+Consider a committed `path = "run#1"`. v1 truncates it to `run` and always has,
+so the user's data physically resides at `run/`. If v2 parses it correctly as
+`run#1`, v2 addresses a location that has never existed — **v2 being right breaks
+a working setup**, silently, by looking in the wrong place.
+
+v2 MUST therefore reject any config value containing a character where v1 and
+TOML semantics disagree (`#`, `\`, interior quotes), naming the field and
+instructing the user to correct it explicitly. Silently resolving such a value
+differently than v1 did is the one outcome that must not occur, in either
+direction.
 
 ### 6.4 Defaulting
 
@@ -650,18 +688,19 @@ containment check. v2 must not port the bug along with the function.
 
 | # | Issue | Recommendation |
 |---|---|---|
-| 1 | `#`-in-value parsing (§6.3) | Adopt `toml`; reject values containing `#` with a clear error |
+| 1 | ~~`#`-in-value parsing~~ | **Resolved (§6.5):** adopt `toml` for reads; v2 `init` writes `min_git_sfs_version = "2.0.0"`; reject legacy values containing `#`, `\`, or interior quotes rather than resolving them differently than v1 |
 | 2 | Duplicate keys: v1 last-wins, TOML errors | Accept the stricter TOML behavior; document it |
 | 3 | v1 accepts unterminated/mismatched quotes via `Trim` | Accept stricter behavior |
-| 4 | `min_git_sfs_version` vs. a `2.x` binary | `2.0.0 > 1.x` passes the existing comparison; no change needed. But v2 MUST NOT write a `min_git_sfs_version` of `2.x` into new configs by default, or v1 binaries are locked out of repos they could otherwise read |
+| 4 | `min_git_sfs_version` vs. a `2.x` binary | **Reversed — v2 now writes `2.0.0` deliberately (§6.5)**, locking v1 out of v2-initialized repos so it cannot misparse them. Migration friction accepted in exchange for parsing correctness. v2 must still keep the *written* config within the v1-parseable subset so the guard reports "upgrade" rather than "invalid config line" |
 | 5 | `status --json` cannot express "remote unknown" (§10.1) | Add a nullable `remote_error` field — additive, existing consumers unaffected. **Blocks Phase 4** |
 | 6 | `verify` correctness fixes change exit `0` → `3` (§9.2) | Accept as bug fix; enumerate each case so the harness expects it |
 | 7 | ~~Orphan reaping advertised but unimplemented~~ | **Resolved:** v2 ships `trash` (move, recoverable), never `gc` (unlink). Design in rust-rewrite-plan §7; layout in §4 |
 | 8 | `countOrphans` derives "unreferenced" from a single repo while the cache serves many (`verify.go:315-331`) | **Open.** v2 requires explicit `--repo` scoping for unreferenced-object reclamation and defaults `trash` to the remote-replicated class instead. Whether to additionally record repo backlinks in the cache is undecided — see below |
 
-Item 4 is subtle and worth restating: writing a v2-minimum into a freshly
-initialized config would make the repo unreadable to v1 for no benefit. Leave
-the field commented out, as v1 does.
+Item 4 was previously the opposite recommendation — leave the field commented out
+so v1 retains access. That reasoning held only while v2 parsed configs the same
+way v1 does. Once v2 adopts real TOML, a shared config is a config two binaries
+may read *differently*, and locking v1 out becomes the safer option. See §6.5.
 
 ### On item 8 — repo backlinks
 
