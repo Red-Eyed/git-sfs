@@ -248,11 +248,28 @@ Snapshots of human output are useless here by construction. What replaces them:
    binaries through identical scenario sequences, then diff resulting trees:
    symlink targets, cache paths, file modes, content hashes. Fully frozen, so
    these assertions stay strict.
-2. **Exit-code assertions** per scenario, including error paths.
-3. **`insta` snapshots** for `--json` output only.
-4. **Cross-binary interop** — lock contention and cache sharing between v1 and
+2. **Success/failure assertions** per scenario — `0` vs non-zero only, since the
+   taxonomy is unfrozen (spec §9).
+3. **Cross-binary interop** — lock contention and cache sharing between v1 and
    v2 (spec §8). No single-binary test can catch this class.
-5. **Existing shell suite** — already contract-level. One assertion loosened.
+4. **Existing shell suite** — already contract-level. One assertion loosened.
+5. **`insta` snapshots of v2's own output** — regression tests, *not* parity
+   checks, now that `status --json` is unfrozen (spec §10.1).
+
+### 5.3 The net is now filesystem state, essentially alone
+
+Worth stating plainly, because it narrowed three times in a row: human output was
+freed by contract-only parity, then the exit-code taxonomy, then the
+`status --json` schema. What remains cross-checkable against v1 is **filesystem
+state plus whether the command succeeded.**
+
+That is defensible — for a data tool, what ends up on disk *is* the product, and
+the freed surfaces are exactly the ones where v1 was demonstrably wrong (spec
+§9.2, §10.1). But it means the tree-diff harness is no longer the most important
+check; it is very close to the only one. Phase 0 should be resourced on that
+basis, and anything the tree diff cannot see — error classification, remote
+state reporting, cancellation behavior — needs its own deliberate tests rather
+than riding along on differential comparison.
 
 The 3,098 lines of Go tests are a **specification to read, not code to
 translate.** They test seams that will not exist. Mine them during Phase 0 for

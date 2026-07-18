@@ -52,8 +52,8 @@ defects that must not be reproduced.
 | Remote layout | Shared between *users* and versions pushing to the same bucket |
 | Lock protocol | Inter-process mutex; v1 and v2 binaries will coexist during migration |
 | `config.toml` | Committed to Git; must be readable by both versions |
-| Exit codes | Scripted against, documented, used by CI |
-| `--json` shapes | Machine-readable by definition |
+| Exit codes | **Only `0` vs non-zero** — CI depends on it. Taxonomy is free (§9) |
+| `--json` shapes | `remotes --json` only. `status --json` is unfrozen (§10.1) |
 | Release artifacts | Installed v1 binaries self-update by fetching these exact names |
 
 ---
@@ -478,7 +478,24 @@ not pretend otherwise.
 
 ## 9. Exit codes
 
-Frozen (`main.go:15-42`):
+**Mostly unfrozen.** git-sfs has only ever been consumed as a user-facing CLI and
+in CI — no library bindings, no third-party integrations branching on specific
+codes — so the *taxonomy* below is v2's to redesign.
+
+Two things remain frozen, and neither is really git-sfs's contract:
+
+- **`0` versus non-zero.** This is the Unix contract and CI depends on it
+  absolutely. `verify` returning non-zero on failure is the entire purpose of the
+  CI gate (§9.1).
+- **`130` for SIGINT.** The `128 + signal` convention belongs to the shell, not to
+  this tool. Keep it because breaking it surprises every user, not because a
+  git-sfs consumer requires it.
+
+Everything else — whether config errors are `1`, whether integrity gets its own
+code, how many codes exist at all — is free. v2 should design the taxonomy it
+wants rather than inheriting this one.
+
+The v1 mapping, for reference (`main.go:15-42`):
 
 | Code | Meaning | Triggers |
 |---|---|---|
@@ -506,26 +523,26 @@ The sentinel error set (`errs/errors.go`) maps to codes as above.
 `ErrMissingCachedFile` and `ErrMissingRemoteFile` are **not** in the exit-3 set
 and fall through to exit 2 — missing is not corrupt.
 
-### 9.2 The mapping is frozen; the trigger set is not
+### 9.2 Where v1 exits `0` and should not
 
-**The code→meaning mapping above is contract. The exact set of conditions that
-produces each code is not.**
+Since the taxonomy is unfrozen, these are simply bugs to fix rather than
+divergences to negotiate — but they are listed because they change the one thing
+still frozen: whether the command succeeds.
 
-This distinction matters because v1 currently exits `0` in situations it should
-not. `verify --check-remote` without `--integrity` records "found" from a listing
+`verify --check-remote` without `--integrity` records "found" from a listing
 without comparing the size it just fetched against anything, so a **zero-byte or
-truncated remote object passes `verify`** (`verify.go:268-280`). That is a false
-green in the CI-facing command — the place a false green is most expensive.
+truncated remote object passes `verify`** (`verify.go:268-280`). A false green in
+the CI-facing command, which is where a false green costs the most.
 
-v2 correcting this will produce exit `3` where v1 produced `0`. That is a **bug
-fix, not a contract break.** The differential harness must therefore compare
-exit codes against the *specified* meaning, not against v1's observed output, and
-every intentional divergence of this kind belongs in §13.
+v2 will exit non-zero there. The differential harness must therefore compare
+against the *specified* behavior rather than v1's observed output, and assert the
+new result positively.
 
-The same reasoning applies to `verify` flagging every regular file in a scanned
-tree as "unconverted" (`verify.go:134-141`) — pointing it at a subtree containing
-a README fails the run. A check that cries wolf gets suppressed in CI, and then
-it protects nothing. v2 may narrow this.
+Separately, `verify` flags every regular file in a scanned tree as "unconverted"
+(`verify.go:134-141`), so pointing it at a subtree containing a README fails the
+run. A check that cries wolf gets `|| true`'d in CI, and then it protects
+nothing. v2 should narrow this — a false red is a slower way to reach the same
+place as a false green.
 
 ---
 
@@ -568,31 +585,30 @@ when no remote check ran, present otherwise. Implementations MUST distinguish
 `files` is always present, and is an empty array rather than null when nothing
 is tracked.
 
-#### Unresolved tension: the schema cannot express "unknown"
+#### Resolved: the schema is unfrozen
 
-`remote` is `Option<bool>` — absent means *not checked*, present means
-*checked, and this is the answer*. There is **no representation for "checked, but
+`status --json` has no external consumers beyond this project's own use, so v2
+redesigns it rather than working within v1's shape.
+
+This matters because v1's schema cannot express a state the tool genuinely
+reaches. `remote` is `Option<bool>` — absent means *not checked*, present means
+*checked, and here is the answer*. There is no representation for **"checked, but
 could not determine."**
 
-This collides with a real v1 defect. `HasFile`, `CheckFile`, and `FileSize`
+That is not hypothetical. `HasFile`, `CheckFile`, and `FileSize`
 (`command.go:169-178`, `195-200`, `506-515`) return *absent* on **any** rclone
-error — expired credentials, a 403, DNS failure, a rate limit all render as
+error: expired credentials, a 403, DNS failure, and a rate limit all render as
 "missing remote file." A user seeing that will re-push, or conclude the remote
-lost their data. Under `CLAUDE.md`'s own rule, absence must carry its reason, and
-"I could not determine" must be a distinct outcome from "it is absent."
+lost their data. The schema forced the lie, and then the lie became
+machine-readable.
 
-v2 will model this correctly internally (`Present | Absent{reason} |
-Unknown{cause}`), but the frozen JSON shape has nowhere to put the third state.
-Options, in preference order:
+v2 models the three states explicitly — `present`, `absent` with a reason, and
+`unknown` with a cause — and the JSON carries all three. This is `CLAUDE.md`'s
+absence rule applied end to end: the reason travels to where the gap surfaces
+instead of collapsing into a bare boolean at the output boundary.
 
-1. **Add a nullable `remote_error` / `remote_unknown` field.** Additive, so
-   existing consumers reading `remote` are unaffected. Recommended.
-2. Emit `remote: false` and report the cause on stderr. Preserves the schema
-   exactly but perpetuates the lie in machine-readable output.
-3. Fail the command outright on an undeterminable remote. Safest, most
-   disruptive to existing scripts.
-
-**Decision required before Phase 4.** Recorded in §13.
+The v1 shape above remains documented as reference for reading old output. It is
+not a constraint on v2.
 
 ### 10.2 `remotes --json`
 
@@ -649,6 +665,8 @@ Under contract-only parity these are free to change:
 
 - All human-readable stdout/stderr wording, including error text after the
   `git-sfs: ` prefix.
+- **The exit-code taxonomy** — every code except `0`/non-zero and `130` (§9).
+- **The `status --json` schema** (§10.1).
 - Progress rendering, spinners, bar format, TTY behavior.
 - `--verbose` / debug output entirely.
 - Log ordering and interleaving under parallelism.
@@ -756,8 +774,8 @@ containment check. v2 must not port the bug along with the function.
 | 2 | Duplicate keys: v1 last-wins, TOML errors | Accept the stricter TOML behavior; document it |
 | 3 | v1 accepts unterminated/mismatched quotes via `Trim` | Accept stricter behavior |
 | 4 | `min_git_sfs_version` vs. a `2.x` binary | `2.0.0 > 1.x` passes the existing comparison; no change needed. v2 MUST NOT write a `2.x` floor into new configs — §6.5's comparison makes it unnecessary, and setting it would lock v1 out of repos it can read correctly. Leave the field commented out, as v1 does |
-| 5 | `status --json` cannot express "remote unknown" (§10.1) | Add a nullable `remote_error` field — additive, existing consumers unaffected. **Blocks Phase 4** |
-| 6 | `verify` correctness fixes change exit `0` → `3` (§9.2) | Accept as bug fix; enumerate each case so the harness expects it |
+| 5 | ~~`status --json` cannot express "remote unknown"~~ | **Resolved:** schema unfrozen (§10.1). v2 carries `present` / `absent{reason}` / `unknown{cause}` directly |
+| 6 | ~~`verify` fixes change exit codes~~ | **Resolved:** taxonomy unfrozen (§9). Only `0` vs non-zero is contract, and v2 correctly returns non-zero |
 | 7 | ~~Orphan reaping advertised but unimplemented~~ | **Resolved:** v2 ships `trash` (move, recoverable), never `gc` (unlink). Design in rust-rewrite-plan §7; layout in §4 |
 | 8 | `countOrphans` derives "unreferenced" from a single repo while the cache serves many (`verify.go:315-331`) | **Open.** v2 requires explicit `--repo` scoping for unreferenced-object reclamation and defaults `trash` to the remote-replicated class instead. Whether to additionally record repo backlinks in the cache is undecided — see below |
 
