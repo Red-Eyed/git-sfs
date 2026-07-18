@@ -209,11 +209,15 @@ scenario_filesystem_workflows() {
   (
     cd "$repo_b"
     git_sfs verify data/train-000.tar.zst >/dev/null
-    if integrity_out="$(git_sfs verify --with-integrity data/train-000.tar.zst 2>&1)"; then
+    if git_sfs verify --with-integrity data/train-000.tar.zst >/dev/null 2>&1; then
       fail "verify --with-integrity should fail for corrupt cache and remote files"
     fi
-    assert_contains "$integrity_out" "corrupt cache files: 1" "integrity verify cache corruption"
   )
+  # Human output is free under contract-only parity, so the detection is pinned
+  # by the non-zero exit above and the consequence by filesystem state here:
+  # verify reports corruption, it never repairs or removes the object it found.
+  assert_eq "$(cat "$(cache_file_for "$shared_cache" "$hash_train")")" \
+    "corrupt cache bytes" "verify leaves the corrupt cache file untouched"
 
 }
 

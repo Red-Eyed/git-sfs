@@ -378,10 +378,10 @@ Nothing else starts until this lands.
 
 - [x] Write [contract-spec.md](contract-spec.md), grounded in the Go source
 - [x] Fold [failure-modes.md](failure-modes.md) into spec §13 (do-not-reproduce)
-- [ ] Resolve spec §14 open divergences — **items 5 and 7 block Phase 4**
+- [x] Resolve spec §14 open divergences — all eight now Resolved or Dissolved
 - [ ] Mine the Go test suite for edge cases; fold into the spec
-- [ ] Decouple `test/workflows/` from `go build` via `GIT_SFS_BIN`
-- [ ] Loosen `scenarios.sh:215` to a structural assertion
+- [x] Decouple `test/workflows/` from `go build` via `GIT_SFS_BIN`
+- [x] Loosen `scenarios.sh:215` to a structural assertion
 - [ ] Build the tree-diff harness; prove it green **Go against Go**
 - [ ] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [ ] Build the cross-binary lock-contention harness

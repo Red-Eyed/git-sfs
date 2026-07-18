@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="${TMPDIR:-/tmp}/git-sfs-workflows-$$"
 HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 HOST_ARCH="$(uname -m)"
-VERSION="v0.0.0-workflows"
+BUILD_VERSION="v0.0.0-workflows"
 INSTALL_DIR="$WORK/install/bin"
 TEST_BIN_DIR="$WORK/test-bin"
 FIXTURE_ROOT="$WORK/fixtures"
@@ -41,7 +41,14 @@ mkdir -p "$INSTALL_DIR" "$TEST_BIN_DIR" "$FIXTURE_ROOT" "$REMOTE_ROOT"
 export GOCACHE="${GOCACHE:-$WORK/gocache}"
 export GOMODCACHE="${GOMODCACHE:-$WORK/gomodcache}"
 export GIT_TERMINAL_PROMPT=0
-export PATH="$TEST_BIN_DIR:$INSTALL_DIR:$(dirname "$(command -v go)"):$PATH"
+
+# Go is only needed to build the binary from this tree. Running against a
+# prebuilt GIT_SFS_BIN must not require a toolchain to be installed at all.
+GO_BIN_DIR=""
+if _go_path="$(command -v go 2>/dev/null)"; then
+  GO_BIN_DIR="$(dirname "$_go_path")"
+fi
+export PATH="$TEST_BIN_DIR:$INSTALL_DIR${GO_BIN_DIR:+:$GO_BIN_DIR}:$PATH"
 
 . "$ROOT/test/workflows/lib/test_lib.sh"
 . "$ROOT/test/workflows/lib/install.sh"
@@ -58,7 +65,10 @@ require_rclone() {
 main() {
   assert_repo_root_clean
   require_rclone
-  build_release_fixture
+  SOURCE_BIN="$(resolve_source_binary)"
+  VERSION="$(binary_version "$SOURCE_BIN")"
+  note "testing git-sfs $VERSION ($SOURCE_BIN)"
+  build_release_fixture "$SOURCE_BIN"
   install_from_fixture
   scenario_filesystem_workflows
   scenario_import_workflows
