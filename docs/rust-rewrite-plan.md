@@ -359,6 +359,8 @@ Nothing else starts until this lands.
 - [ ] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [ ] Build the cross-binary lock-contention harness
 - [ ] Build the SIGINT driver and mode fault-injection hook; prove against v1
+- [ ] Capture v1 performance baselines (§9b)
+- [ ] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c)
 - [ ] Encode each §13 divergence as a positive assertion (§5.1)
 
 Proving the harness against the Go binary first is what makes it trustworthy
@@ -402,7 +404,21 @@ reverse.
 
 ### Phase 7 — cutover
 
-Full differential run, v2.0.0, Go preserved on `go-legacy`.
+**Acceptance gate — literal, not vibes.** contract-spec §15 states that clauses
+without assertions are aspirational. The gate is therefore: **every contract-spec
+clause maps to a passing assertion.** Enumerable, checkable, and it fails loudly
+when a clause has no test rather than when a test breaks.
+
+Plus: no performance regression past the Phase 0 baselines (§9b), and the
+downgrade test green (§7c).
+
+**Staged, not big-bang.** v2.0.0 is published but is *not* the default install.
+`install.sh` continues serving the latest v1 until a flag day; v2 is opt-in via
+`GIT_SFS_VERSION`. For a tool holding irreplaceable data, an aggressive default
+buys nothing — the people who want v2 will ask for it, and the people who don't
+should not receive it because a version number incremented.
+
+Go preserved on `go-legacy`, and v1 binaries stay published permanently (§7c).
 
 ---
 
@@ -591,6 +607,33 @@ corrupt, recovery handled by the storage layer.
 
 ---
 
+## 7c. Downgrade is an invariant, not a procedure
+
+Users self-update *forward*. Nothing in v1 goes back. If v2 ships a defect that
+touches data, the exit path must already exist — writing one afterwards is too
+late, because the affected users are the ones who cannot afford to experiment.
+
+**Requirement: v1 must remain able to operate any repo or cache v2 has touched.**
+
+This is nearly free given decisions already made — no version floor (spec §6.5),
+identical cache layout, identical remote layout, identical lock protocol. v2 was
+already forbidden from writing anything v1 cannot read. Stating it as an
+invariant makes it *testable* rather than incidental:
+
+- **Downgrade test, in Phase 0 scaffolding and Phase 7 gating:** run a full
+  workflow under v2, install v1 over it, run the same workflow again. Cache,
+  symlinks, config, and remote must all still work.
+- v1 binaries and their `SHA256SUMS` remain published permanently. A downgrade
+  that requires building from source is not a downgrade path.
+- Anything v2 adds that v1 ignores (`trash/`, spec §4) must stay ignorable —
+  additive only, never a change to something v1 reads.
+
+The invariant also constrains future work: any later v2.x feature that breaks it
+is a breaking change requiring its own deliberate decision, not an incidental
+consequence.
+
+---
+
 ## 7b. Environmental checks — prevent at the choice, diagnose on request
 
 failure-modes §1b–§1d and §6 enumerate assumptions nothing currently verifies.
@@ -641,6 +684,59 @@ discovering it.
 **Phase 0 compression.** Under schedule pressure the harness will look skippable.
 It is the only thing standing between an aggressive rewrite and silent data
 corruption in a tool whose users cannot tolerate it.
+
+**Bit rot has no policy — genuinely open.** failure-modes §2 notes that
+`--rehash` is opt-in, manual, and unscheduled, that nothing re-verifies a
+protected file on read, and that at TB scale sampling is the only realistic mode.
+For archival datasets sitting untouched for years this is the slow failure.
+
+There is no obviously correct default: automatic rehashing costs hours of I/O on
+data the user is not touching, and declaring it the user's responsibility is how
+bit rot wins. Candidate directions — a sampled rehash on some existing command, a
+non-zero `--rehash-sample` default in `verify`, a documented cron recipe, or an
+explicit statement that the storage layer owns it — but this needs a decision,
+not a recommendation. **Unresolved; does not block Phase 0.**
+
+**Platform scope.** Unix-only (linux, darwin) is an explicit non-goal for
+Windows, matching v1. Windows *path* handling survives only where it affects
+rclone remote strings such as `hwr1:F:/Storage` (`command.go:63`), not as host
+support.
+
+---
+
+## 9b. Performance and scale — currently unmeasured
+
+The plan claims a throughput win from SHA-NI (§4.1) and measures nothing. That is
+a gap, not a detail: rewrites regress in unglamorous ways, and the classic for
+this shape of tool is `rayon` defaulting to CPU-count threads on work that is
+I/O-bound, turning parallelism into contention. At TB scale a 2× slowdown is a
+serious user-facing regression.
+
+**Baselines belong in Phase 0**, captured from v1 while it is still the thing
+being run:
+
+| Operation | Why it matters |
+|---|---|
+| Hash throughput, large single file | The hot path; SHA-NI claim lives or dies here |
+| `add` / `import` of N files | Per-file overhead, lock and syscall costs |
+| `push` / `pull` of N objects | rclone orchestration and concurrency |
+| `verify` over a large tree | Walk plus stat cost |
+| `verify --rehash` | Full re-read; the worst case |
+
+Phase 7 gates on no regression past a stated threshold. Today the entire
+benchmark surface is `BenchmarkStore8MiB`.
+
+### Tests run at the wrong scale
+
+Every workflow scenario uses files like `printf "one\n"` — twelve bytes — for a
+tool whose domain is terabytes. Nothing exercises what only breaks at scale:
+memory during walks, listing sizes, progress rendering with large counts,
+file-descriptor limits, per-prefix bucket sizes.
+
+Add a **scale tier**: generated or sparse files, thousands of objects, run
+nightly rather than per-commit. It does not need to be slow to be useful —
+sparse files give object *count* without byte volume, which catches most of the
+per-object costs.
 
 ---
 

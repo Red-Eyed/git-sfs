@@ -740,6 +740,13 @@ regression.
 - `retryLoop` (`command.go:377-405`) retries permanent failures — bad
   credentials, missing path, permission denied — turning a clear immediate error
   into a slow one. v2 should retry only transient classes.
+- **`FileSizes` is O(entire remote)** (`command.go:521-545`). It runs
+  `lsjson --recursive` across the whole remote and unmarshals the complete
+  listing into a slice, then filters for the hashes it wanted. A million-object
+  remote materializes roughly 150 MB of JSON twice to answer a question that may
+  concern a single hash — and it is reached from `status --remote` and
+  `verify --check-remote`, both casual commands. v2 should query the specific
+  paths it needs, or stream-parse rather than materialize.
 
 ### 13.4b Defaults that place data in harm's way
 
