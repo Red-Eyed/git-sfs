@@ -253,6 +253,7 @@ Snapshots of human output are useless here by construction. What replaces them:
 3. **Cross-binary interop** — lock contention and cache sharing between v1 and
    v2 (spec §8). No single-binary test can catch this class.
 4. **Existing shell suite** — already contract-level. One assertion loosened.
+   **Kept in bash, unchanged, for the duration of the port** (§5.2c).
 5. **`insta` snapshots of v2's own output** — regression tests, *not* parity
    checks, now that `status --json` is unfrozen (spec §10.1).
 
@@ -302,6 +303,32 @@ exit codes provides both halves of the need: **record** for the argv diff,
 Layer 5 stays optional. Real cloud backends are slow, flaky, and credential-bound;
 nothing in the contract requires them beyond confirming that a real backend
 behaves like the local one, which is a smoke test rather than a suite.
+
+### 5.2c The bash suite stays bash
+
+**Do not rewrite the test suite and the code it tests at the same time.** If both
+change together a failure is ambiguous — implementation wrong, or new test wrong?
+Holding `test/workflows/` fixed makes it a known-good constant, so every red
+during the port points at the Rust code and nowhere else.
+
+The only Phase 0 changes are therefore mechanical:
+
+- `GIT_SFS_BIN` indirection replacing the `go build` fixture — changes *which
+  binary runs*, never *what is asserted*.
+- The single human-output assertion at `scenarios.sh:215` loosened to a
+  structural check.
+
+Both are made **and proven green against v1** before any Rust exists. After that
+the file does not move for the duration of the port.
+
+**It should stay bash permanently, not just until v2.** The suite exercises the
+*installed artifact through the real install path* — building a release tarball,
+running `install.sh` against a `file://` endpoint, resolving from `PATH`,
+checking `--version` (`test/workflows/lib/install.sh`). `assert_cmd` integration
+tests drive a binary from the build directory and never touch any of that. The
+two do different jobs, and the bash one covers the path every real user takes.
+
+Rust integration tests are additive here, not a replacement.
 
 ### 5.3 The net is now filesystem state, essentially alone
 
@@ -412,13 +439,37 @@ when a clause has no test rather than when a test breaks.
 Plus: no performance regression past the Phase 0 baselines (§9b), and the
 downgrade test green (§7c).
 
-**Staged, not big-bang.** v2.0.0 is published but is *not* the default install.
-`install.sh` continues serving the latest v1 until a flag day; v2 is opt-in via
-`GIT_SFS_VERSION`. For a tool holding irreplaceable data, an aggressive default
-buys nothing — the people who want v2 will ask for it, and the people who don't
-should not receive it because a version number incremented.
+**Clean cutover — the gate is the bar, not elapsed time.** When the acceptance
+gate passes, v2 becomes the default install. There is no soak period and no
+opt-in window.
 
-Go preserved on `go-legacy`, and v1 binaries stay published permanently (§7c).
+This follows from the decision not to maintain v1 (contract-spec §13.4b). A
+staged rollout combined with an unmaintained v1 is the worst of both: the default
+install would point at a version nobody is fixing, which is how the
+`git clean -x` exposure would have persisted longest in exactly the population
+least likely to opt out of it. Either stage the rollout *and* maintain v1 during
+it, or cut over cleanly and retire v1. Half of each protects no one.
+
+The corollary matters: **rollout caution must not substitute for verification.**
+If the gate is not trusted enough to ship on, strengthen the gate rather than
+hedging with a soak period. A soak that catches a data-corruption bug has already
+corrupted someone's data.
+
+Safety comes from two places instead:
+
+- The gate itself — every contract clause asserted, no performance regression,
+  downgrade test green.
+- The §7c downgrade invariant, with v1 binaries published permanently. An escape
+  hatch, tested rather than hoped for, which suits a single-maintainer project
+  better than running two versions in parallel.
+
+**Honest limit of the escape hatch:** downgrade recovers from a bad *binary*, not
+from *corrupted data*. Reinstalling v1 does not undo damage v2 did to a cache.
+That is why the gate is the real protection, and why the Phase 0 items most
+likely to be compressed — cancellation, mode preservation, lock contention — are
+the ones guarding that exact class.
+
+Go preserved on `go-legacy`.
 
 ---
 
