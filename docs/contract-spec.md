@@ -278,50 +278,63 @@ Adopting the `toml` crate is still the right call (a hand-rolled parser is worse
 in every other respect), but it is a deliberate, documented divergence rather
 than an accident. Required mitigations:
 
-1. Reject on any config value containing `#`, `\`, or an interior quote, where v1
-   and TOML semantics disagree. See §6.5 — this is the load-bearing one.
+1. Require a `min_git_sfs_version >= 2.0.0` floor on every config v2 reads, and
+   resolve older configs through an explicit `migrate` that parses with v1
+   semantics. See §6.5 — this is the load-bearing one.
 2. Keep the closed-schema validation of §6.2 — `serde`'s `deny_unknown_fields`
    plus explicit checks. Real TOML parsing must not silently widen what is
    accepted.
-3. Cover the divergent cases in the differential test suite explicitly.
+3. Cover the divergent cases in the differential test suite explicitly, asserting
+   that `migrate` reproduces v1's reading rather than TOML's.
 
 ### 6.5 Version floor and legacy configs
 
 Two separate populations need two separate mechanisms. They are complementary,
 not alternatives.
 
-**New configs — raise the floor.** v2's `init` writes
-`min_git_sfs_version = "2.0.0"`, so a v1 binary refuses rather than misparsing.
-The guard is enforced at `app.go:56`, after `config.Load()` succeeds and before
-any command work, so it fires before a misparsed remote path can be used.
+**The floor is the whole mechanism.** v2 requires
+`min_git_sfs_version >= 2.0.0` in every config it operates on:
 
-Two constraints on this:
+- A **v1 binary** meeting that floor refuses to run, so it can never misparse a
+  v2-era config. Enforced at `app.go:56`, after load and before command work, so
+  it fires before a misparsed remote path can be used.
+- A **v2 binary** meeting a config *without* the floor refuses too, and directs
+  the user to `git-sfs migrate`.
 
-- **v2 MUST keep writing the v1-parseable subset.** v1 scans line by line and
-  errors on the first bad line, *then* evaluates the version guard. Emitting
-  arrays, multi-line strings, or inline tables makes v1 fail with
-  `invalid config line` instead of a clean upgrade prompt. It fails closed, so it
-  is safe, but it misdiagnoses the problem. Full TOML is a **read** capability;
-  writing stays conservative.
-- **Accepted cost: partial-adoption partition.** One person running v2 `init` and
-  committing hard-blocks every v1 colleague on that repo. For a tool built around
-  sharing datasets, this bites hardest exactly during migration. This is a
-  deliberate trade of migration friction for parsing correctness (reverses the
-  earlier recommendation in §14 item 4).
+The second half is what closes the gap. `min_git_sfs_version` gates the binary
+reading a config; it cannot retroactively gate configs written before the field
+was set. Requiring it — rather than tolerating its absence — means **"legacy
+config" ceases to exist from v2's perspective.** Every config v2 operates on has
+been explicitly migrated.
 
-**Existing configs — detect and refuse.** The floor cannot protect repos written
-before v2 existed, and that is where the real hazard lives.
+**Migration reads with v1 semantics.** `migrate` parses using the v1 line scanner
+— truncation at `#`, `Trim`-based unquoting and all — because that is what the
+file actually meant to the tool that wrote it. It then writes canonical TOML with
+the floor set. v2 therefore retains the v1 parser, but confined to `migrate` and
+never in the normal read path.
+
+This resolves the §6.3 divergence once, visibly, at a moment the user chose. It
+covers every divergence rather than an enumerated subset, and it avoids a
+permanent validation rule that could only ever list the cases someone
+anticipated.
 
 Consider a committed `path = "run#1"`. v1 truncates it to `run` and always has,
-so the user's data physically resides at `run/`. If v2 parses it correctly as
-`run#1`, v2 addresses a location that has never existed — **v2 being right breaks
-a working setup**, silently, by looking in the wrong place.
+so the user's data physically resides at `run/`. Parsing it "correctly" as
+`run#1` would address a location that never existed — **v2 being right would
+break a working setup.** Migration reproduces v1's reading, writes the
+unambiguous equivalent, and the file means one thing thereafter.
 
-v2 MUST therefore reject any config value containing a character where v1 and
-TOML semantics disagree (`#`, `\`, interior quotes), naming the field and
-instructing the user to correct it explicitly. Silently resolving such a value
-differently than v1 did is the one outcome that must not occur, in either
-direction.
+**Two notes on the mechanism:**
+
+- v2's *written* configs stay within the v1-parseable subset. The schema is all
+  simple `key = "value"` scalars with no arrays or multi-line fields, so this
+  costs nothing — but emitting exotic TOML would make v1 report
+  `invalid config line` instead of a clean upgrade prompt, since it errors on the
+  first bad line before reaching the version guard.
+- **Accepted cost: partial-adoption partition.** One person running v2 `init` and
+  committing hard-blocks every v1 colleague on that repo. Deliberate — migration
+  friction traded for the guarantee that no config is ever read two ways
+  (reverses §14 item 4).
 
 ### 6.4 Defaulting
 
@@ -688,7 +701,7 @@ containment check. v2 must not port the bug along with the function.
 
 | # | Issue | Recommendation |
 |---|---|---|
-| 1 | ~~`#`-in-value parsing~~ | **Resolved (§6.5):** adopt `toml` for reads; v2 `init` writes `min_git_sfs_version = "2.0.0"`; reject legacy values containing `#`, `\`, or interior quotes rather than resolving them differently than v1 |
+| 1 | ~~`#`-in-value parsing~~ | **Resolved (§6.5):** v2 requires a `>= 2.0.0` floor on every config it reads; older configs go through `git-sfs migrate`, which parses with v1 semantics and rewrites canonical TOML. Adds one command to the surface |
 | 2 | Duplicate keys: v1 last-wins, TOML errors | Accept the stricter TOML behavior; document it |
 | 3 | v1 accepts unterminated/mismatched quotes via `Trim` | Accept stricter behavior |
 | 4 | `min_git_sfs_version` vs. a `2.x` binary | **Reversed — v2 now writes `2.0.0` deliberately (§6.5)**, locking v1 out of v2-initialized repos so it cannot misparse them. Migration friction accepted in exchange for parsing correctness. v2 must still keep the *written* config within the v1-parseable subset so the guard reports "upgrade" rather than "invalid config line" |
