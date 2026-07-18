@@ -753,6 +753,13 @@ regression.
 From failure-modes §1b–§1d. These are **defaults**, not mechanism, so v2 may
 change them freely.
 
+**Decision: fixed in v2 only; not backported to v1.** Accepted risk, recorded
+because two decisions interact. v2 ships staged (plan §Phase 7) — `install.sh`
+keeps serving v1 until a flag day, with v2 opt-in — so users who do not opt in
+retain the `git clean -x` exposure, which is silent and unrecoverable for
+unpushed objects. The population still at risk is precisely the one that will not
+self-select into the fix. Revisit if the flag day slips.
+
 - **Default cache inside the repo.** `.git-sfs/.cache` (`init.go:43`) is
   gitignored (`init.go:141`), and `git clean -x` removes ignored files — so the
   routine "clean tree" command **deletes every cached object**, losing anything
