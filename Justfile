@@ -24,7 +24,13 @@ build:
 workflows:
     env PATH="$(dirname {{go}}):$PATH" GOCACHE={{gocache}} GOMODCACHE={{gomodcache}} bash test/workflows/run.sh
 
-check: fmt test build workflows
+# Self-check: the same binary compared against itself must always agree, which
+# guards the harness against nondeterminism. Pass two --binary flags to run.py
+# directly to compare different implementations.
+differential: build
+    python3 test/differential/run.py --binary a=./git-sfs --binary b=./git-sfs
+
+check: fmt test build workflows differential
     git --no-pager diff --check
 
 release-snapshot:

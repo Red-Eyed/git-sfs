@@ -382,7 +382,7 @@ Nothing else starts until this lands.
 - [ ] Mine the Go test suite for edge cases; fold into the spec
 - [x] Decouple `test/workflows/` from `go build` via `GIT_SFS_BIN`
 - [x] Loosen `scenarios.sh:215` to a structural assertion
-- [ ] Build the tree-diff harness; prove it green **Go against Go**
+- [x] Build the tree-diff harness; prove it green **Go against Go**
 - [ ] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [ ] Build the cross-binary lock-contention harness
 - [ ] Build the SIGINT driver and mode fault-injection hook; prove against v1

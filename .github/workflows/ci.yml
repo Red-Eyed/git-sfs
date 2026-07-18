@@ -50,3 +50,6 @@ jobs:
 
       - name: Workflow suite
         run: bash test/workflows/run.sh
+
+      - name: Differential harness self-check
+        run: python3 test/differential/run.py --binary a=./git-sfs --binary b=./git-sfs
