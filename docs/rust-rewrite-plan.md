@@ -330,6 +330,13 @@ These are the tests most likely to be skipped, because each needs bespoke
 scaffolding rather than another row in a table-driven suite. They are also the
 ones covering the failure modes that lose data.
 
+**Scaffolding lands in Phase 0; assertions land with the code they cover.** The
+SIGINT driver and the mode-setting fault-injection hook are infrastructure and can
+be built and proven against the v1 binary before any Rust exists. The per-command
+assertions necessarily wait for Phase 4. Splitting it this way prevents "we will
+write those later" from resolving to never — the expensive half is already done
+and idle.
+
 The 3,098 lines of Go tests are a **specification to read, not code to
 translate.** They test seams that will not exist. Mine them during Phase 0 for
 edge cases worth promoting into the contract spec, then discard.
@@ -351,6 +358,7 @@ Nothing else starts until this lands.
 - [ ] Build the tree-diff harness; prove it green **Go against Go**
 - [ ] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [ ] Build the cross-binary lock-contention harness
+- [ ] Build the SIGINT driver and mode fault-injection hook; prove against v1
 - [ ] Encode each §13 divergence as a positive assertion (§5.1)
 
 Proving the harness against the Go binary first is what makes it trustworthy
@@ -437,30 +445,47 @@ Consequences that make this cheap and safe:
 - **Timestamped batches** are the restore granularity, because "undo what I just
   did" is the dominant recovery need.
 
-### The detection problem, which trash does not solve
+### Only replicated eviction ships. `--unreferenced` does not.
 
-Trash makes reclamation *recoverable*. It does not make orphan detection *sound*,
-and conflating the two would be the mistake. `countOrphans` derives "unreferenced"
-from a single repo while the cache serves many.
+**Decision: v2 reclaims only objects confirmed to exist on a remote.** There is no
+`--unreferenced` mode, no `--repo` scoping, and no orphan-based reclamation.
 
-Safety therefore comes from a different criterion:
+This dissolves the detection problem rather than solving it. `countOrphans`
+derives "unreferenced" from a single repo while the cache serves many, and it
+ignores git history besides — but neither matters once reclamation stops asking
+that question.
 
-| Class | Criterion | Default |
+The reasoning is that **the unreferenced case is the hazard, not an unserved
+need**:
+
+- An object **on the remote** can be reclaimed freely — `pull` restores it. This
+  is eviction, not deletion.
+- An object **not on the remote** holds bytes that exist nowhere else.
+  Reclaiming it *is* the data-loss event. It is the unbounded only-copy window
+  of failure-modes §1.
+
+The user need is disk pressure, and replicated eviction serves essentially all of
+it: anyone using the tool as intended pushes, so everything legitimately
+reclaimable is replicated. What `--unreferenced` would additionally reach is
+precisely the set that must never be touched.
+
+| Class | Criterion | Action |
 |---|---|---|
-| **Replicated** | Object confirmed present on the remote | Safe — this is *eviction*, not deletion; `pull` restores it |
-| **Only copy** | Not confirmed on any remote | Refuse without an explicit override |
-| **Leaked temp** | `.git-sfs-tmp-*` inside `files/` (failure-modes §3) | Always safe — not content-addressed, unreferenceable |
+| **Replicated** | Present on remote **and size matches** | Evict to trash |
+| **Only copy** | Not confirmed on a remote | Refuse. Report as unpushed, not as reclaimable |
+| **Leaked temp** | `.git-sfs-tmp-*` inside `files/` (failure-modes §3) | Delete — not content-addressed, unreferenceable |
 
-The reframe matters: for a pushed object, reclamation is not deletion at all. It
-is cache eviction of something that exists elsewhere and can be re-fetched. That
-is the operation users actually want under disk pressure, and it is fully safe.
-The dangerous case — an object that was added but never pushed — is exactly the
-unbounded-window hazard of failure-modes §1, and `trash` should refuse it loudly
-rather than quietly widening that window.
+**Presence is not correctness.** Remote *existence* must not be the sole
+criterion, because failure-modes §7 establishes that push verifies nothing after
+upload. The chain is real: a truncated object lands on the remote, `HasFile`
+reports present, eviction removes the good local copy, and both copies are now
+bad. Eviction therefore compares **size at minimum** (`lsjson` already returns
+it) and still routes through trash rather than deleting. The redundancy is
+warranted because the thing being relied on is known to be unverified.
 
-Determining "unreferenced" still requires knowing which repos use the cache, and
-the cache genuinely does not know. v2 requires explicit `--repo` scoping and warns
-that unnamed repos may reference the same objects. See contract-spec §14 item 8.
+This also removes the §13.4 push-verification defect from the critical path for
+reclamation — but that defect should still be fixed, since it is what makes the
+extra check necessary here.
 
 ### Git history makes "unreferenced" narrower than it looks
 
@@ -480,7 +505,7 @@ reachable history, not just the checkout, or state plainly that it does not.
 ### Surface
 
 ```
-git-sfs trash <paths|--evictable>   move objects to trash (default: replicated only)
+git-sfs trash <paths>               evict replicated objects (size-verified)
 git-sfs trash list                  batches, ages, reclaimable bytes
 git-sfs trash restore <batch>       rename back into the object store
 git-sfs trash empty [--older-than]  THE irreversible operation
@@ -563,6 +588,34 @@ size and still carries the TOCTOU hazard above.
 
 Backend versioning avoids all of it: no bytes moved, no state of our own to
 corrupt, recovery handled by the storage layer.
+
+---
+
+## 7b. Environmental checks — prevent at the choice, diagnose on request
+
+failure-modes §1b–§1d and §6 enumerate assumptions nothing currently verifies.
+The instinct is to put them all in `doctor`. That is wrong: it reproduces the
+instruction pattern the project rejects — "run `doctor` and you'll find out" —
+when most are preventable at the moment the bad state is created.
+
+| Check | Enforce at | Why there |
+|---|---|---|
+| Cache reachable by `git clean -x` | `init`, `setup` | The only moment it can be prevented rather than reported |
+| rclone config tracked by Git | `init`, `push` | Before credentials reach shared history |
+| `core.symlinks` is true | before `add` | Otherwise `add` hashes pointer text as if it were data |
+| Cache filesystem preserves modes | `setup`, result cached | The foundation §4.1 trust rests on |
+| Cache on ephemeral storage | `setup` | Warn while the choice is still cheap to change |
+| Free space | `pull` | Already attempted, but fails open twice (§13.3) |
+| **Unpushed object count** | **`status`, prominently** | The unbounded only-copy window of failure-modes §1 |
+
+`doctor` re-runs the full set on demand for diagnosis. It is the second line, not
+the first.
+
+The last row deserves emphasis. Between `add` and `push` the bytes exist in one
+unreplicated place, the window is unbounded, and **no command currently reports
+it.** Since v2 makes replicated-only eviction the reclamation model (§7), the
+unpushed count doubles as "how much of your cache can never be reclaimed" — one
+number that answers both the safety question and the disk-pressure question.
 
 ---
 

@@ -53,7 +53,7 @@ defects that must not be reproduced.
 | Lock protocol | Inter-process mutex; v1 and v2 binaries will coexist during migration |
 | `config.toml` | Committed to Git; must be readable by both versions |
 | Exit codes | **Only `0` vs non-zero** — CI depends on it. Taxonomy is free (§9) |
-| `--json` shapes | `remotes --json` only. `status --json` is unfrozen (§10.1) |
+| `--json` shapes | **Unfrozen** — no external consumers (§10.1) |
 | Release artifacts | Installed v1 binaries self-update by fetching these exact names |
 
 ---
@@ -790,38 +790,34 @@ containment check. v2 must not port the bug along with the function.
 | # | Issue | Recommendation |
 |---|---|---|
 | 1 | ~~`#`-in-value parsing~~ | **Resolved (§6.5):** parse with both `toml` and the v1 scanner; error only when the readings differ. No version floor, no migrate command, no friction on unambiguous configs |
-| 2 | Duplicate keys: v1 last-wins, TOML errors | Accept the stricter TOML behavior; document it |
-| 3 | v1 accepts unterminated/mismatched quotes via `Trim` | Accept stricter behavior |
+| 2 | ~~Duplicate keys: v1 last-wins, TOML errors~~ | **Resolved:** accept TOML's error. Silent last-wins is the same class of hazard as §6.5 — a config meaning something other than it appears to |
+| 3 | ~~v1 accepts unterminated/mismatched quotes~~ | **Resolved:** §6.5 already covers it — TOML fails, v1 succeeds, so v1's reading is used. No competing interpretation exists, therefore no ambiguity and no risk |
 | 4 | `min_git_sfs_version` vs. a `2.x` binary | `2.0.0 > 1.x` passes the existing comparison; no change needed. v2 MUST NOT write a `2.x` floor into new configs — §6.5's comparison makes it unnecessary, and setting it would lock v1 out of repos it can read correctly. Leave the field commented out, as v1 does |
 | 5 | ~~`status --json` cannot express "remote unknown"~~ | **Resolved:** schema unfrozen (§10.1). v2 carries `present` / `absent{reason}` / `unknown{cause}` directly |
 | 6 | ~~`verify` fixes change exit codes~~ | **Resolved:** taxonomy unfrozen (§9). Only `0` vs non-zero is contract, and v2 correctly returns non-zero |
 | 7 | ~~Orphan reaping advertised but unimplemented~~ | **Resolved:** v2 ships `trash` (move, recoverable), never `gc` (unlink). Design in rust-rewrite-plan §7; layout in §4 |
-| 8 | `countOrphans` derives "unreferenced" from a single repo while the cache serves many (`verify.go:315-331`) | **Open.** v2 requires explicit `--repo` scoping for unreferenced-object reclamation and defaults `trash` to the remote-replicated class instead. Whether to additionally record repo backlinks in the cache is undecided — see below |
+| 8 | ~~`countOrphans` derives "unreferenced" from a single repo~~ | **Dissolved:** v2 ships only remote-replicated eviction (plan §7), so reclamation never asks "is this unreferenced." No `--repo` scoping, no backlinks, no history scan. `verify` may still *report* an orphan count, but nothing acts on it |
 
 Item 4 is subtle and worth restating: writing a v2-minimum into a freshly
 initialized config would make the repo unreadable to v1 for no benefit. The
 comparison rule in §6.5 already guarantees no config is ever read two different
 ways, so the floor buys nothing and costs every v1 colleague their access.
 
-### On item 8 — repo backlinks
+### On item 8 — why backlinks are not needed
 
-`.git-sfs/cache` points repo → cache, and symlinks cannot be reversed. The cache
-therefore cannot enumerate the repos it serves, which is why single-repo orphan
-detection is unsound.
+`.git-sfs/cache` points repo → cache, and symlinks cannot be reversed, so the
+cache cannot enumerate the repos it serves. A backlink directory
+(`BindCache` also writing `<cache>/repos/<id> -> <repo>`) would fix that, and
+being pure symlinks it arguably respects the no-manifests rule.
 
-A tempting fix is a backlink directory — `BindCache` also writing
-`<cache>/repos/<id> -> <repo>`. It is implemented purely as symlinks, so it
-arguably respects the "no manifests, no hidden metadata" rule the way
-`.git-sfs/cache` does in the other direction.
+**Not needed, because nothing asks the question any more.** Restricting
+reclamation to remote-replicated objects (plan §7) removes the only consumer of
+repo-set knowledge. The criterion becomes "does a copy exist elsewhere," which is
+directly checkable, rather than "does anything still reference this," which is not.
 
-**Recommended against, for now.** It is only populated by v2-era binds, so during
-migration it is *confidently incomplete* — worse than obviously absent, because
-reclamation logic would trust it. It also introduces cache state that must be
-kept consistent as repos are moved or deleted, which is the class of drift the
-project avoids on principle.
-
-Preferred instead: default reclamation to the remote-replicated class, where
-soundness does not depend on knowing the repo set at all.
+Had backlinks been adopted, they would also have been *confidently incomplete*
+during migration — populated only by v2-era binds, yet trusted by reclamation
+logic. Absent state is safer than state that is wrong in an unknown direction.
 
 ---
 
