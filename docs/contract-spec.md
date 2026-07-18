@@ -741,6 +741,25 @@ regression.
   credentials, missing path, permission denied — turning a clear immediate error
   into a slow one. v2 should retry only transient classes.
 
+### 13.4b Defaults that place data in harm's way
+
+From failure-modes §1b–§1d. These are **defaults**, not mechanism, so v2 may
+change them freely.
+
+- **Default cache inside the repo.** `.git-sfs/.cache` (`init.go:43`) is
+  gitignored (`init.go:141`), and `git clean -x` removes ignored files — so the
+  routine "clean tree" command **deletes every cached object**, losing anything
+  unpushed. `rm -rf` on a clone does the same. v2 should default the cache
+  outside the working tree, or refuse a cache root that `git clean -x` can reach.
+- **rclone config not gitignored.** The default `config = "rclone.conf"` resolves
+  inside `.git-sfs/`, which `ensureGitignore` does not cover, so `git add
+  .git-sfs` commits credentials. v2 must gitignore the configured path at `init`
+  and have `doctor` fail if it is tracked.
+- **Moves outside `git-sfs mv` dangle symlinks.** Targets are relative to the
+  file's directory (`sfspath.go:20-22`), so `git mv` or shell `mv` across depths
+  silently invalidates them, undetected until `verify`. Same for branch switches
+  and historical checkouts against a cache lacking those hashes.
+
 ### 13.5 Unverified environmental assumptions
 
 Nothing in v1 checks these, and each silently changes what the repo means:

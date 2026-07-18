@@ -45,6 +45,75 @@ count a first-class output; don't advertise commands that don't exist.
 
 ---
 
+## 1b. Ordinary Git commands destroy the cache
+
+§1 establishes that the cache is the only copy. What makes that acute is *where
+it lives by default*: `.git-sfs/.cache`, inside the repository working tree
+([init.go:43](../internal/core/init.go#L43)).
+
+- [ ] **`git clean -xfd` deletes the entire cache.** `ensureGitignore` adds
+      `.git-sfs/cache` and `.git-sfs/.cache` to `.gitignore`
+      ([init.go:141](../internal/core/init.go#L141)), and `git clean -x` removes
+      **ignored** files. So the standard "give me a clean tree" command erases
+      every cached object and the cache symlink. For anything not yet pushed
+      that is total, unrecoverable loss — from a command developers run without
+      thinking, with no warning and no confirmation.
+- [ ] **`rm -rf` on a "disposable" clone takes the data with it.** The same
+      co-location means deleting a repo you believe is just a checkout destroys
+      the only copy of its unpushed objects.
+- [ ] **Moving or copying the repo moves the cache**, including onto network
+      mounts or filesystems that do not preserve modes (§2).
+
+**Never go there:** do not put the only copy of user data inside a directory that
+routine tooling is entitled to delete. Either default the cache outside the repo,
+or refuse to place it somewhere `git clean -x` will reach.
+
+---
+
+## 1c. The default config steers users into committing credentials
+
+The default template ships `config = "rclone.conf"`, resolved relative to
+`.git-sfs` ([config.go:137](../internal/config/config.go#L137)) — so the natural
+location is `.git-sfs/rclone.conf`, inside the tracked directory.
+
+- [ ] **`.gitignore` does not cover it.** `ensureGitignore` adds only
+      `.git-sfs/cache` and `.git-sfs/.cache`
+      ([init.go:141](../internal/core/init.go#L141)). A `git add .git-sfs`
+      commits cloud credentials into shared history, where they must be treated
+      as compromised and rotated.
+- [ ] **The mitigation is currently a sentence.** Both the config template and
+      [configuration.md](configuration.md) tell the user not to commit secrets.
+      That is an instruction where automation was available.
+
+**Never go there:** never let the documented happy path place a secret inside a
+tracked directory. Gitignore the configured rclone config path at `init`, and
+have `doctor` fail loudly if it is tracked.
+
+---
+
+## 1d. Ordinary Git operations dangle symlinks
+
+Symlink targets are relative to the file's own directory
+([sfspath.go:20-22](../internal/sfspath/sfspath.go#L20-L22)), so a target is only
+valid at the depth it was created for.
+
+- [ ] **`git mv` or shell `mv` silently breaks the link.** Moving
+      `data/a.bin` to `data/sub/a.bin` leaves a target computed for the old
+      depth: it now resolves to nothing, or to a path outside the cache root.
+      Nothing detects it until `verify`, and users will reach for `git mv`
+      because it is the obvious command.
+- [ ] **Branch switches and historical checkouts** update symlinks to hashes the
+      cache may not hold, producing dangling links with no warning until
+      something reads them. This is the history-reachability gap that also makes
+      orphan detection unsound (§1), surfacing during ordinary branch work rather
+      than during reclamation.
+
+**Never go there:** don't let a correct-looking Git operation leave the repo in a
+state the tool considers invalid without saying so. These want a `post-checkout`
+hook or a cheap `status` check, not a `verify` run the user has to remember.
+
+---
+
 ## 2. Integrity rests on a filesystem permission bit
 
 `HasValid` treats *"the file is read-only"* as proof *"the bytes were hash-verified"*
@@ -238,7 +307,8 @@ confirm what landed, at least by size, and `verify --check-remote` should compar
 
 Run it as an inversion pass, not a bug list. For each change ask:
 
-1. **Does this create a window where the only copy of the bytes is unprotected?** (§1, §3)
+1. **Does this create a window where the only copy of the bytes is unprotected?** (§1, §1b, §3)
+   And: is that copy somewhere ordinary tooling is entitled to delete? (§1b)
 2. **Does this trust a claim I did not verify in this process?** (§2, §7)
 3. **Does this destroy old state before new state is durable?** (§3)
 4. **Can this report a specific state when it actually knows nothing?** (§4)
