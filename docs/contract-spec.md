@@ -320,6 +320,59 @@ Silently preferring v1 would preserve behavior but leave a file whose plain text
 means something different from what the tool does with it — a trap for the next
 human or program to read it.
 
+#### The error must carry the fix
+
+The message is doing the real work, so it is specified rather than left to the
+implementer:
+
+```
+error: .git-sfs/config.toml: remotes.default.path is ambiguous
+
+  as written:          "datasets/run#1"
+  git-sfs 1.x read:     datasets/run      ← your objects are here
+  strict TOML reads:    datasets/run#1
+
+  Change the line to make it unambiguous:
+      path = "datasets/run"
+```
+
+The `your objects are here` line is essential. Without it the user must guess
+which reading is correct, and the two look equally plausible in isolation.
+
+**Canonicalize by truncation, not deletion.** v1 truncates at the `#` and
+discards the remainder, so `run#1` becomes `run`. Deleting only the `#` character
+would yield `run1` — a third value matching neither parser and addressing a third
+nonexistent location. The suggested replacement MUST reproduce v1's reading
+exactly.
+
+#### git-sfs MUST NOT apply the fix itself
+
+`config.toml` is committed and shared. Rewriting it on read would silently dirty
+a tracked file during an unrelated command such as `status`, and a user who
+commits that change propagates it to the whole team. It also violates the
+project rule that git-sfs never modifies a file the user did not explicitly hand
+to it.
+
+There is a second reason. Disagreement arises only when `#` appears **inside**
+the quotes — a genuine trailing comment (`path = "data"  # prod bucket`) parses
+identically under both readings and never triggers this path. So the user typed
+`#` within a quoted string, which under TOML semantics means they intended it in
+the value. Their *intent* was `run#1`; the *effect* under v1 was `run`.
+
+v2 canonicalizes to the effect, because that is where the bytes physically are.
+But that is an inference about a file the user authored: if they genuinely wanted
+`run#1` and had been investigating why pushes seemed to disappear, silently
+rewriting the value to `run` would cement the bug and destroy the evidence.
+Surface the ambiguity; let the human resolve it.
+
+**No fix command either.** The obvious next step — a `git-sfs config fix` that
+applies the correction with the user's consent — is explicitly rejected. It would
+not violate the modification rule, but it fires only on a rare malformed value
+and exists solely to save a single line-edit. That does not earn a place on the
+CLI surface, and the surface is the thing hardest to shrink later. The error
+message already contains the exact replacement line; copying it is the whole
+remedy.
+
 **Consequences:**
 
 - **No forced version floor.** v1 and v2 coexist on unambiguous configs, which is
