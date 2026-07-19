@@ -467,6 +467,12 @@ v2 requirements:
   own error (`lock.go:33`), so a zero-byte owner file is reachable and reading it
   panics. v2 must tolerate a missing, empty, or malformed owner file.
 
+  **Both predictions are now confirmed against the v1 binary**, not merely read
+  out of the source, by `test/differential/lock_contention.py`: a zero-byte
+  `owner` yields `panic: runtime error: slice bounds out of range [:-1]`, and a
+  lock whose recorded pid is not running blocks indefinitely. The harness records
+  these as observations rather than assertions, since v2 must diverge on both.
+
 Liveness checking is strictly more conservative than v1's behavior and cannot
 cause a v1 process's lock to be broken while that process is alive.
 

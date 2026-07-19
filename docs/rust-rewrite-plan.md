@@ -391,7 +391,7 @@ Nothing else starts until this lands.
 - [x] Loosen `scenarios.sh:215` to a structural assertion
 - [x] Build the tree-diff harness; prove it green **Go against Go**
 - [x] Build the fake-rclone recorder; capture v1's argv stream as the baseline
-- [ ] Build the cross-binary lock-contention harness
+- [x] Build the cross-binary lock-contention harness
 - [ ] Build the SIGINT driver and mode fault-injection hook; prove against v1
 - [ ] Capture v1 performance baselines (§9b)
 - [ ] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c)

@@ -30,7 +30,12 @@ workflows:
 differential: build
     python3 test/differential/run.py --binary a=./git-sfs --binary b=./git-sfs
 
-check: fmt test build workflows differential
+# Lock protocol conformance. Pass a second --binary to run.py's sibling to
+# exercise real cross-version contention.
+lock-contention: build
+    python3 test/differential/lock_contention.py --binary v1=./git-sfs
+
+check: fmt test build workflows differential lock-contention
     git --no-pager diff --check
 
 release-snapshot:

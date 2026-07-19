@@ -25,6 +25,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 FAKE_VERSION = "v1.99.0-fake"
@@ -267,11 +268,17 @@ def main() -> int:
 
     fault = matching_fault(subcommand, count_invocation(subcommand), argv)
     if fault is not None:
+        # A slow transfer, so a caller can observe the lock git-sfs holds for the
+        # duration of the operation. Applied before the failure so a rule can be
+        # both slow and failing.
+        if fault.get("sleep"):
+            time.sleep(float(fault["sleep"]))
         if fault.get("stderr"):
             print(fault["stderr"], file=sys.stderr)
         if fault.get("stdout"):
             print(fault["stdout"])
-        return int(fault.get("exit", 1))
+        if "exit" in fault:
+            return int(fault["exit"])
 
     if subcommand == "version":
         print(f"rclone {FAKE_VERSION}")
