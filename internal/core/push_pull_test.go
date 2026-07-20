@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func TestPushPullRoundTrip(t *testing.T) {
 
 	inDir(t, repo, func() {
 		require.NoError(t, app(&bytes.Buffer{}).Add(context.Background(), []string{"data/blob"}))
-		require.NoError(t, app(&bytes.Buffer{}).Push(context.Background(), ""))
+		require.NoError(t, app(&bytes.Buffer{}).Push(context.Background(), "", "."))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
@@ -66,7 +67,7 @@ func TestPullCanRestoreOnlySelectedFile(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
 		require.NoError(t, err)
 		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "two.bin"))
@@ -95,7 +96,7 @@ func TestPullWithMixedPresentAndMissingCacheFiles(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		h1, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "one.bin"))
 		require.NoError(t, err)
 		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "nested", "two.bin"))
@@ -140,7 +141,7 @@ func TestSelectedRemoteErrors(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.Error(t, a.Push(context.Background(), "missing"))
+		require.Error(t, a.Push(context.Background(), "missing", "."))
 	})
 }
 
@@ -235,7 +236,7 @@ func TestPushFailsWhenRcloneNotOnPath(t *testing.T) {
 	writeLocal(t, repo, filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("PATH", t.TempDir())
 	inDir(t, repo, func() {
-		err := app(&bytes.Buffer{}).Push(context.Background(), "")
+		err := app(&bytes.Buffer{}).Push(context.Background(), "", ".")
 		require.Error(t, err)
 		require.True(t, strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no such file"), "unexpected error: %v", err)
 	})
@@ -249,7 +250,7 @@ func TestPushFailsForMissingRemotePath(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.ErrorContains(t, a.Push(context.Background(), ""), "does not exist")
+		require.ErrorContains(t, a.Push(context.Background(), "", "."), "does not exist")
 	})
 }
 
@@ -264,12 +265,12 @@ func TestPushSkipsExistingRemoteFileAndRejectsMissingCache(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.NoError(t, a.Push(context.Background(), ""))
-		require.NoError(t, a.Push(context.Background(), "")) // idempotent
+		require.NoError(t, a.Push(context.Background(), "", "."))
+		require.NoError(t, a.Push(context.Background(), "", ".")) // idempotent
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
 		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
-		require.Error(t, a.Push(context.Background(), ""))
+		require.Error(t, a.Push(context.Background(), "", "."))
 	})
 }
 
@@ -313,7 +314,7 @@ func TestPullRejectsHashMismatch(t *testing.T) {
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
 		require.NoError(t, os.Chmod(remoteFile, 0o644))
 		require.NoError(t, os.WriteFile(remoteFile, []byte("wrong content"), 0o644))
@@ -337,7 +338,201 @@ func TestPushFailsForMissingCacheFile(t *testing.T) {
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
 		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
-		require.ErrorIs(t, a.Push(context.Background(), ""), errs.ErrMissingCachedFile)
+		require.ErrorIs(t, a.Push(context.Background(), "", "."), errs.ErrMissingCachedFile)
+	})
+}
+
+// A partially-pulled dataset must still be pushable: pushing a subtree whose
+// files are cached must not be blocked by a sibling subtree the user never
+// pulled. Without a path argument, push scans the whole repo and aborts on the
+// uncached sibling.
+func TestPushCanUploadOnlySelectedPath(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "want", "blob"), []byte("bytes to push"))
+	mustWrite(t, filepath.Join(repo, "other", "blob"), []byte("bytes never pulled"))
+
+	inDir(t, repo, func() {
+		a := app(&bytes.Buffer{})
+		require.NoError(t, a.Add(context.Background(), []string{"want/blob", "other/blob"}))
+
+		want, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "want", "blob"))
+		require.NoError(t, err)
+		other, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "other", "blob"))
+		require.NoError(t, err)
+		// Drop the sibling's cache file to mimic a subtree that was never pulled.
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, other.Prefix(), other.String())))
+
+		require.NoError(t, a.Push(context.Background(), "", "want"))
+
+		wantRemote := filepath.Join(remoteDir, "files", hash.Algorithm, want.Prefix(), want.String())
+		require.NoError(t, hash.VerifyFile(context.Background(), wantRemote, want))
+		otherRemote := filepath.Join(remoteDir, "files", hash.Algorithm, other.Prefix(), other.String())
+		require.NoFileExists(t, otherRemote)
+
+		// The whole-repo push still fails, and names the offending path.
+		err = a.Push(context.Background(), "", ".")
+		require.ErrorIs(t, err, errs.ErrMissingCachedFile)
+		require.ErrorContains(t, err, filepath.Join("other", "blob"))
+	})
+}
+
+// --skip-missing trades completeness for progress: it must upload every cached
+// file, leave the uncached ones alone, and say plainly on stderr that the remote
+// is now an incomplete copy.
+func TestPushSkipMissingUploadsWhatIsCached(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "want", "blob"), []byte("bytes to push"))
+	mustWrite(t, filepath.Join(repo, "other", "blob"), []byte("bytes never pulled"))
+
+	inDir(t, repo, func() {
+		stderr := &bytes.Buffer{}
+		a := appWithStderr(&bytes.Buffer{}, stderr)
+		require.NoError(t, a.Add(context.Background(), []string{"want/blob", "other/blob"}))
+
+		want, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "want", "blob"))
+		require.NoError(t, err)
+		other, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "other", "blob"))
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, other.Prefix(), other.String())))
+
+		opts := PushOptions{SkipMissing: true}
+		require.NoError(t, a.PushWithOptions(context.Background(), "", ".", opts))
+
+		wantRemote := filepath.Join(remoteDir, "files", hash.Algorithm, want.Prefix(), want.String())
+		require.NoError(t, hash.VerifyFile(context.Background(), wantRemote, want))
+		otherRemote := filepath.Join(remoteDir, "files", hash.Algorithm, other.Prefix(), other.String())
+		require.NoFileExists(t, otherRemote)
+
+		require.Contains(t, stderr.String(), "skipped 1 file(s) referenced by 1 symlink(s)")
+		require.Contains(t, stderr.String(), filepath.Join("other", "blob"))
+	})
+}
+
+// With nothing cached at all, --skip-missing must still succeed and warn rather
+// than uploading an empty set silently.
+func TestPushSkipMissingWithNothingCached(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+
+	inDir(t, repo, func() {
+		stderr := &bytes.Buffer{}
+		a := appWithStderr(&bytes.Buffer{}, stderr)
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
+
+		opts := PushOptions{SkipMissing: true}
+		require.NoError(t, a.PushWithOptions(context.Background(), "", ".", opts))
+		require.Contains(t, stderr.String(), "skipped 1 file(s) referenced by 1 symlink(s)")
+	})
+}
+
+// Several symlinks can share one cached object. The skip report must count and
+// list the affected working-tree paths, not just the unique objects, or it
+// understates how much of the tree is missing from the remote.
+func TestPushSkipMissingReportsEveryAffectedPath(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	for _, dir := range []string{"a", "b", "c"} {
+		mustWrite(t, filepath.Join(repo, dir, "blob"), []byte("shared content"))
+	}
+
+	inDir(t, repo, func() {
+		stderr := &bytes.Buffer{}
+		a := appWithStderr(&bytes.Buffer{}, stderr)
+		require.NoError(t, a.Add(context.Background(), []string{"a/blob", "b/blob", "c/blob"}))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "a", "blob"))
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())))
+
+		require.NoError(t, a.PushWithOptions(context.Background(), "", ".", PushOptions{SkipMissing: true}))
+
+		out := stderr.String()
+		require.Contains(t, out, "skipped 1 file(s) referenced by 3 symlink(s)")
+		for _, dir := range []string{"a", "b", "c"} {
+			require.Contains(t, out, filepath.Join(dir, "blob"))
+		}
+	})
+}
+
+// The per-path listing is capped so a heavily partial checkout cannot bury the
+// result in thousands of lines.
+func TestPushSkipMissingCapsThePathListing(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	total := maxSkippedListed + 5
+	paths := make([]string, 0, total)
+	for i := range total {
+		p := filepath.Join("data", fmt.Sprintf("blob-%02d", i))
+		mustWrite(t, filepath.Join(repo, p), fmt.Appendf(nil, "payload %d", i))
+		paths = append(paths, p)
+	}
+
+	inDir(t, repo, func() {
+		stderr := &bytes.Buffer{}
+		a := appWithStderr(&bytes.Buffer{}, stderr)
+		require.NoError(t, a.Add(context.Background(), paths))
+		require.NoError(t, os.RemoveAll(filepath.Join(cacheDir, "files")))
+
+		require.NoError(t, a.PushWithOptions(context.Background(), "", ".", PushOptions{SkipMissing: true}))
+
+		out := stderr.String()
+		require.Contains(t, out, fmt.Sprintf("referenced by %d symlink(s)", total))
+		require.Contains(t, out, "... and 5 more")
+		require.Equal(t, maxSkippedListed, strings.Count(out, "  data/blob-"))
+	})
+}
+
+// A corrupt cache file must be treated as missing, never uploaded as-is.
+func TestPushSkipMissingSkipsCorruptCacheFile(t *testing.T) {
+	repo := newRepo(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	remoteDir := filepath.Join(t.TempDir(), "remote")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o755))
+	writeLocalRemote(t, repo, remoteDir)
+	writeLocal(t, repo, cacheDir)
+	mustWrite(t, filepath.Join(repo, "data", "blob"), []byte("payload"))
+
+	inDir(t, repo, func() {
+		stderr := &bytes.Buffer{}
+		a := appWithStderr(&bytes.Buffer{}, stderr)
+		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
+		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
+		require.NoError(t, err)
+		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		require.NoError(t, os.Chmod(cacheFile, 0o644))
+		require.NoError(t, os.WriteFile(cacheFile, []byte("tampered"), 0o644))
+
+		opts := PushOptions{SkipMissing: true}
+		require.NoError(t, a.PushWithOptions(context.Background(), "", ".", opts))
+
+		remoteFile := filepath.Join(remoteDir, "files", hash.Algorithm, h.Prefix(), h.String())
+		require.NoFileExists(t, remoteFile)
+		require.Contains(t, stderr.String(), "skipped 1 file(s) referenced by 1 symlink(s)")
 	})
 }
 
@@ -353,7 +548,7 @@ func TestPullCleansTmpDirOnStart(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())

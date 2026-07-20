@@ -225,10 +225,44 @@ Upload referenced cached files to the remote:
 
 ```sh
 git-sfs push
-git-sfs push -r backup
+git-sfs push data/train-000.tar.zst
+git-sfs push data/
+git-sfs push -r backup data/
 ```
 
 `-r remote` pushes to a named remote instead of `default`.
+
+When a path is provided, only symlinks below that path are uploaded. This is the
+intended way to push part of a dataset, and it is required when the repository is
+only partially pulled: subtrees you never pulled are dangling symlinks, and a
+whole-repo push fails on them with `missing cached file`.
+
+`--skip-missing` uploads the files that are cached instead of failing on the
+first one that is not:
+
+```sh
+git-sfs push --skip-missing
+```
+
+Use it when the missing files are scattered rather than confined to a subtree,
+so no single path argument selects the cached ones. It reports every skipped
+path on stderr:
+
+```
+git-sfs: warning: push skipped 1 file(s) referenced by 3 symlink(s); the remote is not a complete copy
+  a/blob (8446e508a4da)
+  b/blob (8446e508a4da)
+  c/blob (8446e508a4da)
+  run: git-sfs pull <path> to restore them
+```
+
+The two counts differ when several symlinks share one cached file. Listing is
+capped at 10 paths; `git-sfs status` prints the full set.
+
+It is off by default on purpose. A push that omits files still exits `0`, so the
+remote silently becomes an incomplete copy — treat a remote written this way as
+partial until a full `git-sfs push` succeeds, and do not clear a local cache on
+the strength of it.
 
 `git-sfs push` skips files that are already present on the remote with a
 matching checksum. It uses rclone's `--checksum` flag, which compares against

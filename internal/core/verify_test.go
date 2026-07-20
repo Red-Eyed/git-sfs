@@ -126,7 +126,7 @@ func TestVerifyReportsRemoteProblems(t *testing.T) {
 		require.Error(t, app(stdout).Verify(context.Background(), "", true, false, "."))
 		require.Contains(t, stdout.String(), "missing remote files: 1")
 
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		require.NoError(t, os.Chmod(remoteFile, 0o644))
 		require.NoError(t, os.WriteFile(remoteFile, []byte("corrupt"), 0o644))
 		stdout.Reset()
@@ -148,7 +148,7 @@ func TestVerifyPathScopesChecksToSelectedSubtree(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 
 		h2, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "nested", "two.bin"))
 		require.NoError(t, err)
@@ -177,7 +177,7 @@ func TestVerifyWithoutIntegritySkipsCorruptionChecks(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(&bytes.Buffer{})
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
 		cacheFile := filepath.Join(cacheDir, "files", hash.Algorithm, h.Prefix(), h.String())
