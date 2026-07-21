@@ -72,7 +72,7 @@ func TestStatusSizesMissingLocalFileFromRemote(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(stdout)
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		h, _, err := sfspath.ParseGitSymlink(repo, filepath.Join(repo, "data", "blob"))
 		require.NoError(t, err)
 		// Drop the local cache file: size must now come from the remote, no download.
@@ -125,7 +125,7 @@ func TestStatusJSONIncludesRemoteWhenChecked(t *testing.T) {
 	inDir(t, repo, func() {
 		a := app(stdout)
 		require.NoError(t, a.Add(context.Background(), []string{"data/blob"}))
-		require.NoError(t, a.Push(context.Background(), ""))
+		require.NoError(t, a.Push(context.Background(), "", "."))
 		stdout.Reset()
 		require.NoError(t, app(stdout).Status(context.Background(), "default", true, "."))
 	})

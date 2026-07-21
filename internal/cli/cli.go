@@ -91,7 +91,9 @@ type remotesCmd struct {
 }
 
 type pushCmd struct {
-	RemoteName string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
+	RemoteName  string `short:"r" name:"remote" help:"remote name (default: \"default\")"`
+	SkipMissing bool   `name:"skip-missing" help:"upload the files that are cached instead of failing on missing ones (leaves the remote incomplete)"`
+	Path        string `arg:"" optional:"" default:"." help:"path to push"`
 }
 
 type pullCmd struct {
@@ -188,7 +190,9 @@ func dispatch(ctx context.Context, app core.App, g grammar, cmd string, stdout i
 	case "remotes":
 		return app.Remotes(g.Remotes.JSON)
 	case "push":
-		return app.Push(ctx, g.Push.RemoteName)
+		return app.PushWithOptions(ctx, g.Push.RemoteName, g.Push.Path, core.PushOptions{
+			SkipMissing: g.Push.SkipMissing,
+		})
 	case "pull":
 		return app.Pull(ctx, g.Pull.RemoteName, g.Pull.Path)
 	case "doctor":

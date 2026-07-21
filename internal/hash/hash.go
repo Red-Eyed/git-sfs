@@ -69,6 +69,19 @@ func VerifyFile(ctx context.Context, path string, want Hash) error {
 
 func (h Hash) String() string { return string(h) }
 
+// Short returns the leading hex characters used when a hash is displayed next to
+// a path. The full 64 characters wrap terminal lines without telling the reader
+// anything they need; 12 is still enough to tell two objects apart by eye and to
+// spot when several paths share one object.
+func (h Hash) Short() string {
+	const shortLen = 12
+	s := string(h)
+	if len(s) < shortLen {
+		return s
+	}
+	return s[:shortLen]
+}
+
 // Prefix is the two-character fanout directory used by the file store.
 func (h Hash) Prefix() string {
 	s := string(h)

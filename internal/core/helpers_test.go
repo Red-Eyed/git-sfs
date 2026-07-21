@@ -8,9 +8,13 @@ import (
 )
 
 func app(stdout *bytes.Buffer) App {
+	return appWithStderr(stdout, &bytes.Buffer{})
+}
+
+func appWithStderr(stdout, stderr *bytes.Buffer) App {
 	return App{
 		Stdout:     stdout,
-		Stderr:     &bytes.Buffer{},
+		Stderr:     stderr,
 		ConfigPath: ".git-sfs/config.toml",
 	}
 }

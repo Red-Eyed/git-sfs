@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.22.0
+
+### Added
+
+- **`git-sfs push [path]`** — `push` now takes an optional path argument, matching `pull` and `status`. Only symlinks below that path are uploaded. Previously `push` always scanned the whole repository and aborted on the first hash with no local cache file, which made a partially-pulled repository impossible to push from: subtrees the user deliberately never pulled are dangling symlinks, and they blocked the upload of every file that *was* cached. Defaults to `.`, so existing behavior is unchanged.
+- **`git-sfs push --skip-missing`** — uploads the files that are cached instead of failing on the first one that is not. Intended for the case where missing files are scattered rather than confined to a subtree, so no single path argument selects the cached ones. Off by default: a push that omits files still exits `0`, so the remote silently becomes an incomplete copy. Skipped paths are reported on stderr, and a remote written this way should be treated as partial until a full `git-sfs push` succeeds.
+
+### Fixed
+
+- **`missing cached file` now names the file.** The error reported only a bare 64-character hash, which gave no indication of which tracked file was affected or how to fix it. It now reports the working-tree path, a short hash, and the `git-sfs pull` command that restores it.
+
+---
+
 ## v1.21.0
 
 ### Added
