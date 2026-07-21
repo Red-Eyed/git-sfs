@@ -80,6 +80,20 @@ resolves to a different path than requested, implementations MUST fail with an
 invalid-config error rather than relink (`localstate.go:73-85`). Silently
 repointing a cache is a data-loss vector.
 
+**The comparison is between canonicalized paths, not between strings.**
+`BindCache` resolves both sides through `canonicalPath` — `EvalSymlinks`, falling
+back to `Clean` — and joins a relative existing target against the link's own
+directory first (`localstate.go:74-82`). Re-binding a cache to where it already
+points is therefore a no-op returning success, not an error.
+
+A literal string comparison rejects the common case rather than the dangerous
+one. Any symlinked path component makes two spellings name one directory — a
+home directory relocated onto another volume, a mounted network share, macOS's
+`/var` → `/private/var` — and each produces a spurious mismatch. An
+implementation that compares literally makes `setup` fail on correctly-configured
+repos, and the natural user response is to delete the link and relink by hand:
+precisely the operation this clause exists to prevent.
+
 ---
 
 ## 3. Symlink format
@@ -123,6 +137,28 @@ Rule 6 is redundant with the hash but is deliberately enforced so that stale or
 hand-edited links fail loudly instead of resolving to the wrong object.
 
 Violations produce `ErrInvalidSymlink` → **exit code 3**.
+
+### 3.3 Links are the unit of operation, not the objects behind them
+
+`mv` parses and rewrites symlink entries and MUST NOT require the referenced
+cache object to exist — nothing on its path stats the target (`mv.go:36-38`).
+Moving a tracked path whose object is absent succeeds and produces a correctly
+retargeted dangling link.
+
+This is a recovery path, not an edge case. §13.4b's default puts the cache at
+`.git-sfs/.cache`, where `git clean -x` deletes it; a fresh clone before any
+`pull` is in the same state. In both, *every* link in the tree dangles at once,
+and wanting to reorganize the tree before restoring several hundred gigabytes is
+reasonable. A v2 that resolves or validates the target before moving turns the
+recovery path into a dead end at exactly the moment the user has no local copy.
+
+Two rules from the same code path:
+
+- A source that is not a valid git-sfs symlink is rejected (`mv.go:36-38`).
+  `mv` never touches regular files; `git mv` is the tool for those.
+- Destination semantics are POSIX: an existing **directory** destination means
+  "move the source inside it" (`mv.go:40-43`), and an existing non-directory
+  destination is an error rather than an overwrite (`mv.go:44-46`).
 
 ---
 
@@ -194,6 +230,43 @@ trust a corrupt entry (`cache.go:122-125`).
 
 Cache objects are write-once and immutable thereafter.
 
+**`import --move` must survive a cross-filesystem source.** The move stages via
+`os.Rename`, and on `EXDEV` falls back to copy-then-remove, publishing the
+staging file at its final mode (`cache.go:158-190`). This is not an exotic path:
+§13.4b directs v2 to default the cache *outside* the working tree, which makes
+"source and cache on different filesystems" the common case rather than the rare
+one — an import from an external drive, a scratch mount, or a network share. An
+implementation that treats `rename` as infallible fails precisely the workflow
+the recommended default creates.
+
+### 4.3 `tmp/` is purged unlocked, by one command only
+
+`pull` calls `PurgeTmp` — `RemoveAll(tmp/)` then recreate at `0o755` — as its
+first cache operation (`pull.go:30`, `cache.go:51-56`). No other command purges,
+and the purge happens **before** `pull` acquires its lock (`pull.go:33`).
+
+Recorded because two facts stated elsewhere in this document combine into a
+data-loss bug that does not exist in v1 and that v2 would introduce by following
+v1's own advice:
+
+- §13.2 tells v2 to stage temp files in `tmp/` instead of inside
+  `files/sha256/<prefix>/`. Correct on its own terms.
+- §8 establishes that commands take **different** locks, so an `add` and a `pull`
+  run concurrently by design.
+
+v1 is safe only by accident: it stages inside the object store, so the directory
+`pull` wipes holds nothing but rclone's own scratch. Move staging into `tmp/`
+while keeping the unlocked purge, and a concurrent `pull` deletes an in-flight
+`add`'s staging file out from under it. During migration the two processes need
+not even be the same version — a v1 `pull` will happily purge a v2 `add`'s
+staging.
+
+**v2 requirements:** purge under the same lock that guards writes to what is
+being purged, and purge selectively — by age, or by owning pid — rather than
+wiping a directory other live processes are writing into. Reclaiming abandoned
+scratch is a convenience; destroying another process's in-flight write is not an
+acceptable price for it.
+
 ---
 
 ## 5. Remote layout
@@ -211,6 +284,101 @@ two disjoint stores, and the symptom is "my colleague's push didn't arrive."
 
 `rclone` is the only supported mover. `<remote_url>` is composed from the
 remote's `backend` and `path` config fields.
+
+### 5.1 URL composition
+
+The composition rule is frozen for the same reason the layout is: two users
+pushing into one bucket must land on identical paths (`command.go:41-61`).
+
+1. If `backend` is empty, the URL is `path` unchanged.
+2. Otherwise **trailing** `/` are stripped from `path`.
+3. If the result begins with `/` **or** is a Windows absolute path (`D:/…`), the
+   URL is `backend + ":" + path`.
+4. Otherwise leading `/` are stripped too, then the URL is `backend + ":" + path`.
+5. Trailing `/` are stripped from the composed URL (`command.go:52-54`).
+
+Object paths are `<url>/files/sha256/<prefix>/<hash>` (`command.go:67-69`).
+
+Each case below has a plausible wrong answer, which is why they are enumerated:
+
+| `backend` | `path` | URL |
+|---|---|---|
+| `local` | `/srv/data` | `local:/srv/data` |
+| `s3` | `dataset/root` | `s3:dataset/root` |
+| `s3` | `/dataset/root/` | `s3:/dataset/root` |
+| `s3` | `D:/data` | `s3:D:/data` |
+| `s3` | *(empty)* | `s3:` |
+| *(empty)* | `/abs/path` | `/abs/path` |
+
+Skipping step 2 yields `s3:dataset/root//files/sha256/…`, and several backends
+treat that as a distinct key from the single-slash form. The result is §5's
+stated failure mode — a shared remote silently partitioned into two disjoint
+stores — reached through one character.
+
+---
+
+## 5b. Operation scope — which files a command acts on
+
+`status`, `verify`, `push`, and `pull` each take an optional path argument
+scoping the operation to a subtree; `.` means the whole repository. All four
+route through one walk (`collectGitSFSSymlinks(repo, path)`, `walk.go:18`) and so
+share selection semantics: every valid git-sfs symlink at or below the path,
+deduplicated by hash for operations that act on objects rather than links.
+
+This is contract, not convenience. A partial checkout is the normal state of a
+large dataset — users pull one subtree of a multi-terabyte repo — so a command
+that could only act on the whole tree would be unusable against the working set
+they actually have. `pull <path>` restores the selected subtree and MUST NOT
+restore siblings; `verify <path>` and `status <path>` report only that subtree.
+
+### 5b.1 `push` and missing cache objects
+
+`push` without `--skip-missing` fails when any selected symlink's object is not
+present-and-valid locally, and the error names a **working-tree path** rather
+than a hash (`push.go:59-60`, `push.go:120-125`). The path comes from a
+path-sorted link list, so the same repo state always names the same file.
+
+Scoping is what makes that failure recoverable. A partially-pulled dataset would
+otherwise be unpushable, because a subtree the user never pulled blocks pushing
+the subtree they did: `push want/` succeeds where `push .` correctly fails.
+
+`--skip-missing` (added v1.21) trades completeness for progress — it uploads what
+is cached, leaves the rest, and exits `0`. Its contract:
+
+- Objects are admitted via `HasValid` (`push.go:76-88`), so **an object failing
+  verification is treated as missing and is never uploaded.** Subject to §4.1's
+  limit: `HasValid` trusts the read-only bit, so this catches rot only where the
+  mode bit does not hide it. §13.4 is the unresolved half of the same problem.
+- The omission is reported on **stderr**, where it survives piping and cannot be
+  mistaken for success (`push.go:99-119`).
+- The report counts **both** unique objects and the symlinks referencing them.
+  The two differ whenever paths share content, and counting objects alone
+  understates how much of the tree is unbacked.
+- The per-path listing is capped (v1: 10, `push.go:90`) with an "and N more"
+  line, so a heavily partial checkout cannot bury the result.
+
+The dual count is the part worth preserving; the wording around it is free
+under §12.
+
+### 5b.2 `import` and symlinked sources
+
+A symlink reached by `import` — whether it *is* the source, or is found while
+walking a source directory — is an **error unless `-L` is given**
+(`import.go:179-182`, `import.go:228-230`). With `-L` the link is resolved and
+the resolved file is ingested; under `--move` the link and its target are both
+removed, and a source directory left empty is removed too.
+
+Refusing by default is the safe choice and must be kept. A symlink in an incoming
+tree may point anywhere on the machine, and silently following one under `--move`
+deletes a file outside the directory the user named. Under `import` without
+`--move` it would still hash something other than what the tree appears to
+contain.
+
+The failure must be clean: rejecting a symlinked source leaves **both the link
+and its target untouched** on disk. This is the general rule for the whole
+command — `import` validates before it moves anything, so a rejected import is a
+no-op rather than a partial ingest. §13.1 requires v2 to go further and publish
+destinations before removing sources.
 
 ---
 
@@ -392,6 +560,44 @@ remedy.
 - Missing `algorithm` defaults to `"sha256"` **after** parsing, then is validated.
 - `Default()` (`config.go:108-116`) produces the in-memory default; `init` writes
   the annotated template at `config.go:125-151` with mode `0o644`.
+- **The template MUST parse under the implementation's own validator** and, under
+  §6.5, identically under both parsers. It carries quoted values and `#` comments
+  — exactly the construct §6.3 shows the two parsers disagreeing about — so a
+  template that trips its own ambiguity check would make `init` produce a repo no
+  command can open.
+
+### 6.6 Version strings are not semver
+
+`min_git_sfs_version` and `min_rclone_version` are compared with a hand-rolled
+parser (`config.go:18-33`) that is **not** semver, and every difference is
+load-bearing:
+
+- An optional leading `v` is stripped, so `v1.67.0` parses.
+- Exactly three `.`-separated components are required (`SplitN(s, ".", 3)`), each
+  read with `strconv.Atoi`. `1.60` is an error.
+- Leading zeros are accepted — `1.07.0` reads as `1.7.0`.
+- Prerelease and build metadata are **rejected**: `Atoi("0-beta")` fails, so
+  `1.67.0-beta` is an error.
+
+Comparison is lexicographic over the resulting `[3]int`, and `detected >= minimum`
+passes (`config.go:60-78`).
+
+**The `semver` crate named in rust-rewrite-plan §4.1 inverts all three of the
+first rules.** `semver::Version::parse` rejects a leading `v`, rejects leading
+zeros, and accepts prerelease. Adopting it unmodified is not a refactor — it
+changes which committed configs load.
+
+The leading `v` is the sharp edge, and it is not hypothetical.
+`CheckGitSFSVersion` is called with git-sfs's own `version.Version`
+(`app.go:57`, `doctor.go:60`), and §11 pins that to the tag form: `v1.21.0`. A v2
+parsing it with bare `semver` fails to parse *its own version* and errors on
+every repo that sets `min_git_sfs_version`. The rclone path is safer only by
+luck — `DetectRcloneVersion` strips the `rclone v` prefix before returning
+(`command.go:467-471`), so there only the config-supplied minimum carries a `v`.
+
+v2 may be **more** permissive: accepting `1.67.0-beta`, which v1 rejects, only
+widens the set of configs that load and cannot break a repo that works today. It
+MUST NOT be less permissive on the forms v1 accepts.
 
 ---
 
@@ -437,6 +643,10 @@ a v1 binary in one shell and v2 in another against the same cache. If v2 changes
 the lock path, the directory name, or the acquisition mechanism, both processes
 acquire "the lock" simultaneously and write concurrently to the same cache.
 
+`<name>` is not a placeholder for a single well-known string: there are **five**
+locks, one per command, and which one a process takes is itself part of the
+contract. See §8.2 — it is the clause most likely to be broken by an improvement.
+
 No single-binary test can detect this. The differential suite MUST include a
 cross-binary contention case: hold the lock with the v1 binary, confirm v2
 blocks, and vice versa.
@@ -479,6 +689,50 @@ cause a v1 process's lock to be broken while that process is alive.
 **Known limitation, unchanged:** locks are per-cache and offer no mutual
 exclusion between hosts sharing a network cache. v2 does not fix this; it should
 not pretend otherwise.
+
+### 8.2 There is no single lock — there are five, and the names are frozen
+
+Each command takes a lock named after itself:
+
+| Command | Lock directory | Source |
+|---|---|---|
+| `add` | `locks/add.lock` | `add.go:40` |
+| `import` | `locks/import.lock` | `import.go:59` |
+| `setup` | `locks/setup.lock` | `init.go:90` |
+| `pull` | `locks/pull.lock` | `pull.go:33` |
+| `push` | `locks/push.lock` | `push.go:42` |
+
+Two consequences follow, and they pull in opposite directions.
+
+**First: different commands do not exclude each other.** A concurrent `add` and
+`pull` against one cache take different directories and both proceed. Only two
+instances of the *same* command serialize. Whether that is adequate is a design
+question v2 should answer deliberately — §4.3 describes one place it is already
+not adequate — but it is the behavior today, and it is what a v1 process running
+beside a v2 process will assume.
+
+**Second, and this is the trap: consolidating to a single lock silently removes
+all cross-version mutual exclusion.** One `cache.lock` guarding every mutating
+command is the obvious cleanup. It is *more* correct in isolation. It is also
+exactly the failure §8 exists to prevent: v2's `add` would take `cache.lock`
+while v1's `add` takes `add.lock`, the `mkdir` calls target different paths,
+neither blocks, and two processes write the same cache concurrently — with both
+binaries reporting that they hold the lock.
+
+The nature of the mistake is what makes it dangerous. It arrives disguised as an
+improvement, it passes every single-binary test, and it is invisible until a
+migrating user runs both versions at once — which §8 already establishes is the
+expected case, not an unlucky one.
+
+**v2 requirement:** these five names are mechanism and are frozen. v2 may take
+*more* locks than v1 for a given command — acquiring `add.lock` **and** a broader
+lock is strictly more conservative and cannot break v1 interop — but it MUST NOT
+rename them, and MUST NOT drop v1's name for a command in favor of a different
+one. Strengthening exclusion means adding to the set, never substituting for it.
+
+Ordering matters once a command takes more than one: acquire in a fixed global
+order across all commands, or two v2 processes deadlock against each other while
+correctly excluding v1.
 
 ---
 
@@ -528,6 +782,34 @@ the prefix is not.
 The sentinel error set (`errs/errors.go`) maps to codes as above.
 `ErrMissingCachedFile` and `ErrMissingRemoteFile` are **not** in the exit-3 set
 and fall through to exit 2 — missing is not corrupt.
+
+**`status` without `--remote` makes no network calls at all.** The remote is
+contacted only when a remote name is supplied: `checkRemote := remoteName != ""`
+gates remote selection, preflight, and every per-file query (`status.go:53-71`).
+This is the difference between a command usable on a plane and one that hangs on
+a dead VPN, and it pairs with §10.2's rule for `remotes`. A v2 that resolves or
+preflights the remote eagerly — to report it uniformly, say — breaks it without
+changing a single line of output.
+
+**What `verify` counts as a failure.** Eight issue kinds are enumerated
+(`verify.go:42-51`): unconverted file, broken git symlink, missing cache file,
+corrupt cache file, wrong cache permissions, missing remote file, corrupt remote
+file, invalid config. Any issue makes the run non-zero; the sentinel is chosen by
+severity, with corrupt-cache and **wrong-permissions** both mapping to
+`ErrCorruptCachedFile` (`verify.go:100-111`).
+
+Orphaned cache objects are deliberately *not* an issue kind. They are counted
+separately and printed as a comment, and a repo whose only finding is orphans
+**exits 0** (`verify.go:85-89`, `verify.go:341-344`). This is correct and must be
+preserved: an orphan is unreferenced storage, not damage, and §14 item 8 already
+establishes that v1 cannot even compute the property reliably. Failing CI on it
+would be a false red in the CI-facing command — §9.2's exact failure mode.
+
+**Declared divergence on wrong permissions.** §4.1 permits v2 to treat a writable
+cache object as unverified, hash-verify it, and protect it in place. Where those
+bytes are intact, v2 therefore repairs and exits **0** on a repo where v1 exits
+**3**. That is the intended consequence of §4.1, not a regression, and the
+harness must assert the new result positively rather than diffing against v1.
 
 ### 9.2 Where v1 exits `0` and should not
 

@@ -432,7 +432,13 @@ Nothing else starts until this lands.
 - [x] Write [contract-spec.md](contract-spec.md), grounded in the Go source
 - [x] Fold [failure-modes.md](failure-modes.md) into spec §13 (do-not-reproduce)
 - [x] Resolve spec §14 open divergences — all eight now Resolved or Dissolved
-- [ ] Mine the Go test suite for edge cases; fold into the spec
+- [x] Mine the Go test suite for edge cases; fold into the spec — 14 clause
+      groups added (spec §2, §3.3, §4.2, §4.3, §5.1, §5b, §6.4, §6.6, §8.2, §9.1).
+      Two change v2's design: the lock is **five** locks named per command
+      (§8.2), so the obvious consolidation to one `cache.lock` silently removes
+      all v1↔v2 exclusion; and `semver::Version::parse` (§4.1's chosen crate)
+      rejects the `v`-prefixed tag form git-sfs feeds its own version check
+      (§6.6)
 - [x] Decouple `test/workflows/` from `go build` via `GIT_SFS_BIN`
 - [x] Loosen `scenarios.sh:215` to a structural assertion
 - [x] Build the tree-diff harness; prove it green **Go against Go**
