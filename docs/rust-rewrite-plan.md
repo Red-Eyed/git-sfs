@@ -396,7 +396,8 @@ Nothing else starts until this lands.
 - [x] Build the mode fault-injection hook; prove against v1 — found §13.4's
       push-replicates-rot defect. The chmod-interposer half is deferred until v2
       ships the §7b mode-preservation probe it would test
-- [ ] Capture v1 performance baselines (§9b)
+- [x] Capture v1 performance baselines (§9b) — threshold set at 1.25×, above the
+      measured 1.08× noise floor
 - [ ] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c)
 - [ ] Encode each §13 divergence as a positive assertion (§5.1)
 
@@ -806,6 +807,43 @@ being run:
 
 Phase 7 gates on no regression past a stated threshold. Today the entire
 benchmark surface is `BenchmarkStore8MiB`.
+
+### Captured — and what the numbers may be used for
+
+`test/differential/benchmark.py` drives the **binary**, not internal packages.
+The existing Go benchmarks measure seams that an idiomatic rewrite deletes, so
+they cannot be the baseline; only the command surface is comparable across both
+implementations. `just perf` runs it, `just perf-selfcheck` establishes noise.
+
+**Absolute times do not gate anything.** A millisecond count from one laptop says
+nothing about another machine or another CI runner. The gate is the **ratio
+between two binaries measured side by side in a single run**, which is available
+throughout because v1 survives on `go-legacy`. Committed baselines under
+`test/differential/baselines/` are reference material: they record what the
+workload cost on a named machine, nothing more.
+
+First capture (v1.21.0, Darwin arm64, 10 cpus, 1000×1 KiB files, one 256 MiB
+file, best of 3):
+
+| Operation | v1 |
+|---|---|
+| `add` (1000 files) | 3811 ms |
+| `push` (1000 objects) | 222 ms |
+| `pull` (1000 objects) | 347 ms |
+| `verify` | 15 ms |
+| `verify --rehash` | 75 ms |
+| `add` (one 256 MiB file) | 353 ms — **725 MiB/s** |
+
+**Threshold: 1.25×, per operation.** The self-check — one binary measured under
+two names — returns 0.99–1.08×, so roughly 8% is measurement noise rather than
+signal, concentrated in `add_large` where a single short I/O-bound measurement is
+most exposed to page-cache state. A threshold has to clear that noise floor
+without being so loose it waves through the `rayon`-contention regression this
+section exists to catch; 1.25× does both. Re-run `just perf-selfcheck` on the
+gating machine before trusting it, since the floor is machine-specific.
+
+The SHA-NI claim (§4.1) is now falsifiable: 725 MiB/s on this machine is the
+number to beat, and `add_large` is where it shows up.
 
 ### Tests run at the wrong scale
 

@@ -1,0 +1,26 @@
+{
+  "machine": {
+    "platform": "Darwin arm64",
+    "release": "25.5.0",
+    "cpus": 10
+  },
+  "workload": {
+    "files": 1000,
+    "file_bytes": 1024,
+    "large_bytes": 268435456,
+    "repetitions": 3
+  },
+  "versions": {
+    "v1": "v1.21.0"
+  },
+  "seconds": {
+    "v1": {
+      "add": 3.811138625,
+      "push": 0.22249237499999985,
+      "pull": 0.3466263749999996,
+      "verify": 0.015360790999999985,
+      "rehash": 0.07528349999999939,
+      "add_large": 0.3528783749999995
+    }
+  }
+}

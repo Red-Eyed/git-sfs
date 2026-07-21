@@ -46,6 +46,18 @@ cancellation: build
 mode-preservation: build
     python3 test/differential/mode_preservation.py --binary v1=./git-sfs
 
+# Performance baselines (rust-rewrite-plan 9b). Deliberately NOT part of `check`:
+# this is the nightly/on-demand tier, and it takes minutes rather than seconds.
+# Pass a second --binary to compare implementations side by side, which is the
+# only form the Phase 7 gate accepts -- absolute times are machine-specific.
+perf: build
+    python3 test/differential/benchmark.py --binary v1=./git-sfs
+
+# Self-check: one binary under two names must come out at ratio ~1.0. Establishes
+# the measurement noise floor any regression threshold has to clear.
+perf-selfcheck: build
+    python3 test/differential/benchmark.py --binary a=./git-sfs --binary b=./git-sfs
+
 check: fmt test build workflows differential lock-contention cancellation mode-preservation
     git --no-pager diff --check
 

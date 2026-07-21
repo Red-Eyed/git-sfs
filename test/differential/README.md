@@ -228,6 +228,46 @@ It is OBSERVE today only so the v1 baseline stays green. Flipping it to a
 positive assertion of v2's behavior is the outstanding Phase 0 item "encode each
 §13 divergence as a positive assertion".
 
+## Performance
+
+`benchmark.py` captures the baselines rust-rewrite-plan §9b gates Phase 7 on. It
+is **not** part of `just check` — it takes minutes, and belongs to the nightly
+tier.
+
+```sh
+just perf                 # baseline capture
+just perf-selfcheck       # one binary, two names: establishes the noise floor
+test/differential/benchmark.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+```
+
+It drives the CLI rather than internal packages. That is not incidental: the Go
+benchmarks that exist today (`BenchmarkStore8MiB` and friends) measure seams an
+idiomatic rewrite deletes, so they cannot serve as a cross-implementation
+baseline. The command surface is the only thing both versions share.
+
+Two tiers, because §9b's "tests run at the wrong scale" applies here too — every
+workflow scenario uses twelve-byte files:
+
+| Tier | Shape | Catches |
+|---|---|---|
+| count | 1000 × 1 KiB | per-object overhead, locks, syscalls, walk cost |
+| throughput | 1 × 256 MiB | the hashing hot path, where the SHA-NI claim lives |
+
+Payload bytes differ per file on purpose. Identical contents would make every
+file after the first a dedup hit, which measures the dedup check rather than
+ingest.
+
+**Absolute numbers gate nothing.** A time from one laptop says nothing about
+another machine, so the acceptance criterion is the ratio between two binaries
+measured side by side in one run — available throughout, since v1 survives on
+`go-legacy`. Files under `baselines/` are reference captures, not thresholds.
+
+The self-check is what makes a threshold defensible: one binary under two names
+returns 0.99–1.08×, so ~8% is noise, concentrated in `add_large` where a single
+short I/O-bound measurement is most exposed to page-cache state. The plan sets
+the gate at 1.25×. Re-run the self-check on whatever machine does the gating —
+the floor is machine-specific.
+
 ## Writing a scenario
 
 A scenario is a bash file in `scenarios/`, sourced with `lib.sh` already loaded.
