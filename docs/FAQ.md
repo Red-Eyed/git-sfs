@@ -325,6 +325,81 @@ repo silently means something different.
 
 ## Interrupts
 
+### I hit Ctrl-C during `git-sfs push` or `pull` — or the process gets killed outright (OOM, crash, machine/server restart) or the network drops. Recoverable?
+
+Depends on which of three things happened, and they have three different answers.
+
+**Plain Ctrl-C (or a graceful shutdown signal), one press.** This is the safe case.
+`main` turns SIGINT *and* SIGTERM into context cancellation
+([main.go:45](../cmd/git-sfs/main.go#L45)), so a single Ctrl-C, and a normal "your
+process has 30 seconds" shutdown signal from systemd/CI/a container orchestrator, both
+unwind cleanly: the in-flight `rclone` subprocess is killed
+([command.go:347](../internal/remote/command.go#L347)), the call returns
+`context.Canceled`, and the deferred lock release still runs
+([push.go:46](../internal/core/push.go#L46),
+[pull.go:37](../internal/core/pull.go#L37)) because that's ordinary Go code unwinding,
+not a hard kill. The command prints `canceled` and exits `130`
+([main.go:47-54](../cmd/git-sfs/main.go#L47-L54)). **Rule: just re-run the same
+command.** Push re-diffs by cache presence and `--checksum`
+([push.go:58](../internal/core/push.go#L58),
+[command.go:248](../internal/remote/command.go#L248)); pull re-diffs by `HasValid` and
+`--ignore-existing` ([pull.go:69](../internal/core/pull.go#L69)) — already-transferred
+files are skipped, not redone.
+
+**A hard kill (`kill -9`, OOM killer, power loss, host crash, a second impatient
+Ctrl-C).** This is where recovery stops being automatic. None of the Go code above runs
+— no deferred lock release — so the `push.lock` or `pull.lock` directory is left behind,
+and it has no staleness check, no PID-liveness check, and no timeout
+([lock.go:29-53](../internal/lock/lock.go#L29-L53), covered above under *Locks*). The
+next invocation of that same command, on that machine, waits on the lock **forever**.
+Recovery is the same manual step as the OOM-killed-push case above: `rm -rf` the
+specific `<cache>/locks/<name>.lock` directory, then re-run. This is the only step that
+isn't automatic — everything else below still holds.
+
+**What happens to the data itself in a hard kill, independent of the lock:**
+
+- *Local cache, during `pull`.* Safe. Downloads stage through rclone's own temp file
+  before the final rename — the comment at
+  [command.go:261-263](../internal/remote/command.go#L261-L263) is explicit that this
+  is why `--temp-dir` is routed through `<cache>/tmp`. A kill mid-download leaves at
+  worst an orphaned temp file, never a truncated file at the real cache path, and the
+  *next* `pull` calls `PurgeTmp()` — `RemoveAll(<cache>/tmp)` — as its first action
+  before it does anything else ([pull.go:30-32](../internal/core/pull.go#L30-L32)),
+  clearing it automatically. Even in the narrow case where a kill lands between
+  rclone's rename and git-sfs's own hash-verify-and-protect step, the file is left
+  writable, and `HasValid` treats a writable file as unverified and re-hashes it
+  before trusting it ([cache.go:63-81](../internal/cache/cache.go#L63-L81)) — corrupt
+  ones get deleted and redownloaded automatically
+  ([pull.go:80-87](../internal/core/pull.go#L80-L87)). One sharp edge shared with any
+  `pull`, not specific to crashes: that same startup `PurgeTmp()` can destroy an
+  in-flight `import --move`'s staging file if the two race (see the *Locks* section
+  above).
+- *Local cache, during `push`.* Never at risk — push only reads the cache, it never
+  writes to it ([push.go:70](../internal/core/push.go#L70)).
+- *Remote copy, during `push`.* The honest answer is "depends on the backend, and
+  git-sfs cannot tell you which happened." `CopyToRemote` writes straight to the final
+  remote path with no temp-path-then-publish step of its own
+  ([command.go:248](../internal/remote/command.go#L248); the "Remote Writes" section of
+  [safety.md](safety.md) claims otherwise — code doesn't implement it, see the "When
+  git-sfs tells you something untrue" section above). On an object store (S3/GCS/Azure)
+  each write is one atomic PUT, so a kill mid-upload means nothing landed — the remote
+  is simply missing the object, and the next `push` uploads it cleanly. On SFTP/WebDAV/
+  local/NFS/SMB destinations, whether a kill mid-write leaves a truncated object at the
+  final path depends on rclone's own write mode for that backend, which git-sfs does not
+  control or verify (same hazard as the "two users push at once" question above). Push
+  never reads back what it sent — nothing here is checked automatically. **Rule: after
+  any hard-killed push to a non-object-store backend, run `git-sfs verify --check-remote
+  --with-integrity` before trusting the remote as a backup.**
+
+**A network drop that doesn't kill the process.** Handled below the level you'd notice.
+Every `rclone` invocation is wrapped in a retry loop — up to 3 attempts by default,
+exponential backoff starting at 1 second — and only gives up and returns a real,
+non-zero-exit error after that's exhausted
+([command.go:374-402](../internal/remote/command.go#L374-L402)). A transient blip is
+usually invisible; a genuinely dead connection surfaces as a normal command failure, not
+a silent success, and re-running is safe for the same idempotency reasons as the Ctrl-C
+case.
+
 ### I hit Ctrl-C during `git-sfs add`. What state am I in?
 
 A mixed one. Files already processed are symlinks; the rest are still regular files, and
