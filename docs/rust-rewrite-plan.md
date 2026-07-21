@@ -543,6 +543,54 @@ everything above it inherits the mistake.
 `Store`, `Remote`, `Repo` traits; rclone and filesystem implementations; test
 fakes.
 
+- [x] `Cancellable<R: Read>` (§2.4) —
+      `crates/git-sfs-core/src/ports/cancellable_io.rs`. Checks a `Cancel` flag
+      on every `read()`, so `io::copy` over a `Cancellable` source inherits
+      prompt cancellation structurally. Deliberately does **not** signal via
+      `io::ErrorKind::Interrupted` — `io::copy`'s generic path treats that kind
+      as EINTR-style and silently retries, which would make a canceled copy
+      loop instead of stop; a private marker type on `ErrorKind::Other`,
+      recovered via `is_canceled`, is used instead
+- [x] `Store` trait + `CacheEntry` (§2.2, "the highest-value" invariant) +
+      `FsStore` (real) + `FakeStore` (in-memory) —
+      `crates/git-sfs-core/src/ports/store.rs`. `CacheEntry` has no public
+      constructor or fields; the only way to obtain one is `Store::verified`
+      or `Store::store`, both of which trusted an already-read-only object or
+      freshly hash-verified one first. `verified()` returns `Result<Option<_>,
+      StoreError>` — three states, not two, so a permission-denied `stat`
+      (§2.5's exact defect class: v1's `HasValid` collapsed *any* stat error
+      into "absent") cannot be mistaken for genuine absence; a present-but-
+      wrong-content object is `Err(HashMismatch)`, not `Ok(None)`, since
+      corrupt and missing are different classes (§9.1). A writable object is
+      hash-verified and chmod'd read-only in place — both the §4.1 legacy-
+      migration path and §9.1's declared wrong-permissions divergence.
+      `store()` verifies the copied bytes **before** publishing (stricter than
+      v1's verify-after-rename-then-remove-on-failure sequence: a corrupt
+      object is never even briefly visible at its trusted path), and fsyncs
+      the parent directory after rename — a durability gap §13.2 flags in v1
+      ("atomic" is not "durable"). Every staging write goes through
+      `tempfile::Builder::tempfile_in` pointed at the cache's own `tmp/`,
+      never the bare `NamedTempFile::new()` that defaults to system `/tmp` —
+      a full system-wide `/tmp` on a shared cluster has taken git-sfs down
+      before even though the cache itself, on a separate filesystem, had
+      room; now documented as its own failure mode (failure-modes.md §7,
+      contract-spec §13.4)
+- [ ] `Store::adopt` (rename/move semantics for `import --move`, including the
+      cross-device `EXDEV` fallback contract-spec §4.2 requires) — not yet
+      built; `store()` (copy) covers the write-protocol invariants that
+      matter most and was the priority for this pass
+- [ ] `Remote` trait + rclone subprocess implementation + fake — not started.
+      The real implementation must fix the asymmetry just found in v1: `push`
+      never sets rclone's own `--temp-dir` at all, and `pull` only warns (not
+      errors) when it is unset — both must become hard requirements, matching
+      the no-system-tmp rule `Store` already enforces
+- [ ] `Lock` (§8) — not started. Deliberately **not** a trait: there is one
+      real implementation (mkdir-based, frozen name/mechanism) and no second
+      one is contemplated, so per §3.3 it does not clear the bar for an
+      abstraction. Needs the liveness check and non-infinite wait §8.1
+      requires, on top of the five frozen lock names of §8.2
+- [ ] `Repo` trait (symlink scanning, §3.3/§5b operation scope) — not started
+
 ### Phase 4 — commands
 
 Dependency order: `init`/`setup` → `add`/`import`/`mv` → `status`/`remotes` →

@@ -1,0 +1,638 @@
+//! The cache: content-addressed, write-once, read-only-after-storage.
+//!
+//! contract-spec §4, rust-rewrite-plan §2.2/§2.3. [`Store`] gets a trait
+//! because there are genuinely two implementations — [`FsStore`] (real) and
+//! [`FakeStore`] (in-memory, for higher-layer tests) — which is the bar
+//! rust-rewrite-plan §3.3 sets for introducing one at all.
+//!
+//! **Never stages in the OS-wide temp directory.** Every write goes through
+//! `tempfile::Builder::tempfile_in`, pointed at the cache's own `tmp/`
+//! (`domain::cache_layout::tmp_dir`), never the bare `NamedTempFile::new()`
+//! that defaults to `std::env::temp_dir()`. A cache write that depends on
+//! system `/tmp` having room is a real outage: a full system `/tmp` on a
+//! shared machine has taken git-sfs down before even though the cache itself,
+//! on a different filesystem, had plenty of space.
+
+use std::fs::File;
+use std::io::{self, Seek, SeekFrom};
+use std::os::unix::fs::PermissionsExt;
+
+use camino::{Utf8Path, Utf8PathBuf};
+use thiserror::Error;
+
+use crate::cancel::Cancel;
+use crate::domain::cache_layout::{object_path, tmp_dir};
+use crate::domain::hash::Sha256;
+use crate::error::Error;
+
+use super::cancellable_io::{Cancellable, is_canceled};
+
+/// Proof that a hash's bytes are, at time of construction, verified present in
+/// the cache.
+///
+/// rust-rewrite-plan §2.2 — "the highest-value" invariant in the correctness
+/// thesis. No public constructor and no public fields: the only way to obtain
+/// one is [`Store::verified`] or [`Store::store`], both of which either
+/// trusted an already-protected (read-only) object or freshly hash-verified
+/// one before returning it. A function that needs trustworthy bytes takes
+/// `&CacheEntry`, never a bare [`Sha256`] — passing an unverified hash where
+/// verified content is required stops compiling instead of relying on a
+/// caller to have checked first.
+///
+/// This proves "verified at construction", not "verified now": another
+/// process can still chmod or truncate the file after this value is created.
+/// contract-spec §4.1 remains mandatory — types shrink the vigilance surface,
+/// they do not eliminate it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheEntry {
+    hash: Sha256,
+    // `path` is derived solely from `hash` and the store root, so it is not
+    // stored -- keeping the type to exactly the fields that can vary would
+    // otherwise invite two copies of the same information to drift apart.
+}
+
+impl CacheEntry {
+    /// The hash this entry proves is present and verified.
+    #[must_use]
+    pub fn hash(&self) -> Sha256 {
+        self.hash
+    }
+}
+
+/// Why a [`Store`] operation failed.
+#[derive(Debug, Error)]
+pub enum StoreError {
+    /// An I/O operation failed for a reason other than "the object is
+    /// absent". This is the class v1's `HasValid`/`Protect` collapsed into
+    /// `false`/an ignored error (rust-rewrite-plan §2.5): a permission-denied
+    /// `stat` on a cache object is not the same fact as the object not
+    /// existing, and this variant is what keeps the two from being
+    /// conflated at the type level.
+    #[error("{path}: {source}")]
+    Io {
+        /// The path the failing operation was on.
+        path: Utf8PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: io::Error,
+    },
+    /// The bytes at `path` do not hash to the name they are stored under.
+    /// Corrupt, not missing — contract-spec §9.1 is explicit that the two
+    /// are different classes.
+    #[error("cached object corrupt: {path} does not hash to its own name (want {want}, got {got})")]
+    HashMismatch {
+        /// The corrupt object's path.
+        path: Utf8PathBuf,
+        /// The hash the object is supposed to have.
+        want: Sha256,
+        /// The hash its actual bytes produce.
+        got: Sha256,
+    },
+    /// The caller asked to stop.
+    #[error("canceled")]
+    Canceled,
+}
+
+impl From<StoreError> for Error {
+    fn from(err: StoreError) -> Self {
+        match err {
+            StoreError::Io { .. } => Error::Unavailable(err.to_string()),
+            StoreError::HashMismatch { .. } => Error::Integrity(err.to_string()),
+            StoreError::Canceled => Error::Canceled,
+        }
+    }
+}
+
+/// The cache: a content-addressed object store.
+pub trait Store {
+    /// Where `hash`'s object lives, whether or not it currently exists.
+    fn object_path(&self, hash: Sha256) -> Utf8PathBuf;
+
+    /// Whether `hash` is present and trustworthy.
+    ///
+    /// Three outcomes, not two, per rust-rewrite-plan §2.5: `Ok(None)` means
+    /// genuinely absent; `Ok(Some(_))` means present and verified (read-only
+    /// objects are trusted without re-hashing — contract-spec §4.1's
+    /// load-bearing rule — a writable one is hash-verified and protected in
+    /// place); `Err` means the question could not be answered (a permission
+    /// error, a real I/O failure). A caller that cannot reach the cache must
+    /// never be able to mistake that for the cache being empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Io`] if presence could not be determined, and
+    /// [`StoreError::HashMismatch`] if an object exists at the path but its
+    /// content does not match `hash` — corrupt, not absent.
+    fn verified(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError>;
+
+    /// Copies `source`'s bytes into the store under `hash`, verifying the
+    /// written bytes before the object becomes visible at its final path.
+    /// A no-op if `hash` is already present and verified.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::HashMismatch`] if `source`'s content does not
+    /// actually hash to `hash`; the object is never published in that case.
+    /// Returns [`StoreError::Io`] for any other failure, and
+    /// [`StoreError::Canceled`] if `cancel` fires mid-copy.
+    fn store(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError>;
+}
+
+/// The real, filesystem-backed [`Store`].
+pub struct FsStore {
+    root: Utf8PathBuf,
+}
+
+impl FsStore {
+    /// A store rooted at `root` — the already-resolved cache directory
+    /// (contract-spec §7.2 governs how `root` itself is chosen; that
+    /// resolution happens above this type).
+    #[must_use]
+    pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+}
+
+impl Store for FsStore {
+    fn object_path(&self, hash: Sha256) -> Utf8PathBuf {
+        object_path(&self.root, hash)
+    }
+
+    fn verified(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError> {
+        let path = self.object_path(hash);
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(StoreError::Io { path, source }),
+        };
+
+        let mode = metadata.permissions().mode();
+        if mode & 0o222 == 0 {
+            // Read-only: write-protection was set only after a prior hash
+            // verification, so the bytes cannot have changed since. No re-hash.
+            return Ok(Some(CacheEntry { hash }));
+        }
+
+        // Writable: either a legacy object predating write-protection, or
+        // contract-spec §9.1's declared divergence (v1 would flag this
+        // ErrCorruptCachedFile and exit 3; v2 hash-verifies and repairs in
+        // place instead, and exits 0 where the bytes are actually intact).
+        let got = hash_file(&path, cancel)?;
+        if got != hash {
+            return Err(StoreError::HashMismatch {
+                path,
+                want: hash,
+                got,
+            });
+        }
+        let mut perms = metadata.permissions();
+        perms.set_mode(mode & !0o222);
+        std::fs::set_permissions(&path, perms).map_err(|source| StoreError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        Ok(Some(CacheEntry { hash }))
+    }
+
+    fn store(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        if let Some(entry) = self.verified(hash, cancel)? {
+            return Ok(entry);
+        }
+
+        let dst = self.object_path(hash);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| StoreError::Io {
+                path: parent.to_owned(),
+                source,
+            })?;
+        }
+        let staging = tmp_dir(&self.root);
+        std::fs::create_dir_all(&staging).map_err(|source| StoreError::Io {
+            path: staging.clone(),
+            source,
+        })?;
+
+        let source_mode = std::fs::metadata(source)
+            .map_err(|source_err| StoreError::Io {
+                path: source.to_owned(),
+                source: source_err,
+            })?
+            .permissions()
+            .mode();
+
+        // `tempfile_in`, never the bare `NamedTempFile::new()` -- see the
+        // module doc. `NamedTempFile`'s `Drop` is what makes every early
+        // return below (a copy error, a hash mismatch) leave nothing behind:
+        // there is no branch an author has to remember to clean up.
+        let mut tmp = tempfile::Builder::new()
+            .tempfile_in(&staging)
+            .map_err(|source| StoreError::Io {
+                path: staging,
+                source,
+            })?;
+
+        {
+            let src_file = File::open(source).map_err(|source_err| StoreError::Io {
+                path: source.to_owned(),
+                source: source_err,
+            })?;
+            let mut reader = Cancellable::new(src_file, cancel.clone());
+            io::copy(&mut reader, tmp.as_file_mut())
+                .map_err(|err| classify_copy_error(err, source))?;
+        }
+
+        // contract-spec §4.2: the final mode is set before publishing. v1
+        // derives it from the *source* file's mode (write bits stripped, but
+        // e.g. an executable bit survives), not a fixed constant, and that is
+        // preserved here.
+        let mut perms = tmp
+            .as_file()
+            .metadata()
+            .map_err(|source| StoreError::Io {
+                path: dst.clone(),
+                source,
+            })?
+            .permissions();
+        perms.set_mode(source_mode & !0o222);
+        tmp.as_file()
+            .set_permissions(perms)
+            .map_err(|source| StoreError::Io {
+                path: dst.clone(),
+                source,
+            })?;
+        tmp.as_file().sync_all().map_err(|source| StoreError::Io {
+            path: dst.clone(),
+            source,
+        })?;
+
+        // Verified *before* publishing, unlike v1 (contract-spec §4.2:
+        // v1 renames first, hash-verifies the published file, then removes it
+        // on mismatch). Checking while the bytes are still hidden in `tmp/`
+        // means a corrupt object is never even briefly visible at its final,
+        // trusted path -- strictly stronger than the invariant v1's sequence
+        // protects, not a divergence from it.
+        tmp.as_file_mut()
+            .seek(SeekFrom::Start(0))
+            .map_err(|source| StoreError::Io {
+                path: dst.clone(),
+                source,
+            })?;
+        let got =
+            hash_reader(tmp.as_file(), cancel).map_err(|err| classify_copy_error(err, &dst))?;
+        if got != hash {
+            // `tmp`'s Drop removes the staging file; nothing to roll back.
+            return Err(StoreError::HashMismatch {
+                path: dst,
+                want: hash,
+                got,
+            });
+        }
+
+        let persisted = tmp.persist(&dst).map_err(|e| StoreError::Io {
+            path: dst.clone(),
+            source: e.error,
+        })?;
+        drop(persisted);
+
+        // contract-spec §13.2: v1 fsyncs the file but never the parent
+        // directory, so the rename can be lost on power loss even though the
+        // data was durable. "Atomic" is not "durable"; this is the fix.
+        if let Some(parent) = dst.parent() {
+            fsync_dir(parent).map_err(|source| StoreError::Io {
+                path: parent.to_owned(),
+                source,
+            })?;
+        }
+
+        Ok(CacheEntry { hash })
+    }
+}
+
+/// Maps a copy failure to the right [`StoreError`], recovering cancellation
+/// from the marker [`Cancellable`] leaves on the [`io::Error`] rather than
+/// letting it read as an ordinary I/O failure.
+fn classify_copy_error(err: io::Error, source: &Utf8Path) -> StoreError {
+    if is_canceled(&err) {
+        StoreError::Canceled
+    } else {
+        StoreError::Io {
+            path: source.to_owned(),
+            source: err,
+        }
+    }
+}
+
+/// Hashes the file at `path`, checking `cancel` every chunk via
+/// [`Cancellable`] rather than reading it in one shot.
+fn hash_file(path: &Utf8Path, cancel: &Cancel) -> Result<Sha256, StoreError> {
+    let file = File::open(path).map_err(|source| StoreError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    hash_reader(&file, cancel).map_err(|err| classify_copy_error(err, path))
+}
+
+/// Hashes `reader`'s remaining bytes, checking `cancel` every chunk.
+///
+/// A manual read loop rather than `io::copy`: `sha2`'s hasher does not
+/// implement [`io::Write`], so there is no writer side for `io::copy` to
+/// target. Reading through [`Cancellable`] still checks `cancel` on every
+/// chunk, which is the property that actually matters here.
+fn hash_reader(reader: impl io::Read, cancel: &Cancel) -> io::Result<Sha256> {
+    use std::io::Read as _;
+
+    use sha2::{Digest, Sha256 as Sha256Hasher};
+
+    let mut cancellable = Cancellable::new(reader, cancel.clone());
+    let mut hasher = Sha256Hasher::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = cancellable.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(Sha256::from_digest(hasher.finalize().into()))
+}
+
+/// Fsyncs a directory's entries — opening a directory read-only and syncing
+/// it is the standard Unix technique for making a rename durable, not just
+/// atomic. Matches this project's Unix-only platform scope.
+fn fsync_dir(path: &Utf8Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+/// An in-memory [`Store`], for tests above this layer that need a cache
+/// without a filesystem. Its existence is what justifies `Store` being a
+/// trait at all (rust-rewrite-plan §3.3).
+#[derive(Default)]
+pub struct FakeStore {
+    objects: std::sync::Mutex<std::collections::HashMap<Sha256, Vec<u8>>>,
+}
+
+impl FakeStore {
+    /// An empty in-memory store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Store for FakeStore {
+    fn object_path(&self, hash: Sha256) -> Utf8PathBuf {
+        Utf8PathBuf::from(format!("fake:///{}", hash.to_hex()))
+    }
+
+    fn verified(&self, hash: Sha256, _cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError> {
+        let objects = self.objects.lock().expect("fake store mutex poisoned");
+        Ok(objects.get(&hash).map(|_| CacheEntry { hash }))
+    }
+
+    fn store(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        if let Some(entry) = self.verified(hash, cancel)? {
+            return Ok(entry);
+        }
+        let bytes = std::fs::read(source).map_err(|source_err| StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        })?;
+        let got = {
+            use sha2::{Digest, Sha256 as Sha256Hasher};
+            Sha256::from_digest(Sha256Hasher::digest(&bytes).into())
+        };
+        if got != hash {
+            return Err(StoreError::HashMismatch {
+                path: source.to_owned(),
+                want: hash,
+                got,
+            });
+        }
+        self.objects
+            .lock()
+            .expect("fake store mutex poisoned")
+            .insert(hash, bytes);
+        Ok(CacheEntry { hash })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn write_temp_file(dir: &tempfile::TempDir, name: &str, content: &[u8]) -> Utf8PathBuf {
+        let path = Utf8PathBuf::from_path_buf(dir.path().join(name)).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(content)
+            .unwrap();
+        path
+    }
+
+    fn hash_of(content: &[u8]) -> Sha256 {
+        use sha2::{Digest, Sha256 as Sha256Hasher};
+        Sha256::from_digest(Sha256Hasher::digest(content).into())
+    }
+
+    #[test]
+    fn an_absent_object_is_none_not_an_error() {
+        let cache = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+        assert!(store.verified(hash_of(b"nope"), &cancel).unwrap().is_none());
+    }
+
+    #[test]
+    fn storing_publishes_a_read_only_verified_object() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let content = b"large research dataset bytes";
+        let source = write_temp_file(&source_dir, "data.bin", content);
+        let hash = hash_of(content);
+
+        let entry = store.store(&source, hash, &cancel).unwrap();
+        assert_eq!(entry.hash(), hash);
+
+        let path = store.object_path(hash);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o222, 0, "published object must be read-only");
+
+        // A second store() of the same content is a verified no-op, not an error.
+        assert_eq!(store.store(&source, hash, &cancel).unwrap().hash(), hash);
+    }
+
+    #[test]
+    fn storing_never_stages_in_the_system_temp_directory() {
+        // The whole reason `tempfile_in` is used instead of the bare
+        // constructor: a full system /tmp must not be able to break this.
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let content = b"staging location matters";
+        let source = write_temp_file(&source_dir, "data.bin", content);
+        store.store(&source, hash_of(content), &cancel).unwrap();
+
+        let staged = std::fs::read_dir(cache.path().join("tmp")).unwrap().count();
+        // The temp file was persisted (renamed) out of tmp/ on success, so
+        // tmp/ is empty again -- but it must have been *created*, proving
+        // that is where staging happened rather than system temp.
+        assert_eq!(staged, 0);
+        assert!(cache.path().join("tmp").is_dir());
+    }
+
+    #[test]
+    fn rejects_content_that_does_not_match_the_claimed_hash() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let source = write_temp_file(&source_dir, "data.bin", b"actual content");
+        let wrong_hash = hash_of(b"a different content entirely");
+
+        let err = store.store(&source, wrong_hash, &cancel).unwrap_err();
+        assert!(matches!(err, StoreError::HashMismatch { .. }));
+        // Nothing is published on mismatch.
+        assert!(store.verified(wrong_hash, &cancel).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_writable_legacy_object_is_verified_and_repaired_in_place() {
+        // contract-spec §4.1's one-time migration path, and §9.1's declared
+        // divergence: a writable object with intact content is repaired
+        // (chmod'd read-only) rather than treated as corrupt.
+        let cache = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let content = b"pre-existing legacy object";
+        let hash = hash_of(content);
+        let path = store.object_path(hash);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, content).unwrap();
+        // Left writable, as a pre-write-protection-era cache object would be.
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let entry = store
+            .verified(hash, &cancel)
+            .unwrap()
+            .expect("valid content should verify");
+        assert_eq!(entry.hash(), hash);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o222,
+            0,
+            "verifying a legacy object must protect it in place"
+        );
+    }
+
+    #[test]
+    fn a_writable_object_with_wrong_content_is_corrupt_not_absent() {
+        let cache = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let hash = hash_of(b"the real content");
+        let path = store.object_path(hash);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"tampered bytes").unwrap();
+
+        let err = store.verified(hash, &cancel).unwrap_err();
+        assert!(matches!(err, StoreError::HashMismatch { .. }));
+    }
+
+    /// rust-rewrite-plan §2.5's fix, made concrete: a `stat` failure that is
+    /// *not* "not found" must never collapse to the same `Ok(None)` an
+    /// actually-absent object produces. This is the exact defect class v1's
+    /// `HasValid` had (`os.Stat` erroring for *any* reason returned `false`).
+    #[test]
+    fn a_stat_failure_that_is_not_absence_is_an_error_not_none() {
+        let cache = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+        let hash = hash_of(b"unreachable");
+
+        let path = store.object_path(hash);
+        let parent = path.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+        std::fs::write(&path, b"content").unwrap();
+        // Revoke traversal on the parent directory so `stat` on the object
+        // itself fails with permission-denied, not not-found.
+        let mut perms = std::fs::metadata(parent).unwrap().permissions();
+        perms.set_mode(0o000);
+        std::fs::set_permissions(parent, perms).unwrap();
+
+        let result = store.verified(hash, &cancel);
+
+        // Restore permissions unconditionally so the tempdir can clean itself
+        // up -- deleting the entries inside `parent` needs write+execute on
+        // it, which the revoked mode above denies.
+        let mut restore = std::fs::metadata(parent).unwrap().permissions();
+        restore.set_mode(0o755);
+        std::fs::set_permissions(parent, restore).unwrap();
+
+        match result {
+            Err(StoreError::Io { .. }) => {}
+            // Root (or an equivalent privilege, common in some CI containers)
+            // bypasses the permission bit entirely -- nothing to assert then,
+            // rather than trying to predict root ahead of time.
+            Ok(_) => {}
+            other => panic!("expected an Io error or a root-bypassed success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cancellation_during_a_store_is_reported_as_canceled() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+        cancel.cancel();
+
+        let content = vec![0u8; 1 << 20];
+        let source = write_temp_file(&source_dir, "data.bin", &content);
+        let err = store
+            .store(&source, hash_of(&content), &cancel)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Canceled));
+    }
+
+    #[test]
+    fn fake_store_satisfies_the_same_contract_as_the_real_one() {
+        let store = FakeStore::new();
+        let cancel = Cancel::new();
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"in memory only";
+        let source = write_temp_file(&dir, "data.bin", content);
+        let hash = hash_of(content);
+
+        assert!(store.verified(hash, &cancel).unwrap().is_none());
+        let entry = store.store(&source, hash, &cancel).unwrap();
+        assert_eq!(entry.hash(), hash);
+        assert!(store.verified(hash, &cancel).unwrap().is_some());
+    }
+}

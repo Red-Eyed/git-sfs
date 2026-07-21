@@ -303,6 +303,26 @@ assume it.
 - [ ] **rclone is an unpinned external binary.** A version check exists but is opt-in via
       `min_rclone_version`. Behavior of `--ignore-existing`, `--checksum`, and `--temp-dir`
       is assumed across all versions and all backends.
+- [ ] **A full system-wide `/tmp` can silently break `pull`, and always breaks `push`'s
+      staging.** `writeTempPathList` ([command.go:210-224](../internal/remote/command.go#L210-L224))
+      writes the `--files-from` list "in `r.tempDir` (or the OS temp dir when unset)" — its
+      own doc comment. `CopyFromRemote` ([command.go:261-270](../internal/remote/command.go#L261-L270))
+      knows this is dangerous — the comment there says routing rclone's own `--temp-dir`
+      through the cache keeps download staging on the same filesystem as the final cache
+      files, "makes the final rename atomic" — but an empty `tempDir` only prints a warning
+      to stderr and proceeds anyway; it is not a hard error. `CopyToRemote`
+      ([command.go:234-248](../internal/remote/command.go#L234-L248)), push's upload path, does
+      not even attempt to set `--temp-dir` for rclone itself, so rclone's own upload-side
+      staging always falls back to system default. **Confirmed against a real incident, not
+      just source reading:** a full system-wide `/tmp` on a shared cluster took git-sfs down
+      even though the cache itself, on a separate filesystem, had plenty of space.
+      `CheckFile` ([command.go:181-190](../internal/remote/command.go#L181-L190)) has the same
+      "OS temp when unset" fallback for its own verification-download staging.
+
+**Never go there:** don't let a directory nobody sized for this tool's workload be load-bearing.
+Every temp file this tool creates — its own, and every one it asks rclone to create — must
+live under the cache's own `tmp/`, never system `/tmp`, and an unconfigured temp location
+should be a hard error, not a warning a script can miss in a scrollback.
 
 **Never go there:** don't let the redundant copy be the unverified one. Push should
 confirm what landed, at least by size, and `verify --check-remote` should compare it (§4).

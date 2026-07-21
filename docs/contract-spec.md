@@ -1071,6 +1071,20 @@ regression.
   concern a single hash — and it is reached from `status --remote` and
   `verify --check-remote`, both casual commands. v2 should query the specific
   paths it needs, or stream-parse rather than materialize.
+- **A full system-wide `/tmp` can silently break `pull`, and always affects
+  `push`'s own staging.** `writeTempPathList` (`command.go:210-224`) writes the
+  `--files-from` list "in `r.tempDir` (or the OS temp dir when unset)" — its own
+  doc comment. `CopyFromRemote` (`command.go:261-270`) knows routing rclone's own
+  `--temp-dir` through the cache keeps download staging on the same filesystem
+  as the final cache files "so the final rename is atomic" — but an empty
+  `tempDir` only warns to stderr and proceeds anyway, never a hard error.
+  `CopyToRemote` (`command.go:234-248`), push's upload path, does not attempt to
+  set `--temp-dir` for rclone at all. **Confirmed against a real incident:** a
+  full system-wide `/tmp` on a shared cluster took git-sfs down even though the
+  cache itself, on a separate filesystem, had room. v2 must never stage a write
+  — its own, or one it delegates to rclone via `--temp-dir` — outside the
+  cache's own `tmp/`, and an unconfigured temp location must be a hard error,
+  not a warning a script can miss.
 
 ### 13.4b Defaults that place data in harm's way
 
