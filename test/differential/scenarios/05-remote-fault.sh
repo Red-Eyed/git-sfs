@@ -27,15 +27,29 @@ commit_all "track dataset"
   require push git_sfs push
 )
 
-# Deny only per-object queries. The connectivity preflight still succeeds, so
-# this reaches HasFile/FileSize -- where contract-spec 13.3 says any rclone
-# error is reported as "the object is not on the remote".
-inject_fault '{"subcommand": "lsjson", "contains": "/files/sha256/", "exit": 1, "stderr": "403 Forbidden: access denied"}'
+# Deny only the object listing. The connectivity preflight issues `lsd local:`
+# and a bare `lsjson` on the remote root, neither of which is recursive, so
+# matching on --recursive lets the preflight pass and denies exactly the query
+# that enumerates objects (FileSizes, command.go:525).
+#
+# Targeting "/files/sha256/" instead would match nothing at all: no command
+# git-sfs issues names an individual object via lsjson. An earlier version of
+# this scenario did exactly that, and the fault never fired -- see README,
+# "Agreement is not correctness".
+inject_fault '{"subcommand": "lsjson", "contains": "--recursive", "exit": 1, "stderr": "403 Forbidden: access denied"}'
+
+# The other collapse site: with --with-integrity, verify fetches each object via
+# copyto (CheckFile, command.go:195), which also returns "absent" on any error.
+inject_fault '{"subcommand": "copyto", "exit": 1, "stderr": "403 Forbidden: access denied"}'
 
 (
   cd "$REPO"
+  # status discards the error outright (status.go:96, `sizes, _ :=`) and treats
+  # every object as absent, so a denied remote is indistinguishable from an
+  # empty one -- and it still exits 0.
   record status_object_denied git_sfs status --remote default
   record verify_object_denied git_sfs verify --check-remote data
+  record verify_integrity_denied git_sfs verify --check-remote --with-integrity data
 )
 
 # Deny everything, including the preflight. v1 reports this one honestly, so the

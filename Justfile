@@ -46,6 +46,12 @@ cancellation: build
 mode-preservation: build
     python3 test/differential/mode_preservation.py --binary v1=./git-sfs
 
+# Downgrade invariant (rust-rewrite-plan 7c): v1 must still operate anything v2
+# has touched. Pass both binaries to exercise the real handoff in both
+# directions; with one it is a self-check of every handoff step.
+downgrade: build
+    python3 test/differential/downgrade.py --binary v1=./git-sfs
+
 # Performance baselines (rust-rewrite-plan 9b). Deliberately NOT part of `check`:
 # this is the nightly/on-demand tier, and it takes minutes rather than seconds.
 # Pass a second --binary to compare implementations side by side, which is the
@@ -58,7 +64,7 @@ perf: build
 perf-selfcheck: build
     python3 test/differential/benchmark.py --binary a=./git-sfs --binary b=./git-sfs
 
-check: fmt test build workflows differential lock-contention cancellation mode-preservation
+check: fmt test build workflows differential lock-contention cancellation mode-preservation downgrade
     git --no-pager diff --check
 
 release-snapshot:

@@ -41,7 +41,9 @@ it satisfies the same observable contract."
 ## 2. Correctness thesis
 
 The rewrite is only worth it if invariants currently held in comments and runtime
-checks become invariants the compiler enforces. Four qualify.
+checks become invariants the compiler enforces. Five qualify — and §2.5, keeping
+errors from being discarded, is the one with the widest blast radius, since an
+entire section of the do-not-reproduce list turns out to be downstream of it.
 
 ### 2.1 `Hash` is a string alias with a silent-degradation path
 
@@ -93,7 +95,51 @@ hand-writes it today. **Rust:** a `Cancellable<R: Read>` adapter checking the fl
 on each `read()`. Hashing and copying then use plain `io::copy` and inherit
 prompt cancellation structurally.
 
-### 2.5 Where types do not help
+### 2.5 Discarded errors — the largest one, and the reason §13.3 exists
+
+The whole problem in one line (`status.go:96`):
+
+```go
+sizes, _ := r.FileSizes(ctx, hashes) // on error treat all as absent
+```
+
+A remote returning 403, or timing out, or holding expired credentials, is
+reported to the user as **a remote containing none of their data** — and
+`status` exits `0` while saying it. The comment is not an oversight; someone
+wrote down the decision to discard. Go made it a two-character change and
+nothing downstream can tell the difference afterwards.
+
+**§13.3 "Reporting untruths" is not five unrelated bugs. It is five instances of
+this one affordance:** `HasFile` and `CheckFile` both `return false, nil` on any
+error, the disk-space guard fails open twice, and `isRemotePathNotFound` greps
+English because the error class was never carried as data in the first place.
+
+Three things change in Rust, in increasing order of value:
+
+1. `Result` is `#[must_use]`, so ignoring one warns by default. `let _ = ` still
+   compiles but is explicit, greppable, and deniable via
+   `clippy::let_underscore_must_use` at the workspace level.
+2. Typed errors mean collapsing a class is a `match` arm someone has to write,
+   not an absence of code.
+3. **The signature stops permitting it.** `(bool, error)` makes `(false, nil)` a
+   legal return on failure, conflating "absent" with "could not determine". A
+   three-state result makes that conflation unrepresentable rather than merely
+   discouraged — the same reasoning as carrying a *reason* for absence instead of
+   a bare `None`.
+
+The third is the real fix. The first two catch a developer who forgot; only the
+third stops a developer who decided.
+
+This is why v1 is an oracle for **mechanism** and never for **policy** (§5.1).
+Where v1 discards an error, matching it faithfully would reproduce the defect
+with the harness certifying it.
+
+*Evidence, not theory:* the fake-rclone harness was pointed at a remote denying
+every object listing. `status --remote` exited `0` and reported a successfully
+pushed object as absent — while `verify`, which propagates the same error,
+exited non-zero. One error, two commands, opposite honesty.
+
+### 2.6 Where types do not help
 
 The filesystem is shared mutable state. `CacheEntry` proves *verified at time T*,
 not *verified now* — another process can chmod a cache file. The runtime
@@ -398,7 +444,8 @@ Nothing else starts until this lands.
       ships the §7b mode-preservation probe it would test
 - [x] Capture v1 performance baselines (§9b) — threshold set at 1.25×, above the
       measured 1.08× noise floor
-- [ ] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c)
+- [x] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c) —
+      also pins that v1 rejects unknown config keys, so v2 cannot add one
 - [ ] Encode each §13 divergence as a positive assertion (§5.1)
 
 Proving the harness against the Go binary first is what makes it trustworthy

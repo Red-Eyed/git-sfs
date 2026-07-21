@@ -319,10 +319,40 @@ Three separate jobs, and only the last is about speed:
    pauses — making the partial file exact and the interrupt window deterministic.
 
 The cost is that the fake is *our model* of rclone, so a wrong model produces
-tests that are wrong and green. That has already happened once (see "Agreement is
-not correctness"). This is why the fake **does not replace** real rclone: it is
-layer 3 of the plan's five, and layer 4 — real rclone against a local directory —
-stays exactly where it is.
+tests that are wrong and green. That has already happened twice (see "Agreement
+is not correctness"). This is why the fake **does not replace** real rclone: it
+is layer 3 of the plan's five, and layer 4 — real rclone against a local
+directory — stays exactly where it is.
+
+### Why not an in-process mock instead
+
+Reasonable question, since a Rust `Remote` mock would be faster, typed, and need
+no subprocess. **v2 should have one** — it is layer 2 of the plan's five, and it
+is the right tool for exec orchestration, retry policy, cancellation, and event
+emission. It does not replace this, for two reasons.
+
+**It substitutes away the code under test.** An in-process mock implements the
+`Remote` trait, so it stands *above* the argv boundary. Everything below —
+building `copy --checksum --files-from <list> <src> <dst>`, parsing `lsjson`
+output, mapping exit codes and stderr onto error classes — is exactly the code
+the mock replaces. A mock hands back a typed `HashMap<Sha256, u64>`; the JSON
+parser never runs.
+
+That is not hypothetical. The `Name`/`Path` bug below was a wrong belief about
+rclone's JSON contract, and it silently disabled the remote half of `verify` and
+`status`. An in-process mock cannot expose that class of error *by construction*
+— it tests our code against our own belief, with the belief never written down
+where it can be compared to the real thing. The subprocess fake at least forces
+the belief into bytes on a pipe, which is diffable against real rclone.
+
+**It cannot instrument the Go binary.** The differential harness captures the
+argv stream from v1 *and* v2 and diffs them (§5.2b) — that is the entire
+comparison artifact for the remote half, since a remote has no tree to walk. One
+of those two binaries is not Rust, so an in-process Rust mock can never produce
+the v1 side of that diff. An external recorder is the only thing both
+implementations can be driven through.
+
+The division that follows: **mock what you own, fake what you shell out to.**
 
 `--files-from` points at a temp file whose name is random per run; the recorder
 logs the file's **contents** and discards its path, because which objects move is
@@ -336,19 +366,44 @@ inject_fault '{"subcommand": "lsjson", "contains": "/files/sha256/",
                "exit": 1, "stderr": "403 Forbidden"}'
 ```
 
-`contains` matters more than it looks. git-sfs runs a connectivity preflight
-before per-object queries, so a fault matching *every* `lsjson` is caught by the
-preflight and never reaches the per-object path — which is exactly where
-contract-spec §13.3's defect lives. Scenario 05 uses it to pin that baseline: a
-403 on object queries makes `status --remote` **exit 0** and report a
-successfully pushed object as `remote=missing`.
+`contains` matters more than it looks, and is easy to get wrong. git-sfs runs a
+connectivity preflight before enumerating objects, so a fault matching *every*
+`lsjson` is caught by the preflight and never reaches the path where
+contract-spec §13.3's defect lives. The preflight issues `lsd local:` and a
+non-recursive `lsjson` on the remote root, so **matching on `--recursive`** lets
+it through and denies exactly the object listing (`FileSizes`).
+
+Matching on `/files/sha256/` does *not* work, though it reads as if it should:
+no command names an individual object via `lsjson`. Scenario 05 was written that
+way and the fault never fired for as long as it existed — see "Agreement is not
+correctness".
+
+With it fixed, the scenario pins the §13.3 baseline for real: a denied remote
+makes `status --remote` **exit 0** while reporting every object absent, because
+`status.go:96` discards the error outright (`sizes, _ :=`). `verify` propagates
+it and exits non-zero. The retries visible in the argv log — six `lsjson`, three
+`copyto` for a permanent 403 — are §13.4's retry-on-permanent-failure showing up
+in passing.
 
 ## Agreement is not correctness
 
 The harness compares binaries against each other, so **a broken fixture fails
-identically on both sides and reads as green.** This is not hypothetical: the
-first version of the fake mis-parsed `--files-from`, every `copy` failed, and all
-scenarios passed.
+identically on both sides and reads as green.** This is not hypothetical. It has
+now happened twice, and the second one hid for longer:
+
+- The first version of the fake mis-parsed `--files-from`, every `copy` failed,
+  and all scenarios passed.
+- The fake emitted `lsjson`'s `Name` field as the path relative to the listing
+  root rather than the basename. `parseFileSizesJSON` matches objects on `Name`,
+  so **every object looked absent from the remote** whenever `FileSizes` ran —
+  silently disabling the remote half of `verify` and `status`. Scenario 05
+  appeared to demonstrate contract-spec §13.3 and was in fact demonstrating this
+  bug; its fault rule targeted `/files/sha256/`, which matches nothing git-sfs
+  ever issues, so the 403 it claimed to inject never fired.
+
+Both were found by writing a *new* test that expected a specific outcome, not by
+the diff. The lesson repeats: a self-comparison proves determinism, never
+correctness.
 
 Two things guard against it, and neither is optional:
 

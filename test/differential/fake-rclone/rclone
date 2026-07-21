@@ -179,10 +179,19 @@ def count_invocation(subcommand: str) -> int:
     return seen
 
 
-def describe(path: Path, name: str) -> dict:
+def describe(path: Path, relative: str) -> dict:
+    """One lsjson entry.
+
+    `Path` is relative to the listing root and `Name` is the basename -- they
+    differ only under --recursive, which is exactly where it matters:
+    parseFileSizesJSON (command.go) matches objects on `Name`, so emitting the
+    relative path there made every object look absent from the remote. That
+    silently disabled the remote half of `verify` and `status` in this harness
+    for as long as the fake has existed.
+    """
     return {
-        "Path": name,
-        "Name": name,
+        "Path": relative,
+        "Name": Path(relative).name,
         "Size": path.stat().st_size if path.is_file() else -1,
         "IsDir": path.is_dir(),
     }
