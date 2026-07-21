@@ -415,6 +415,59 @@ Two things guard against it, and neither is optional:
   recorded)` or an outcome of `2` where `0` was intended compares equal to itself
   perfectly well.
 
+## Coverage
+
+`coverage.py` enumerates contract-spec clauses and records what actually holds
+each one down. rust-rewrite-plan §7 states the Phase 7 gate literally — *every
+contract-spec clause maps to a passing assertion* — and that needs something
+checkable to compare against.
+
+```sh
+just coverage                        # report; fails only on a stale claim
+test/differential/coverage.py --list UNCOVERED
+test/differential/coverage.py --gate # the Phase 7 criterion
+```
+
+The map is **self-verifying**: every clause claiming coverage names a file and a
+fragment of the assertion covering it, and the script confirms the fragment is
+still there. Rename an assertion and the map goes red instead of quietly lying,
+which is where hand-maintained checklists always end up.
+
+| Status | Meaning |
+|---|---|
+| `ASSERTED` | a named assertion fails if violated |
+| `STRUCTURAL` | any change surfaces as a manifest or argv diff |
+| `OBSERVED` | recorded as a v1 baseline; v2 must diverge, so not yet an assertion |
+| `V2-ONLY` | untestable until the Rust binary exists |
+| `UNCOVERED` | nothing tests it |
+
+The default run is deliberately *not* the gate. Today's gaps are known and
+tracked rather than regressions, and failing on them now would only teach people
+to skip the script.
+
+**What it cannot check:** a substring proves a *mention*, not an assertion.
+Building the map caught a clause claiming `benchmark.py` enforced a regression
+threshold when it only printed ratios — the fragment matched, the guarantee did
+not exist. (That gap is now closed; `--max-ratio` fails the run.) Evidence
+fragments therefore name the failure path, not the subject matter.
+
+## Enumerated divergences will turn the diff red
+
+A structural consequence worth knowing before it happens, surfaced by the
+coverage audit rather than by a failure.
+
+Plan §5.1 says an unenumerated divergence is a regression and an enumerated one
+is a fix. The tree diff and the argv diff cannot tell them apart. Scenario 05's
+argv manifest currently records six `lsjson` and three `copyto` attempts against
+a permanent 403 — v1 retrying a failure it should not retry (§13.4). When v2
+correctly stops, **that manifest changes and `run.py` reports a regression.**
+
+The same applies anywhere a §13 fix alters observable structure. Nothing here
+distinguishes "v2 is wrong" from "v2 is right and the baseline was the defect",
+so the enumerated cases need per-scenario expected-divergence markers before v2
+lands, or every red run becomes a judgement call — which §5.1 warns is exactly
+how a harness trains people to ignore it.
+
 ## Determinism
 
 Anything varying between two runs of one scenario must be normalized, or the

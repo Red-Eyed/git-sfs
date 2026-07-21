@@ -446,7 +446,12 @@ Nothing else starts until this lands.
       measured 1.08× noise floor
 - [x] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c) —
       also pins that v1 rejects unknown config keys, so v2 cannot add one
-- [ ] Encode each §13 divergence as a positive assertion (§5.1)
+- [x] Enumerate every contract-spec clause with its coverage status
+      (`test/differential/coverage.py`); 22 asserted, 8 structural, 6 observed,
+      30 uncovered
+- [ ] Encode each §13 divergence as a positive assertion (§5.1) — needs v2 for
+      most, plus expected-divergence markers so a §13 fix does not read as a
+      regression in the tree/argv diff
 
 Proving the harness against the Go binary first is what makes it trustworthy
 before it becomes load-bearing.

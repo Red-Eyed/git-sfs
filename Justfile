@@ -46,6 +46,11 @@ cancellation: build
 mode-preservation: build
     python3 test/differential/mode_preservation.py --binary v1=./git-sfs
 
+# contract-spec clause coverage. Fails on a stale claim, not on a known gap;
+# add --gate for the Phase 7 criterion that no clause is UNCOVERED.
+spec-coverage:
+    python3 test/differential/coverage.py
+
 # Downgrade invariant (rust-rewrite-plan 7c): v1 must still operate anything v2
 # has touched. Pass both binaries to exercise the real handoff in both
 # directions; with one it is a self-check of every handoff step.
@@ -64,7 +69,7 @@ perf: build
 perf-selfcheck: build
     python3 test/differential/benchmark.py --binary a=./git-sfs --binary b=./git-sfs
 
-check: fmt test build workflows differential lock-contention cancellation mode-preservation downgrade
+check: fmt test build workflows differential lock-contention cancellation mode-preservation downgrade spec-coverage
     git --no-pager diff --check
 
 release-snapshot:

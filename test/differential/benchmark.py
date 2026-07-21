@@ -53,6 +53,11 @@ DEFAULT_FILE_BYTES = 1024
 DEFAULT_LARGE_BYTES = 256 * 1024 * 1024
 DEFAULT_REPETITIONS = 3
 
+# Above the 1.08x self-check noise floor, below the contention regression 9b
+# exists to catch. Re-measure with --binary a=X --binary b=X on the gating
+# machine before trusting it; the floor is machine-specific.
+DEFAULT_MAX_RATIO = 1.25
+
 # Ordered for reporting; also the set a regression gate would consult.
 OPERATIONS = ("add", "push", "pull", "verify", "rehash", "add_large")
 
@@ -199,6 +204,26 @@ def render(results: dict[str, dict[str, float]], baseline: str, args) -> str:
     return "\n".join(lines)
 
 
+def exceeding(
+    results: dict[str, dict[str, float]], baseline: str, limit: float
+) -> list[tuple[str, str, float]]:
+    """Operations where a binary is slower than the baseline by more than limit.
+
+    This is the Phase 7 gate. It compares binaries measured in the same run
+    rather than against a committed number, because an absolute time is a
+    property of the machine that produced it.
+    """
+    over = []
+    for name, timings in results.items():
+        if name == baseline:
+            continue
+        for operation, seconds in timings.items():
+            ratio = seconds / results[baseline][operation]
+            if ratio > limit:
+                over.append((name, operation, ratio))
+    return over
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -213,6 +238,12 @@ def main() -> None:
     parser.add_argument("--large-bytes", type=int, default=DEFAULT_LARGE_BYTES)
     parser.add_argument("--repetitions", type=int, default=DEFAULT_REPETITIONS)
     parser.add_argument("--json", type=Path, help="write the capture here")
+    parser.add_argument(
+        "--max-ratio",
+        type=float,
+        default=DEFAULT_MAX_RATIO,
+        help="fail when any operation is this much slower than the first binary",
+    )
     args = parser.parse_args()
 
     print(
@@ -234,6 +265,16 @@ def main() -> None:
     baseline = args.binary[0].name
     print()
     print(render(results, baseline, args))
+
+    regressions = exceeding(results, baseline, args.max_ratio)
+    if regressions:
+        print()
+        for name, operation, ratio in regressions:
+            print(
+                f"REGRESSION {name}: {operation} is {ratio:.2f}x {baseline} "
+                f"(limit {args.max_ratio:.2f}x)"
+            )
+        sys.exit(f"{len(regressions)} operation(s) past the threshold")
 
     if args.json:
         capture = {
