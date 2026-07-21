@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import snapshot
+from harness import Binary, parse_binary
 
 HARNESS_DIR = Path(__file__).parent
 SCENARIO_DIR = HARNESS_DIR / "scenarios"
@@ -39,12 +40,6 @@ EXCLUDED = [".git"]
 
 @dataclass(frozen=True)
 class Scenario:
-    name: str
-    path: Path
-
-
-@dataclass(frozen=True)
-class Binary:
     name: str
     path: Path
 
@@ -152,16 +147,6 @@ def _manifest(root: Path, replacements: list[tuple[bytes, bytes]]) -> str:
     if not root.is_dir():
         return "(absent)\n"
     return snapshot.render_manifest(snapshot.walk(root, replacements, EXCLUDED))
-
-
-def parse_binary(spec: str) -> Binary:
-    name, _, path = spec.partition("=")
-    if not name or not path:
-        raise argparse.ArgumentTypeError(f"expected NAME=PATH, got {spec!r}")
-    resolved = Path(path)
-    if not os.access(resolved, os.X_OK):
-        raise argparse.ArgumentTypeError(f"not executable: {path}")
-    return Binary(name, resolved)
 
 
 def main() -> None:

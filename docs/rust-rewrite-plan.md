@@ -392,7 +392,8 @@ Nothing else starts until this lands.
 - [x] Build the tree-diff harness; prove it green **Go against Go**
 - [x] Build the fake-rclone recorder; capture v1's argv stream as the baseline
 - [x] Build the cross-binary lock-contention harness
-- [ ] Build the SIGINT driver and mode fault-injection hook; prove against v1
+- [x] Build the SIGINT driver; prove against v1
+- [ ] Build the mode fault-injection hook; prove against v1
 - [ ] Capture v1 performance baselines (§9b)
 - [ ] Build the downgrade test: v2 workflow → install v1 → same workflow (§7c)
 - [ ] Encode each §13 divergence as a positive assertion (§5.1)

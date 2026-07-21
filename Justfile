@@ -35,7 +35,13 @@ differential: build
 lock-contention: build
     python3 test/differential/lock_contention.py --binary v1=./git-sfs
 
-check: fmt test build workflows differential lock-contention
+# Cancellation safety: SIGINT mid-transfer must publish no partial file and must
+# leave the operation retryable. Asserts invariants rather than diffing trees,
+# since an interrupt lands where no binary controls.
+cancellation: build
+    python3 test/differential/cancellation.py --binary v1=./git-sfs
+
+check: fmt test build workflows differential lock-contention cancellation
     git --no-pager diff --check
 
 release-snapshot:

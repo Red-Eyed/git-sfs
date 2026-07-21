@@ -221,7 +221,30 @@ def do_lsd(operands: list[str]) -> int:
     return 0
 
 
-def do_copyto(operands: list[str]) -> int:
+def transfer(source: Path, destination: Path, stall: float) -> None:
+    """Copy source to destination, optionally pausing halfway through the write.
+
+    `stall` exists to make interruption *deterministic*. A caller that kills this
+    process during the pause leaves exactly half an object at the destination --
+    and since git-sfs pulls straight into the content-addressed cache, that
+    destination is a real object path. Sleeping before the copy instead would
+    only ever produce an absent file, which is the easy case; the dangerous one
+    is a partial file sitting where a hash promises whole content.
+    """
+    if stall <= 0:
+        shutil.copyfile(source, destination)
+        return
+    payload = source.read_bytes()
+    midpoint = len(payload) // 2
+    with open(destination, "wb") as handle:
+        handle.write(payload[:midpoint])
+        handle.flush()
+        os.fsync(handle.fileno())
+        time.sleep(stall)
+        handle.write(payload[midpoint:])
+
+
+def do_copyto(operands: list[str], stall: float) -> int:
     if len(operands) < 2:
         return fail("copyto: need source and destination")
     source = map_path(operands[0])
@@ -229,11 +252,11 @@ def do_copyto(operands: list[str]) -> int:
     if not source.is_file():
         return fail(f"object not found: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
+    transfer(source, destination, stall)
     return 0
 
 
-def do_copy(operands: list[str], argv: list[str]) -> int:
+def do_copy(operands: list[str], argv: list[str], stall: float) -> int:
     ignore_existing = "--ignore-existing" in operands
     roots = positional(operands)
     if len(roots) < 2:
@@ -249,7 +272,7 @@ def do_copy(operands: list[str], argv: list[str]) -> int:
         if ignore_existing and destination.exists():
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+        transfer(source, destination, stall)
         # Real rclone writes destination objects with default permissions
         # rather than mirroring the source's read-only cache bits.
         destination.chmod(0o644)
@@ -267,12 +290,15 @@ def main() -> int:
     _, subcommand, operands = split_args(argv)
 
     fault = matching_fault(subcommand, count_invocation(subcommand), argv)
+    stall = 0.0
     if fault is not None:
         # A slow transfer, so a caller can observe the lock git-sfs holds for the
         # duration of the operation. Applied before the failure so a rule can be
         # both slow and failing.
         if fault.get("sleep"):
             time.sleep(float(fault["sleep"]))
+        # Unlike "sleep", this one pauses *inside* the write. See transfer().
+        stall = float(fault.get("stall", 0.0))
         if fault.get("stderr"):
             print(fault["stderr"], file=sys.stderr)
         if fault.get("stdout"):
@@ -289,9 +315,9 @@ def main() -> int:
     if subcommand == "lsd":
         return do_lsd(operands)
     if subcommand == "copyto":
-        return do_copyto(operands)
+        return do_copyto(operands, stall)
     if subcommand == "copy":
-        return do_copy(operands, argv)
+        return do_copy(operands, argv, stall)
 
     print(f"fake-rclone: unsupported subcommand: {subcommand!r}", file=sys.stderr)
     return 2

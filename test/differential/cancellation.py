@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""SIGINT driver: interrupt a transfer in flight and check what survives.
+
+AGENTS.md makes cancellation a safety requirement, not a convenience --
+"cancellation must leave state consistent: never publish a partial file, and
+surface the interrupt as a clean cancellation, not a corrupt result." Nothing
+else in the suite tests it, and rust-rewrite-plan §5.3 lists it first among the
+checks most likely to be skipped and most likely to lose data.
+
+This is a separate entry point rather than a scenario in run.py because an
+interrupt lands at a point neither binary controls. The tree afterwards
+legitimately differs between two runs of one binary, let alone between v1 and
+v2, so there is nothing to diff. What is stable is the set of invariants that
+must hold no matter where the interrupt landed -- so those are asserted
+directly.
+
+Usage:
+
+    test/differential/cancellation.py --binary v1=./git-sfs
+    test/differential/cancellation.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from harness import (
+    Binary,
+    Results,
+    chmod_writable,
+    parse_binary,
+    prepare_workspace,
+    wait_for,
+)
+
+HARNESS_DIR = Path(__file__).parent
+SETUP = HARNESS_DIR / "cancel-setup.sh"
+
+# 128 = SIGINT's 130 by the shell's 128+signal convention. contract-spec §9 keeps
+# this frozen even though the rest of the taxonomy is v2's to redesign.
+SIGINT_EXIT = 130
+
+# How long a stalled rclone holds its half-written object open. Only has to
+# outlast the poll that spots the file plus the signal delivery.
+STALL_SECONDS = 5.0
+SYNC_TIMEOUT = 20.0
+SHUTDOWN_TIMEOUT = 30.0
+
+OBJECT_NAME = re.compile(r"^[0-9a-f]{64}$")
+
+# Big enough that hashing and copying it take long enough to interrupt, small
+# enough not to dominate the run. Built from a repeating block rather than read
+# wholesale from /dev/urandom, which is the slow part at this size.
+ADD_FIXTURE_BYTES = 128 * 1024 * 1024
+
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def object_dir(root: Path) -> Path:
+    return root / "files" / "sha256"
+
+
+def published_objects(root: Path) -> list[Path]:
+    """Every file sitting at a content-addressed path under root."""
+    objects = object_dir(root)
+    if not objects.is_dir():
+        return []
+    return [
+        path
+        for path in sorted(objects.rglob("*"))
+        if path.is_file() and OBJECT_NAME.match(path.name)
+    ]
+
+
+def trusted_but_wrong(root: Path) -> list[Path]:
+    """Objects that are read-only yet do not hash to their own name.
+
+    This is the single most dangerous state in the system (contract-spec §4.1):
+    HasValid reads the stripped write bit as proof the bytes were verified when
+    written, so it never re-hashes. A partial file published read-only is
+    therefore trusted forever, and every later integrity check silently passes.
+    """
+    return [
+        path
+        for path in published_objects(root)
+        if path.stat().st_mode & 0o222 == 0 and sha256_of(path) != path.name
+    ]
+
+
+def stray_files(root: Path) -> list[Path]:
+    """Non-object files inside the object store -- v1 stages temps here (§13.2)."""
+    objects = object_dir(root)
+    if not objects.is_dir():
+        return []
+    return [
+        path
+        for path in sorted(objects.rglob("*"))
+        if path.is_file() and not OBJECT_NAME.match(path.name)
+    ]
+
+
+def held_locks(root: Path) -> list[str]:
+    locks = root / "locks"
+    if not locks.is_dir():
+        return []
+    return sorted(path.name for path in locks.iterdir())
+
+
+def start(
+    context: dict, args: list[str], faults: str | None = None
+) -> subprocess.Popen:
+    env = dict(context["env"])
+    if faults is not None:
+        faults_file = context["work"] / "faults.jsonl"
+        faults_file.write_text(faults + "\n")
+        env["RCLONE_FAULTS"] = str(faults_file)
+    else:
+        env.pop("RCLONE_FAULTS", None)
+    return subprocess.Popen(
+        [env["GIT_SFS"], "--quiet", *args],
+        cwd=context["repo"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def run_to_completion(context: dict, args: list[str]) -> subprocess.CompletedProcess:
+    env = dict(context["env"])
+    env.pop("RCLONE_FAULTS", None)
+    return subprocess.run(
+        [env["GIT_SFS"], "--quiet", *args],
+        cwd=context["repo"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def interrupt(process: subprocess.Popen) -> tuple[int, str, str]:
+    """Send SIGINT to git-sfs alone and collect how it exited.
+
+    Deliberately not signalling the process group. A real Ctrl-C would also hit
+    the rclone child directly, which would mask whether git-sfs propagates
+    cancellation to its own subprocess -- and propagation is the property under
+    test (the child is spawned with exec.CommandContext for exactly this reason).
+    """
+    process.send_signal(signal.SIGINT)
+    try:
+        stdout, stderr = process.communicate(timeout=SHUTDOWN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        return -1, stdout, stderr
+    return process.returncode, stdout, stderr
+
+
+def assert_clean_cancellation(
+    r: Results, label: str, status: int, stdout: str, stderr: str
+) -> None:
+    r.check(status == SIGINT_EXIT, f"{label}: exits {SIGINT_EXIT} (got {status})")
+    # §9 freezes the stream and the "git-sfs: " prefix; the wording after it is
+    # free, so the assertion stops there.
+    r.check(
+        stderr.startswith("git-sfs: ") or "\ngit-sfs: " in stderr,
+        f"{label}: reports on stderr with the git-sfs prefix",
+    )
+    r.check(stdout.strip() == "", f"{label}: prints nothing to stdout")
+
+
+def assert_no_trusted_corruption(
+    r: Results, label: str, when: str, cache: Path
+) -> None:
+    """Checked at every observation point, not just after the interrupt.
+
+    A regression can publish the bad object during *recovery* rather than during
+    the cancelled run -- an unlink that stops happening turns the retry itself
+    into the step that protects a partial file. Asserting only at the interrupt
+    misses that entirely, which a mutant proved before this took a `when`.
+    """
+    wrong = trusted_but_wrong(cache)
+    r.check(
+        not wrong,
+        f"{label}: no read-only object mismatches its hash {when} "
+        f"({[p.name[:12] for p in wrong]})",
+    )
+
+
+def observe_residue(r: Results, label: str, cache: Path) -> None:
+    strays = stray_files(cache)
+    r.observe(f"{label}: temp files left inside files/sha256", str(len(strays)))
+    staged = list((cache / "tmp").glob("*")) if (cache / "tmp").is_dir() else []
+    r.observe(f"{label}: files left in cache tmp/", str(len(staged)))
+    r.observe(f"{label}: locks still held", str(held_locks(cache) or "none"))
+
+
+def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
+    """The dangerous direction: pull writes straight into the object store.
+
+    rclone is handed <cache>/files as its destination root, so a half-finished
+    download is a half-finished file *at a content-addressed path* -- not in a
+    staging area. Whether that file is left trusted is the whole question.
+    """
+    print(f"\n[{binary.name}] SIGINT during pull, mid-download")
+    cache = context["cache"]
+    chmod_writable(cache)
+    shutil.rmtree(object_dir(cache), ignore_errors=True)
+
+    expected = expected_object(context)
+    target = object_dir(cache) / expected[:2] / expected
+
+    process = start(
+        context, ["pull"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
+    )
+    caught = wait_for(target.exists, SYNC_TIMEOUT)
+    r.check(caught, "pull: interrupt landed while the object was half-written")
+    status, stdout, stderr = interrupt(process)
+
+    assert_clean_cancellation(r, "pull", status, stdout, stderr)
+    assert_no_trusted_corruption(r, "pull", "after the interrupt", cache)
+    observe_residue(r, "pull", cache)
+
+    # Recoverability is the point of a clean cancellation: an interrupted pull
+    # must leave nothing that stops the next one from finishing the job. The
+    # retry passes --ignore-existing (command.go:272), so it would skip the
+    # half-written file outright were it not for the explicit unlink of partial
+    # objects in pullMissingFiles (pull.go:79-87). That unlink is the mechanism
+    # under test here; without it this assertion fails.
+    completed = run_to_completion(context, ["pull"])
+    r.check(completed.returncode == 0, "pull: re-running after the interrupt succeeds")
+    r.check(
+        target.is_file() and sha256_of(target) == expected,
+        "pull: the recovered object matches its hash",
+    )
+    r.check(
+        target.is_file() and target.stat().st_mode & 0o222 == 0,
+        "pull: the recovered object is read-only (§4.1)",
+    )
+    assert_no_trusted_corruption(r, "pull", "after the recovery", cache)
+
+
+def test_push_interrupted(binary: Binary, context: dict, r: Results) -> None:
+    """A partial object on the remote is the copy that exists so the cache is not alone."""
+    print(f"\n[{binary.name}] SIGINT during push, mid-upload")
+    cache, remote = context["cache"], context["remote"]
+    shutil.rmtree(object_dir(remote), ignore_errors=True)
+
+    expected = expected_object(context)
+    landing = object_dir(remote) / expected[:2] / expected
+
+    process = start(
+        context, ["push"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
+    )
+    caught = wait_for(landing.exists, SYNC_TIMEOUT)
+    r.check(caught, "push: interrupt landed while the object was half-written")
+    status, stdout, stderr = interrupt(process)
+
+    assert_clean_cancellation(r, "push", status, stdout, stderr)
+    assert_no_trusted_corruption(r, "push", "after the interrupt", cache)
+    observe_residue(r, "push", cache)
+    # v1 verifies nothing after upload (§13.4), so whether a truncated object is
+    # left behind is recorded rather than asserted -- v2 is required to diverge.
+    if landing.is_file():
+        r.observe(
+            "push: object left on the remote after the interrupt",
+            "truncated" if sha256_of(landing) != expected else "complete",
+        )
+    else:
+        r.observe("push: object left on the remote after the interrupt", "absent")
+
+    completed = run_to_completion(context, ["push"])
+    r.check(completed.returncode == 0, "push: re-running after the interrupt succeeds")
+    # Whether the retry repairs the remote is the question that matters. It does
+    # -- CopyToRemote omits --ignore-existing (command.go:272 uses it only on the
+    # pull direction), so a re-push overwrites. Recorded rather than asserted
+    # because the repair is incidental: push verifies nothing after upload
+    # (§13.4) and verify --check-remote accepts a truncated object (§9.2), so
+    # nothing ever tells the user the replica is bad. It is fixed only if they
+    # happen to push again.
+    if landing.is_file():
+        r.observe(
+            "push: remote object after the recovery push",
+            "repaired" if sha256_of(landing) == expected else "STILL TRUNCATED",
+        )
+    assert_no_trusted_corruption(r, "push", "after the recovery", cache)
+
+
+def test_add_interrupted(binary: Binary, context: dict, r: Results) -> None:
+    """The user's only copy is in play here, so absence is the failure to hunt.
+
+    add removes the source and then creates the symlink (§13.1), so an interrupt
+    in the wrong place leaves a path with neither. The assertion is written
+    against the spec rather than against v1: the file must be readable
+    afterwards, one way or the other.
+    """
+    print(f"\n[{binary.name}] SIGINT during add, mid-ingest")
+    repo, cache = context["repo"], context["cache"]
+    source = repo / "data" / "large.bin"
+    write_fixture(source, ADD_FIXTURE_BYTES)
+    expected = sha256_of(source)
+
+    process = start(context, ["add", "data"])
+    # The temp file AtomicCopy stages inside the object store is the only
+    # externally visible marker that ingest reached the copy pass.
+    caught = wait_for(lambda: bool(stray_files(cache)), SYNC_TIMEOUT)
+    status, stdout, stderr = interrupt(process)
+    r.observe(
+        "add: interrupt landed during the copy pass",
+        "yes" if caught else "no (hash pass or later)",
+    )
+
+    assert_clean_cancellation(r, "add", status, stdout, stderr)
+    assert_no_trusted_corruption(r, "add", "after the interrupt", cache)
+    observe_residue(r, "add", cache)
+
+    r.check(
+        source.exists(),
+        "add: the source path still resolves -- bytes were not left nowhere",
+    )
+    if source.exists():
+        r.check(
+            sha256_of(source) == expected,
+            "add: the source still reads back as its original content",
+        )
+
+    completed = run_to_completion(context, ["add", "data"])
+    r.check(completed.returncode == 0, "add: re-running after the interrupt succeeds")
+    stored = object_dir(cache) / expected[:2] / expected
+    r.check(stored.is_file(), "add: the object lands in the cache on the retry")
+    assert_no_trusted_corruption(r, "add", "after the recovery", cache)
+
+
+def write_fixture(path: Path, size: int) -> None:
+    block = os.urandom(1024 * 1024)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as handle:
+        for _ in range(size // len(block)):
+            handle.write(block)
+
+
+def expected_object(context: dict) -> str:
+    """The hash of the fixture the setup script committed, read from its symlink."""
+    link = context["repo"] / "data" / "blob.bin"
+    return os.readlink(link).rsplit("/", 1)[-1]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--binary",
+        type=parse_binary,
+        action="append",
+        required=True,
+        metavar="NAME=PATH",
+    )
+    args = parser.parse_args()
+
+    results = Results()
+    root = Path(tempfile.mkdtemp(prefix="git-sfs-cancel-"))
+    try:
+        for binary in args.binary:
+            context = prepare_workspace(binary, root, SETUP)
+            test_pull_interrupted(binary, context, results)
+            test_push_interrupted(binary, context, results)
+            test_add_interrupted(binary, context, results)
+    finally:
+        chmod_writable(root)
+        shutil.rmtree(root, ignore_errors=True)
+
+    print(f"\n{results.asserts_passed} passed, {results.asserts_failed} failed")
+    if results.asserts_failed:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -31,10 +31,19 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
+from harness import (
+    Binary,
+    Results,
+    chmod_writable,
+    parse_binary,
+    prepare_workspace,
+    wait_for,
+)
+
 HARNESS_DIR = Path(__file__).parent
+SETUP = HARNESS_DIR / "lock-setup.sh"
 
 # Every lock git-sfs takes (internal/core: add, import, setup, pull, push).
 LOCK_NAMES = ("add", "import", "setup", "pull", "push")
@@ -43,66 +52,6 @@ HOLD_SECONDS = 3.0
 # How long a blocked process is given to prove it is genuinely blocked. v1 waits
 # forever by design, so this bounds the run rather than measuring anything.
 BLOCK_PROBE_SECONDS = 2.0
-POLL_SECONDS = 0.05
-
-
-@dataclass(frozen=True)
-class Binary:
-    name: str
-    path: Path
-
-
-@dataclass
-class Results:
-    asserts_passed: int = 0
-    asserts_failed: int = 0
-
-    def check(self, condition: bool, description: str) -> None:
-        if condition:
-            self.asserts_passed += 1
-            print(f"  ASSERT ok   {description}")
-        else:
-            self.asserts_failed += 1
-            print(f"  ASSERT FAIL {description}")
-
-    def observe(self, description: str, value: str) -> None:
-        print(f"  OBSERVE     {description}: {value}")
-
-
-def prepare_workspace(binary: Binary, root: Path) -> dict:
-    """Build a repo with content staged for push, via the shared scenario lib."""
-    work = root / binary.name
-    repo, cache, remote = work / "repo", work / "cache", work / "remote"
-    for directory in (cache, remote):
-        directory.mkdir(parents=True)
-    outcomes = work / "outcomes.txt"
-    outcomes.touch()
-
-    env = scenario_env(binary, work, repo, cache, remote, outcomes)
-    script = f'set -uo pipefail; . "{HARNESS_DIR}/lib.sh"; . "{HARNESS_DIR}/lock-setup.sh"'
-    completed = subprocess.run(
-        ["bash", "-c", script], env=env, capture_output=True, text=True
-    )
-    if completed.returncode != 0:
-        sys.exit(f"lock harness: setup failed for {binary.name}:\n{completed.stderr}")
-    return {"work": work, "repo": repo, "cache": cache, "remote": remote, "env": env}
-
-
-def scenario_env(
-    binary: Binary, work: Path, repo: Path, cache: Path, remote: Path, outcomes: Path
-) -> dict:
-    return os.environ | {
-        "GIT_SFS": str(binary.path.resolve()),
-        "HARNESS_DIR": str(HARNESS_DIR),
-        "WORK": str(work),
-        "REPO": str(repo),
-        "CACHE": str(cache),
-        "REMOTE": str(remote),
-        "OUTCOMES": str(outcomes),
-        "GIT_TERMINAL_PROMPT": "0",
-        "PATH": f"{HARNESS_DIR / 'fake-rclone'}:{os.environ['PATH']}",
-        "RCLONE_ARGV_LOG": str(work / "rclone-argv.log"),
-    }
 
 
 def lock_path(cache: Path, name: str) -> Path:
@@ -133,15 +82,6 @@ def start_push(context: dict, faults: str | None = None) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
     )
-
-
-def wait_for(predicate, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(POLL_SECONDS)
-    return False
 
 
 def test_lock_is_created_at_contract_path(binary: Binary, context: dict, r: Results):
@@ -298,16 +238,6 @@ def find_dead_pid() -> int:
     return 99999
 
 
-def parse_binary(spec: str) -> Binary:
-    name, _, path = spec.partition("=")
-    if not name or not path:
-        raise argparse.ArgumentTypeError(f"expected NAME=PATH, got {spec!r}")
-    resolved = Path(path)
-    if not os.access(resolved, os.X_OK):
-        raise argparse.ArgumentTypeError(f"not executable: {path}")
-    return Binary(name, resolved)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -319,7 +249,7 @@ def main() -> None:
     results = Results()
     root = Path(tempfile.mkdtemp(prefix="git-sfs-lock-"))
     try:
-        contexts = {b.name: prepare_workspace(b, root) for b in args.binary}
+        contexts = {b.name: prepare_workspace(b, root, SETUP) for b in args.binary}
         for binary in args.binary:
             test_lock_is_created_at_contract_path(binary, contexts[binary.name], results)
             test_blocks_on_foreign_lock(binary, contexts[binary.name], results)
@@ -331,9 +261,7 @@ def main() -> None:
                 if holder.name != waiter.name or len(args.binary) == 1:
                     test_cross_binary_contention(holder, waiter, contexts, results)
     finally:
-        for path in root.rglob("*"):
-            if path.is_file():
-                path.chmod(0o644)
+        chmod_writable(root)
         shutil.rmtree(root, ignore_errors=True)
 
     print(

@@ -47,12 +47,15 @@ Exits non-zero when any pair diverges, printing a unified diff of the manifests.
 
 ```
 snapshot.py         tree -> canonical manifest. Reusable on its own.
+harness.py          shared by all three entry points: binaries, workspaces, polling
 run.py              driver: run scenarios, snapshot, diff
 lib.sh              helpers available to every scenario
 scenarios/          one scenario per file
 fake-rclone/        recording, fault-injecting stand-in for rclone
 lock_contention.py  second entry point; see below
 lock-setup.sh       workspace prep for it
+cancellation.py     third entry point; see below
+cancel-setup.sh     workspace prep for it
 ```
 
 ## Lock contention
@@ -95,6 +98,60 @@ manifest rendering is testable without a filesystem. It takes `--replace` and
 `--exclude` as generic parameters rather than knowing the git-sfs layout; the
 caller supplies the domain meaning.
 
+## Cancellation
+
+`cancellation.py` is the third entry point, for the same reason the second one
+exists: it tests a property no tree diff can see. AGENTS.md makes cancellation a
+safety requirement — "never publish a partial file, and surface the interrupt as
+a clean cancellation, not a corrupt result" — and an interrupt lands at a point
+neither binary controls, so the tree afterwards differs legitimately between two
+runs of *one* binary. There is nothing to diff. Invariants are asserted instead.
+
+```sh
+just cancellation
+test/differential/cancellation.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+```
+
+Three operations get interrupted mid-flight, each chosen for a different way to
+lose data:
+
+| Interrupted | The hazard it covers |
+|---|---|
+| `pull` | rclone is handed `<cache>/files` directly, so a half-finished download is a partial file **at a content-addressed path**, not in staging |
+| `push` | the replica that exists so the cache is not the only copy |
+| `add` | the user's only copy is in play — `add` unlinks the source before creating the symlink (§13.1) |
+
+The assertion that matters most is that **no object is ever both read-only and
+mismatched with its own name.** Under §4.1 a stripped write bit *is* the proof
+that bytes were verified, so a partial file published read-only is trusted
+forever and every later integrity check passes on corrupt data. It is checked
+after the interrupt *and* after the recovery run, because a regression can
+publish the bad object during either.
+
+Each case then re-runs the interrupted command and requires it to succeed — a
+clean cancellation that leaves the operation unrepeatable is not clean.
+
+SIGINT goes to git-sfs alone, deliberately not to the process group. A real
+Ctrl-C would also hit the rclone child directly, which would mask whether
+git-sfs propagates cancellation to its own subprocess — and that propagation is
+the property under test.
+
+### Trusting it
+
+Same bar as the tree diff: proven to fail before being trusted to pass. Two
+mutant Go binaries were built and caught.
+
+- Deleting the partial-file unlink in `pullMissingFiles`
+  ([pull.go:79-87](../../internal/core/pull.go#L79-L87)) — the retry's
+  `--ignore-existing` then skips the half-written object. Three assertions fail.
+- That, plus inverting `Protect` to chmod *before* verifying — the retry publishes
+  a read-only object that does not match its hash, and the §4.1 assertion names
+  it.
+
+The second mutant is why the invariant is checked at two points rather than one:
+with the check only after the interrupt, it passed while the mutant was actively
+producing the exact state the check exists to forbid.
+
 ## Writing a scenario
 
 A scenario is a bash file in `scenarios/`, sourced with `lib.sh` already loaded.
@@ -123,6 +180,33 @@ The remote has no tree to diff, but every remote operation is an rclone
 subprocess, so the **argv stream is the equivalent artifact**. A scenario calling
 `use_fake_rclone` gets `fake-rclone/rclone` ahead of the real one on `PATH`, and
 its invocations become a manifest section that diffs like everything else.
+
+### Why a fake rclone at all
+
+Three separate jobs, and only the last is about speed:
+
+1. **The remote is not a filesystem we can walk.** git-sfs reaches every remote
+   *exclusively* through rclone, using exactly five subcommands, so its complete
+   observable remote behavior **is** its argv stream. Recording that stream is
+   what gives the remote half an artifact at all — and you cannot record argv
+   without standing between git-sfs and rclone.
+2. **A real rclone pointed at a local directory cannot fail interestingly.** That
+   is what the shell suite does today: hermetic, fast, and incapable of producing
+   a 403, a rate limit, expired credentials, or truncated `lsjson`. Those are
+   exactly the paths contract-spec §13.3's defects live on — remote errors
+   collapsing into "not found", and `isRemotePathNotFound` classifying by
+   grepping rclone's English for `"directory not found"`. Unreachable without
+   injected failures.
+3. **Interruption needs a window to aim at.** Real rclone copying a local file
+   finishes in microseconds, so a SIGINT test against it is a race that passes
+   for the wrong reason. The `stall` fault writes half an object, `fsync`s, then
+   pauses — making the partial file exact and the interrupt window deterministic.
+
+The cost is that the fake is *our model* of rclone, so a wrong model produces
+tests that are wrong and green. That has already happened once (see "Agreement is
+not correctness"). This is why the fake **does not replace** real rclone: it is
+layer 3 of the plan's five, and layer 4 — real rclone against a local directory —
+stays exactly where it is.
 
 `--files-from` points at a temp file whose name is random per run; the recorder
 logs the file's **contents** and discards its path, because which objects move is
