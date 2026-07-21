@@ -575,20 +575,41 @@ fakes.
       before even though the cache itself, on a separate filesystem, had
       room; now documented as its own failure mode (failure-modes.md §7,
       contract-spec §13.4)
-- [ ] `Store::adopt` (rename/move semantics for `import --move`, including the
-      cross-device `EXDEV` fallback contract-spec §4.2 requires) — not yet
-      built; `store()` (copy) covers the write-protocol invariants that
-      matter most and was the priority for this pass
+- [x] `Store::adopt` (rename/move semantics for `import --move`, including the
+      cross-device `EXDEV` fallback contract-spec §4.2 requires) —
+      `crates/git-sfs-core/src/ports/store.rs`. Stricter than v1's `Move`
+      (`cache.go:130-177`): `source` is hash-verified **before** it is
+      touched, not after, so a mismatch never destroys the caller's only
+      copy the way v1's rename/copy-then-hash ordering can. The `EXDEV`
+      fallback re-verifies the copy at its staging path and only removes
+      `source` once that passes, since a copy — unlike a rename — can
+      corrupt data in transit. A dev+ino identity check guards the
+      pathological case where `source` already *is* the object's own cache
+      path, so "consume the source" can never mean deleting the object.
+      Genuine cross-device rename cannot be produced portably in CI, so the
+      fallback's copy primitive is unit-tested directly instead
+- [x] `Lock` (§8) — `crates/git-sfs-core/src/ports/lock.rs`. Deliberately
+      **not** a trait: one real implementation (mkdir-based, frozen
+      name/mechanism), no second one contemplated, so per §3.3 it does not
+      clear the bar for an abstraction. `LockName` is a closed five-variant
+      enum rather than a bare `&str`, so the frozen names of §8.2 cannot
+      drift by typo. Adds the policy §8.1 requires and v1 lacks: a
+      definitely-dead owner PID (`kill(pid, 0)` → `ESRCH`, via the `nix`
+      crate) is auto-broken and acquisition retried immediately, rather than
+      blocking forever; a missing, empty, or malformed owner file is treated
+      as *unknown*, not dead, so a live v1 process — which sometimes fails to
+      write its own owner file (`lock.go:33` ignores that error) — can never
+      be broken. `Lock::force_break` is the documented, named escape hatch
+      for what liveness-checking cannot resolve on its own (a reused PID, a
+      network-shared cache), replacing "the only recovery is `rm -rf` inside
+      the cache." Test coverage includes a real blocking-then-release case
+      and a real dead-process case (spawn-and-reap a child for a
+      deterministic dead PID), not just the mechanism in isolation
 - [ ] `Remote` trait + rclone subprocess implementation + fake — not started.
       The real implementation must fix the asymmetry just found in v1: `push`
       never sets rclone's own `--temp-dir` at all, and `pull` only warns (not
       errors) when it is unset — both must become hard requirements, matching
       the no-system-tmp rule `Store` already enforces
-- [ ] `Lock` (§8) — not started. Deliberately **not** a trait: there is one
-      real implementation (mkdir-based, frozen name/mechanism) and no second
-      one is contemplated, so per §3.3 it does not clear the bar for an
-      abstraction. Needs the liveness check and non-infinite wait §8.1
-      requires, on top of the five frozen lock names of §8.2
 - [ ] `Repo` trait (symlink scanning, §3.3/§5b operation scope) — not started
 
 ### Phase 4 — commands

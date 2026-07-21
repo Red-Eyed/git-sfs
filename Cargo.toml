@@ -19,6 +19,9 @@ camino = "1.2"
 clap = { version = "4.6", features = ["derive"] }
 ctrlc = { version = "3.5", features = ["termination"] }
 hex = "0.4"
+# `signal` only -- Lock's PID-liveness check (contract-spec 8.1) needs `kill(pid,
+# 0)`; nothing else here uses nix, so no other feature is enabled.
+nix = { version = "0.31", default-features = false, features = ["signal"] }
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 proptest = "1.11"

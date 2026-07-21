@@ -8,11 +8,14 @@
 //!
 //! `Store` gets a trait because there are genuinely two implementations —
 //! [`store::FsStore`] and a test fake — which is the bar rust-rewrite-plan
-//! §3.3 sets for introducing one at all. `Remote` and `Repo` will follow the
-//! same rule once they exist.
+//! §3.3 sets for introducing one at all. `Lock` deliberately does not: one
+//! real implementation, no second one contemplated. `Remote` and `Repo` are
+//! not yet built.
 
 pub mod cancellable_io;
+pub mod lock;
 pub mod store;
 
 pub use cancellable_io::{Cancellable, is_canceled};
+pub use lock::{Lock, LockError, LockName};
 pub use store::{CacheEntry, FsStore, Store, StoreError};

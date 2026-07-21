@@ -15,7 +15,7 @@
 
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use thiserror::Error;
@@ -136,6 +136,36 @@ pub trait Store {
     /// Returns [`StoreError::Io`] for any other failure, and
     /// [`StoreError::Canceled`] if `cancel` fires mid-copy.
     fn store(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError>;
+
+    /// Moves `source`'s bytes into the store under `hash` — `import --move`'s
+    /// primitive (contract-spec §4.2). `source` is consumed on success: it no
+    /// longer exists at its original path.
+    ///
+    /// `source` is hash-verified **before** it is touched, not after, unlike
+    /// v1's `Move` (`cache.go:130-177`), which renames or copies first and
+    /// only then hashes the result — so a hash mismatch there has already
+    /// destroyed the caller's only copy. Verifying first means a mismatch
+    /// leaves `source` exactly where the caller left it.
+    ///
+    /// Prefers a same-filesystem `rename` (cheap, and safe post-verify since
+    /// a rename cannot alter content) and falls back to copy-then-remove on
+    /// [`io::ErrorKind::CrossesDevices`]. The fallback re-verifies the copy
+    /// at its staging path before removing `source`, since a copy — unlike a
+    /// rename — can be corrupted in transit; `source` only disappears once
+    /// the bytes that will replace it are confirmed good.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::HashMismatch`] if `source`'s content does not
+    /// hash to `hash`, [`StoreError::Io`] for any other failure, and
+    /// [`StoreError::Canceled`] if `cancel` fires mid-operation. In every
+    /// error case `source` is left intact.
+    fn adopt(
         &self,
         source: &Utf8Path,
         hash: Sha256,
@@ -316,6 +346,181 @@ impl Store for FsStore {
 
         Ok(CacheEntry { hash })
     }
+
+    fn adopt(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        let dst = self.object_path(hash);
+
+        if let Some(entry) = self.verified(hash, cancel)? {
+            // Already cached under this hash. Unless `source` literally *is*
+            // that cache object (dev+ino identity, not path text -- a
+            // symlink or `..` can make two different-looking paths the same
+            // file), it is now a redundant duplicate that `adopt`'s "source
+            // is consumed" contract requires removing.
+            if !same_file(source, &dst)? {
+                std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
+                    path: source.to_owned(),
+                    source: source_err,
+                })?;
+            }
+            return Ok(entry);
+        }
+
+        // Verify *before* touching `source` -- see the trait doc. Unlike
+        // v1's `Move`, a mismatch here leaves `source` untouched.
+        let got = hash_file(source, cancel)?;
+        if got != hash {
+            return Err(StoreError::HashMismatch {
+                path: source.to_owned(),
+                want: hash,
+                got,
+            });
+        }
+
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|source_err| StoreError::Io {
+                path: parent.to_owned(),
+                source: source_err,
+            })?;
+        }
+        let staging = tmp_dir(&self.root);
+        std::fs::create_dir_all(&staging).map_err(|source_err| StoreError::Io {
+            path: staging.clone(),
+            source: source_err,
+        })?;
+
+        // Mode must be read before any move below -- once the rename or
+        // remove happens, `source` no longer exists to stat.
+        let source_mode = std::fs::metadata(source)
+            .map_err(|source_err| StoreError::Io {
+                path: source.to_owned(),
+                source: source_err,
+            })?
+            .permissions()
+            .mode();
+
+        // Deterministic name, mirroring v1's `.{hash}.move`: two concurrent
+        // adopts of the same hash are already serialized by the caller's
+        // command lock (contract-spec §8), so collision is not a concern,
+        // and a leftover from a crashed prior run is simply overwritten by
+        // the rename/create below.
+        let tmp_path = staging.join(format!(".{}.adopt", hash.to_hex()));
+
+        match std::fs::rename(source, &tmp_path) {
+            Ok(()) => {
+                // Same filesystem: a rename cannot alter content, and
+                // `source` was already verified above, so the bytes now at
+                // `tmp_path` are known-good without re-reading them.
+            }
+            Err(err) if err.kind() == io::ErrorKind::CrossesDevices => {
+                // Cross-filesystem: the copy itself can corrupt data in a
+                // way a rename cannot, so the copy is independently
+                // verified and `source` is removed only once that passes.
+                copy_with_cancel(source, &tmp_path, cancel)?;
+                let copied = hash_file(&tmp_path, cancel)?;
+                if copied != hash {
+                    // `source` is still intact; only the staging copy is
+                    // corrupt, so cleanup here is a courtesy, not a
+                    // correctness requirement -- a leftover is inert and
+                    // gets overwritten by the next adopt of this hash.
+                    #[allow(
+                        clippy::let_underscore_must_use,
+                        reason = "best-effort cleanup of a corrupt staging file; source is already confirmed intact above"
+                    )]
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(StoreError::HashMismatch {
+                        path: tmp_path,
+                        want: hash,
+                        got: copied,
+                    });
+                }
+                std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
+                    path: source.to_owned(),
+                    source: source_err,
+                })?;
+            }
+            Err(source_err) => {
+                return Err(StoreError::Io {
+                    path: source.to_owned(),
+                    source: source_err,
+                });
+            }
+        }
+
+        let mut perms = std::fs::metadata(&tmp_path)
+            .map_err(|source_err| StoreError::Io {
+                path: tmp_path.clone(),
+                source: source_err,
+            })?
+            .permissions();
+        perms.set_mode(source_mode & !0o222);
+        std::fs::set_permissions(&tmp_path, perms).map_err(|source_err| StoreError::Io {
+            path: tmp_path.clone(),
+            source: source_err,
+        })?;
+        // Durability before publish, matching `store()`.
+        File::open(&tmp_path)
+            .and_then(|f| f.sync_all())
+            .map_err(|source_err| StoreError::Io {
+                path: tmp_path.clone(),
+                source: source_err,
+            })?;
+
+        std::fs::rename(&tmp_path, &dst).map_err(|source_err| StoreError::Io {
+            path: dst.clone(),
+            source: source_err,
+        })?;
+
+        if let Some(parent) = dst.parent() {
+            fsync_dir(parent).map_err(|source_err| StoreError::Io {
+                path: parent.to_owned(),
+                source: source_err,
+            })?;
+        }
+
+        Ok(CacheEntry { hash })
+    }
+}
+
+/// Whether `a` and `b` name the same file, by device+inode rather than path
+/// text -- the identity that actually matters when deciding whether removing
+/// one would remove the other (a symlink or `..` component can make two
+/// different-looking paths resolve to one file).
+fn same_file(a: &Utf8Path, b: &Utf8Path) -> Result<bool, StoreError> {
+    let am = std::fs::metadata(a).map_err(|source| StoreError::Io {
+        path: a.to_owned(),
+        source,
+    })?;
+    let bm = std::fs::metadata(b).map_err(|source| StoreError::Io {
+        path: b.to_owned(),
+        source,
+    })?;
+    Ok(am.dev() == bm.dev() && am.ino() == bm.ino())
+}
+
+/// Streams `source`'s bytes to a freshly created file at `dst`, checking
+/// `cancel` every chunk. Used by [`Store::adopt`]'s cross-device fallback,
+/// where -- unlike [`Store::store`] -- there is no [`tempfile::NamedTempFile`]
+/// already open to copy into, since `dst` here is a plain deterministic path.
+fn copy_with_cancel(source: &Utf8Path, dst: &Utf8Path, cancel: &Cancel) -> Result<(), StoreError> {
+    let src_file = File::open(source).map_err(|source_err| StoreError::Io {
+        path: source.to_owned(),
+        source: source_err,
+    })?;
+    let mut reader = Cancellable::new(src_file, cancel.clone());
+    let mut dst_file = File::create(dst).map_err(|source_err| StoreError::Io {
+        path: dst.to_owned(),
+        source: source_err,
+    })?;
+    io::copy(&mut reader, &mut dst_file).map_err(|err| classify_copy_error(err, source))?;
+    dst_file.sync_all().map_err(|source_err| StoreError::Io {
+        path: dst.to_owned(),
+        source: source_err,
+    })
 }
 
 /// Maps a copy failure to the right [`StoreError`], recovering cancellation
@@ -428,6 +633,23 @@ impl Store for FakeStore {
             .expect("fake store mutex poisoned")
             .insert(hash, bytes);
         Ok(CacheEntry { hash })
+    }
+
+    fn adopt(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        // No cache-relative path of its own to alias against, so the
+        // same-file guard `FsStore` needs does not apply here: `source` can
+        // never *be* the in-memory entry.
+        let entry = self.store(source, hash, cancel)?;
+        std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        })?;
+        Ok(entry)
     }
 }
 
@@ -633,6 +855,149 @@ mod tests {
         assert!(store.verified(hash, &cancel).unwrap().is_none());
         let entry = store.store(&source, hash, &cancel).unwrap();
         assert_eq!(entry.hash(), hash);
+        assert!(store.verified(hash, &cancel).unwrap().is_some());
+    }
+
+    #[test]
+    fn adopting_consumes_the_source_and_publishes_a_verified_object() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let content = b"moved into the cache";
+        let source = write_temp_file(&source_dir, "data.bin", content);
+        let hash = hash_of(content);
+
+        let entry = store.adopt(&source, hash, &cancel).unwrap();
+        assert_eq!(entry.hash(), hash);
+        assert!(!source.exists(), "adopt must consume the source");
+
+        let path = store.object_path(hash);
+        assert_eq!(std::fs::read(&path).unwrap(), content);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o222, 0, "published object must be read-only");
+    }
+
+    #[test]
+    fn adopting_a_hash_mismatch_leaves_the_source_untouched() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let source = write_temp_file(&source_dir, "data.bin", b"actual content");
+        let wrong_hash = hash_of(b"a different content entirely");
+
+        let err = store.adopt(&source, wrong_hash, &cancel).unwrap_err();
+        assert!(matches!(err, StoreError::HashMismatch { .. }));
+        // Unlike v1, a mismatch must never have consumed the source.
+        assert!(source.exists());
+        assert_eq!(std::fs::read(&source).unwrap(), b"actual content");
+        assert!(store.verified(wrong_hash, &cancel).unwrap().is_none());
+    }
+
+    #[test]
+    fn adopting_an_already_cached_hash_removes_the_duplicate_source() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let content = b"already present";
+        let hash = hash_of(content);
+        let first_source = write_temp_file(&source_dir, "first.bin", content);
+        store.store(&first_source, hash, &cancel).unwrap();
+
+        let duplicate_source = write_temp_file(&source_dir, "duplicate.bin", content);
+        let entry = store.adopt(&duplicate_source, hash, &cancel).unwrap();
+        assert_eq!(entry.hash(), hash);
+        assert!(
+            !duplicate_source.exists(),
+            "a redundant duplicate must still be consumed"
+        );
+    }
+
+    #[test]
+    fn adopting_a_source_that_is_already_the_cache_object_does_not_delete_it() {
+        // The pathological case the same-file (dev+ino) guard exists for:
+        // if `source` and the object path resolve to one file, "consuming
+        // the source" must not mean deleting the only copy of the object.
+        let cache = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+
+        let content = b"self-adopted object";
+        let hash = hash_of(content);
+        let object_path = store.object_path(hash);
+        std::fs::create_dir_all(object_path.parent().unwrap()).unwrap();
+        std::fs::write(&object_path, content).unwrap();
+        let mut perms = std::fs::metadata(&object_path).unwrap().permissions();
+        perms.set_mode(0o444);
+        std::fs::set_permissions(&object_path, perms).unwrap();
+
+        let entry = store.adopt(&object_path, hash, &cancel).unwrap();
+        assert_eq!(entry.hash(), hash);
+        assert!(object_path.exists(), "must not delete the object it names");
+        assert_eq!(std::fs::read(&object_path).unwrap(), content);
+    }
+
+    #[test]
+    fn adopting_is_cancellable() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+        cancel.cancel();
+
+        let content = vec![0u8; 1 << 20];
+        let source = write_temp_file(&source_dir, "data.bin", &content);
+        let err = store
+            .adopt(&source, hash_of(&content), &cancel)
+            .unwrap_err();
+        assert!(matches!(err, StoreError::Canceled));
+        assert!(
+            source.exists(),
+            "cancellation must not have consumed the source"
+        );
+    }
+
+    #[test]
+    fn copy_with_cancel_reproduces_the_cross_device_fallback_mechanics() {
+        // Genuine EXDEV needs two real filesystems, which is not portable to
+        // exercise in CI. This drives the fallback's actual copy primitive
+        // directly, so the mechanics `adopt` depends on for that branch --
+        // full-content copy, and prompt stop on cancellation -- are still
+        // covered even though the `ErrorKind::CrossesDevices` branch itself
+        // is not.
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"copied across a simulated device boundary";
+        let source = write_temp_file(&dir, "source.bin", content);
+        let dst = Utf8PathBuf::from_path_buf(dir.path().join("dst.bin")).unwrap();
+
+        copy_with_cancel(&source, &dst, &Cancel::new()).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), content);
+
+        let cancel = Cancel::new();
+        cancel.cancel();
+        let large_source = write_temp_file(&dir, "large.bin", &vec![0u8; 1 << 20]);
+        let large_dst = Utf8PathBuf::from_path_buf(dir.path().join("large_dst.bin")).unwrap();
+        let err = copy_with_cancel(&large_source, &large_dst, &cancel).unwrap_err();
+        assert!(matches!(err, StoreError::Canceled));
+    }
+
+    #[test]
+    fn fake_store_adopt_also_consumes_the_source() {
+        let store = FakeStore::new();
+        let cancel = Cancel::new();
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"in memory, adopted";
+        let source = write_temp_file(&dir, "data.bin", content);
+        let hash = hash_of(content);
+
+        let entry = store.adopt(&source, hash, &cancel).unwrap();
+        assert_eq!(entry.hash(), hash);
+        assert!(!source.exists());
         assert!(store.verified(hash, &cancel).unwrap().is_some());
     }
 }

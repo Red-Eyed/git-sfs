@@ -351,6 +351,7 @@ version = "2.0.0"
 dependencies = [
  "camino",
  "hex",
+ "nix",
  "path-clean",
  "pathdiff",
  "proptest",
