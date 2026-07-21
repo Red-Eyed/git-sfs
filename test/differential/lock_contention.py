@@ -68,20 +68,37 @@ def write_lock(cache: Path, name: str, owner: bytes | None) -> Path:
     return path
 
 
-def start_push(context: dict, faults: str | None = None) -> subprocess.Popen:
+def start_command(
+    context: dict, argv: list[str], faults: str | None = None
+) -> subprocess.Popen:
     env = dict(context["env"])
     if faults is not None:
         faults_file = context["work"] / "faults.jsonl"
         faults_file.write_text(faults + "\n")
         env["RCLONE_FAULTS"] = str(faults_file)
     return subprocess.Popen(
-        [env["GIT_SFS"], "--quiet", "push"],
+        [env["GIT_SFS"], "--quiet", *argv],
         cwd=context["repo"],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+def start_push(context: dict, faults: str | None = None) -> subprocess.Popen:
+    return start_command(context, ["push"], faults)
+
+
+def command_for(lock_name: str, source: Path) -> list[str]:
+    """The command that takes each lock (contract-spec §8.2)."""
+    return {
+        "add": ["add", "data"],
+        "import": ["import", str(source), "imported/blob.bin"],
+        "setup": ["setup"],
+        "pull": ["pull"],
+        "push": ["push"],
+    }[lock_name]
 
 
 def test_lock_is_created_at_contract_path(binary: Binary, context: dict, r: Results):
@@ -94,9 +111,7 @@ def test_lock_is_created_at_contract_path(binary: Binary, context: dict, r: Resu
         r.check(appeared, "locks/push.lock exists while push runs")
         if appeared:
             path = lock_path(cache, "push")
-            r.check(
-                path.stat().st_mode & 0o777 == 0o755, "lock directory mode is 0755"
-            )
+            r.check(path.stat().st_mode & 0o777 == 0o755, "lock directory mode is 0755")
             owner = path / "owner"
             r.check(owner.is_file(), "owner file exists")
             if owner.is_file():
@@ -138,7 +153,48 @@ def test_blocks_on_foreign_lock(binary: Binary, context: dict, r: Results):
             process.kill()
 
 
-def test_cross_binary_contention(holder: Binary, waiter: Binary, contexts: dict, r: Results):
+def test_every_command_locks_its_own_name(binary: Binary, context: dict, r: Results):
+    """§8.2: five locks, one per command, and the names are themselves contract.
+
+    Consolidating them into a single cache.lock is the obvious cleanup and is
+    more correct in isolation. It also silently removes everything this file
+    exists to protect: v2's `add` would take cache.lock while v1's takes
+    add.lock, the two mkdir calls would target different paths, neither would
+    block, and both binaries would report holding the lock.
+
+    Planting each lock exactly as a foreign process would write it, then
+    requiring the matching command to wait, is what catches that. Note what is
+    deliberately *not* asserted: nothing here requires a command to ignore
+    another command's lock. §8.2 lets v2 take extra locks, since acquiring more
+    is strictly more conservative and cannot break interop with v1.
+    """
+    print(f"\n[{binary.name}] every command blocks on its own lock name")
+    cache = context["cache"]
+    source = context["work"] / "import-source.bin"
+    source.write_bytes(b"import payload\n")
+
+    for name in LOCK_NAMES:
+        argv = command_for(name, source)
+        held = write_lock(cache, name, b"pid: 1\n")
+        process = start_command(context, argv)
+        try:
+            blocked = not wait_for(
+                lambda: process.poll() is not None, BLOCK_PROBE_SECONDS
+            )
+            r.check(blocked, f"{argv[0]} waits for locks/{name}.lock")
+        finally:
+            shutil.rmtree(held, ignore_errors=True)
+            r.check(
+                wait_for(lambda: process.poll() is not None, 15),
+                f"{argv[0]} proceeds once locks/{name}.lock is released",
+            )
+            if process.poll() is None:
+                process.kill()
+
+
+def test_cross_binary_contention(
+    holder: Binary, waiter: Binary, contexts: dict, r: Results
+):
     """Two real binaries, one cache: the second must wait for the first."""
     print(f"\n[{holder.name} holds, {waiter.name} waits] cross-binary contention")
     context = contexts[holder.name]
@@ -241,7 +297,11 @@ def find_dead_pid() -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--binary", type=parse_binary, action="append", required=True, metavar="NAME=PATH"
+        "--binary",
+        type=parse_binary,
+        action="append",
+        required=True,
+        metavar="NAME=PATH",
     )
     args = parser.parse_args()
 
@@ -251,8 +311,13 @@ def main() -> None:
     try:
         contexts = {b.name: prepare_workspace(b, root, SETUP) for b in args.binary}
         for binary in args.binary:
-            test_lock_is_created_at_contract_path(binary, contexts[binary.name], results)
+            test_lock_is_created_at_contract_path(
+                binary, contexts[binary.name], results
+            )
             test_blocks_on_foreign_lock(binary, contexts[binary.name], results)
+            test_every_command_locks_its_own_name(
+                binary, contexts[binary.name], results
+            )
             observe_malformed_owner(binary, contexts[binary.name], results)
             observe_stale_lock(binary, contexts[binary.name], results)
 
@@ -264,9 +329,7 @@ def main() -> None:
         chmod_writable(root)
         shutil.rmtree(root, ignore_errors=True)
 
-    print(
-        f"\n{results.asserts_passed} passed, {results.asserts_failed} failed"
-    )
+    print(f"\n{results.asserts_passed} passed, {results.asserts_failed} failed")
     if results.asserts_failed:
         sys.exit(1)
 

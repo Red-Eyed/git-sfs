@@ -25,6 +25,7 @@ all, so nothing is normalized and nothing is asserted.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -52,6 +53,76 @@ def collapse_repeats(body: str) -> str:
 
 def fewer_lines(reference: str, candidate: str) -> bool:
     return len(candidate.splitlines()) < len(reference.splitlines())
+
+
+# A cache object's manifest line, e.g.
+#   file files/sha256/ab/ab3f... mode=0444 size=15 sha256=...
+CACHE_OBJECT_PREFIX = "file files/sha256/"
+MODE_FIELD = re.compile(r"mode=\d{4}")
+
+
+def mask_outcome(label: str) -> Callable[[str], str]:
+    """Blank one `label=<status>` line, leaving every other outcome strict."""
+
+    def normalize(body: str) -> str:
+        lines = [
+            f"{label}=<status>\n" if line.startswith(f"{label}=") else line
+            for line in body.splitlines(keepends=True)
+        ]
+        return "".join(lines)
+
+    return normalize
+
+
+def outcome_became_zero(label: str) -> Callable[[str, str], bool]:
+    """The candidate succeeds where the reference did not."""
+
+    def occurred(reference: str, candidate: str) -> bool:
+        return _outcome(reference, label) not in ("0", None) and (
+            _outcome(candidate, label) == "0"
+        )
+
+    return occurred
+
+
+def _outcome(body: str, label: str) -> str | None:
+    for line in body.splitlines():
+        name, _, status = line.partition("=")
+        if name == label:
+            return status
+    return None
+
+
+def mask_object_modes(body: str) -> str:
+    """Blank the mode on cache-object lines only.
+
+    Narrow on purpose: size and digest still compare strictly, and every other
+    entry in the cache -- tmp/, locks/, directory modes -- is untouched. Masking
+    the whole section would hide a genuine regression alongside the permitted
+    difference.
+    """
+    lines = [
+        MODE_FIELD.sub("mode=****", line)
+        if line.startswith(CACHE_OBJECT_PREFIX)
+        else line
+        for line in body.splitlines(keepends=True)
+    ]
+    return "".join(lines)
+
+
+def objects_became_read_only(reference: str, candidate: str) -> bool:
+    """Every cache object is unwritable in the candidate, but not the reference."""
+    return _has_writable_object(reference) and not _has_writable_object(candidate)
+
+
+def _has_writable_object(body: str) -> bool:
+    for line in body.splitlines():
+        if not line.startswith(CACHE_OBJECT_PREFIX):
+            continue
+        found = MODE_FIELD.search(line)
+        if found and int(found.group()[len("mode=") :], 8) & 0o222:
+            return True
+    return False
 
 
 # The manifest sections run.py emits, in order. Declared here because this is
@@ -88,6 +159,26 @@ DIVERGENCES = [
         statement="a permanent 403 is issued once, not retried retry_max times",
         normalize=collapse_repeats,
         occurred=fewer_lines,
+    ),
+    Divergence(
+        id="writable-object-is-repaired-not-failed",
+        spec="§4.1/§9.1",
+        scenario="06-writable-cache",
+        section="outcomes",
+        statement="verify --with-integrity hash-verifies an intact but writable "
+        "object and exits 0, where v1 reports wrong-cache-permissions",
+        normalize=mask_outcome("verify_integrity"),
+        occurred=outcome_became_zero("verify_integrity"),
+    ),
+    Divergence(
+        id="writable-object-is-reprotected",
+        spec="§4.1",
+        scenario="06-writable-cache",
+        section="cache",
+        statement="the verified object is protected in place, so the write bits "
+        "are gone afterwards",
+        normalize=mask_object_modes,
+        occurred=objects_became_read_only,
     ),
 ]
 
