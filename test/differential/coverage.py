@@ -75,6 +75,11 @@ CLAUSES = [
         "resolved form is registered too",
     ),
     Clause("2", "rebinding an existing cache is an error, not an overwrite", UNCOVERED),
+    Clause(
+        "2",
+        "rebind compares canonicalized paths, so an equivalent path is a no-op",
+        UNCOVERED,
+    ),
     Clause("2", "`.git-sfs/cache` must not be committed", UNCOVERED),
     # -- §3 symlink format ---------------------------------------------------
     Clause(
@@ -89,6 +94,13 @@ CLAUSES = [
     Clause("3.2", "uppercase hex in a hash is rejected", UNCOVERED),
     Clause(
         "3.2", "prefix component must equal the hash's first two characters", UNCOVERED
+    ),
+    Clause("3.3", "mv succeeds when the referenced cache object is absent", UNCOVERED),
+    Clause("3.3", "mv rejects a source that is not a git-sfs symlink", UNCOVERED),
+    Clause(
+        "3.3",
+        "a directory destination means move-inside; an existing file is an error",
+        UNCOVERED,
     ),
     # -- §4 cache layout -----------------------------------------------------
     Clause(
@@ -138,6 +150,17 @@ CLAUSES = [
     ),
     Clause("4.2", "a post-rename hash mismatch removes the published file", UNCOVERED),
     Clause(
+        "4.2",
+        "import --move falls back to copy+remove across filesystems",
+        UNCOVERED,
+    ),
+    Clause("4.3", "tmp/ is purged by pull only, before it takes its lock", UNCOVERED),
+    Clause(
+        "4.3",
+        "purging tmp/ must not destroy another process's in-flight staging",
+        V2_ONLY,
+    ),
+    Clause(
         "4",
         "a v2-style trash/ directory is invisible to v1",
         ASSERTED,
@@ -166,6 +189,40 @@ CLAUSES = [
         "scenarios/04-rclone-argv.sh",
         "use_fake_rclone",
     ),
+    Clause(
+        "5.1",
+        "backend and path compose to backend:path, trailing slashes stripped",
+        UNCOVERED,
+    ),
+    Clause("5.1", "a Windows drive-letter path is preserved verbatim", UNCOVERED),
+    Clause("5.1", "an empty backend yields the path unchanged", UNCOVERED),
+    # -- §5b operation scope -------------------------------------------------
+    Clause(
+        "5b",
+        "a path argument scopes status, verify, push and pull to a subtree",
+        UNCOVERED,
+    ),
+    Clause("5b", "pull <path> does not restore siblings", UNCOVERED),
+    Clause(
+        "5b.1",
+        "push names a working-tree path, not a hash, for a missing object",
+        UNCOVERED,
+    ),
+    Clause(
+        "5b.1", "--skip-missing never uploads an object that fails HasValid", UNCOVERED
+    ),
+    Clause("5b.1", "--skip-missing reports object and symlink counts", UNCOVERED),
+    Clause(
+        "5b.1",
+        "the skipped-path listing is capped with an 'and N more' line",
+        UNCOVERED,
+    ),
+    Clause("5b.2", "a symlinked import source is rejected without -L", UNCOVERED),
+    Clause(
+        "5b.2",
+        "a rejected import leaves the source link and its target intact",
+        UNCOVERED,
+    ),
     # -- §6 config -----------------------------------------------------------
     Clause(
         "6.2",
@@ -181,6 +238,20 @@ CLAUSES = [
     Clause("6.2", "a remote missing `backend` is rejected", UNCOVERED),
     Clause("6.3", "`#` inside a quoted value truncates under v1's scanner", UNCOVERED),
     Clause("6.5", "both parsers are run and disagreement is an error", V2_ONLY),
+    Clause(
+        "6.4",
+        "the init template parses under the implementation's own validator",
+        UNCOVERED,
+    ),
+    Clause("6.6", "a leading `v` is accepted in a version string", UNCOVERED),
+    Clause(
+        "6.6", "a version string requires exactly three numeric components", UNCOVERED
+    ),
+    Clause(
+        "6.6",
+        "v2 is never less permissive than v1 on the version forms v1 accepts",
+        UNCOVERED,
+    ),
     # -- §7 local state ------------------------------------------------------
     Clause("7.1", "`.git` as a file (worktree, submodule) is accepted", UNCOVERED),
     Clause(
@@ -232,6 +303,27 @@ CLAUSES = [
         "lock_contention.py",
         "zero-byte owner",
     ),
+    Clause(
+        "8.2",
+        "push takes locks/push.lock, the name another binary looks for",
+        ASSERTED,
+        "lock_contention.py",
+        "locks/push.lock exists while push runs",
+    ),
+    Clause(
+        "8.2",
+        "add, import, setup and pull take their own named locks",
+        ASSERTED,
+        "lock_contention.py",
+        "waits for locks/{name}.lock",
+    ),
+    Clause(
+        "8.2",
+        "consolidating the five names into one lock is detected",
+        ASSERTED,
+        "lock_contention.py",
+        "every command blocks on its own lock name",
+    ),
     # -- §9 exit codes -------------------------------------------------------
     Clause(
         "9", "success vs failure is 0 vs non-zero", STRUCTURAL, "run.py", "outcomes"
@@ -249,7 +341,18 @@ CLAUSES = [
         "verify exits non-zero on an integrity failure",
         STRUCTURAL,
         "scenarios/03-corrupt-cache.sh",
-        "verify_integrity",
+        # The flag, not just the label: without --no-check-remote the default
+        # remote check exits 2 first and the scenario stops testing corruption
+        # while still looking green. That is how it shipped until this fragment
+        # was tightened.
+        "verify --no-check-remote --with-integrity",
+    ),
+    Clause(
+        "9.1",
+        "presence-only verify passes where --with-integrity fails (0 vs 3)",
+        STRUCTURAL,
+        "scenarios/03-corrupt-cache.sh",
+        "The split it exists to pin is 0 vs 3",
     ),
     Clause(
         "9.1",
@@ -257,6 +360,22 @@ CLAUSES = [
         STRUCTURAL,
         "scenarios/05-remote-fault.sh",
         "status_object_denied",
+    ),
+    Clause("9.1", "status without --remote makes no network calls", UNCOVERED),
+    Clause("9.1", "a repo whose only finding is orphaned objects exits 0", UNCOVERED),
+    Clause(
+        "9.1",
+        "verify exits 0 after repairing a writable but intact cache object",
+        DECLARED,
+        "divergences.py",
+        "writable-object-is-repaired-not-failed",
+    ),
+    Clause(
+        "4.1",
+        "a verified writable object is protected in place, losing its write bits",
+        DECLARED,
+        "divergences.py",
+        "writable-object-is-reprotected",
     ),
     Clause(
         "9.2", "verify --check-remote must reject a truncated remote object", UNCOVERED
