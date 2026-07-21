@@ -23,9 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -33,6 +31,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+from cache_state import (
+    held_locks,
+    object_dir,
+    object_path,
+    sha256_of,
+    stray_files,
+    tracked_object,
+    trusted_but_wrong,
+)
 from harness import (
     Binary,
     Results,
@@ -43,7 +50,7 @@ from harness import (
 )
 
 HARNESS_DIR = Path(__file__).parent
-SETUP = HARNESS_DIR / "cancel-setup.sh"
+SETUP = HARNESS_DIR / "replicated-setup.sh"
 
 # 128 = SIGINT's 130 by the shell's 128+signal convention. contract-spec §9 keeps
 # this frozen even though the rest of the taxonomy is v2's to redesign.
@@ -55,70 +62,10 @@ STALL_SECONDS = 5.0
 SYNC_TIMEOUT = 20.0
 SHUTDOWN_TIMEOUT = 30.0
 
-OBJECT_NAME = re.compile(r"^[0-9a-f]{64}$")
-
 # Big enough that hashing and copying it take long enough to interrupt, small
 # enough not to dominate the run. Built from a repeating block rather than read
 # wholesale from /dev/urandom, which is the slow part at this size.
 ADD_FIXTURE_BYTES = 128 * 1024 * 1024
-
-
-def sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def object_dir(root: Path) -> Path:
-    return root / "files" / "sha256"
-
-
-def published_objects(root: Path) -> list[Path]:
-    """Every file sitting at a content-addressed path under root."""
-    objects = object_dir(root)
-    if not objects.is_dir():
-        return []
-    return [
-        path
-        for path in sorted(objects.rglob("*"))
-        if path.is_file() and OBJECT_NAME.match(path.name)
-    ]
-
-
-def trusted_but_wrong(root: Path) -> list[Path]:
-    """Objects that are read-only yet do not hash to their own name.
-
-    This is the single most dangerous state in the system (contract-spec §4.1):
-    HasValid reads the stripped write bit as proof the bytes were verified when
-    written, so it never re-hashes. A partial file published read-only is
-    therefore trusted forever, and every later integrity check silently passes.
-    """
-    return [
-        path
-        for path in published_objects(root)
-        if path.stat().st_mode & 0o222 == 0 and sha256_of(path) != path.name
-    ]
-
-
-def stray_files(root: Path) -> list[Path]:
-    """Non-object files inside the object store -- v1 stages temps here (§13.2)."""
-    objects = object_dir(root)
-    if not objects.is_dir():
-        return []
-    return [
-        path
-        for path in sorted(objects.rglob("*"))
-        if path.is_file() and not OBJECT_NAME.match(path.name)
-    ]
-
-
-def held_locks(root: Path) -> list[str]:
-    locks = root / "locks"
-    if not locks.is_dir():
-        return []
-    return sorted(path.name for path in locks.iterdir())
 
 
 def start(
@@ -222,8 +169,8 @@ def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
     chmod_writable(cache)
     shutil.rmtree(object_dir(cache), ignore_errors=True)
 
-    expected = expected_object(context)
-    target = object_dir(cache) / expected[:2] / expected
+    expected = tracked_object(context["repo"], "data/blob.bin")
+    target = object_path(cache, expected)
 
     process = start(
         context, ["pull"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
@@ -261,8 +208,8 @@ def test_push_interrupted(binary: Binary, context: dict, r: Results) -> None:
     cache, remote = context["cache"], context["remote"]
     shutil.rmtree(object_dir(remote), ignore_errors=True)
 
-    expected = expected_object(context)
-    landing = object_dir(remote) / expected[:2] / expected
+    expected = tracked_object(context["repo"], "data/blob.bin")
+    landing = object_path(remote, expected)
 
     process = start(
         context, ["push"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
@@ -341,7 +288,7 @@ def test_add_interrupted(binary: Binary, context: dict, r: Results) -> None:
 
     completed = run_to_completion(context, ["add", "data"])
     r.check(completed.returncode == 0, "add: re-running after the interrupt succeeds")
-    stored = object_dir(cache) / expected[:2] / expected
+    stored = object_path(cache, expected)
     r.check(stored.is_file(), "add: the object lands in the cache on the retry")
     assert_no_trusted_corruption(r, "add", "after the recovery", cache)
 
@@ -352,12 +299,6 @@ def write_fixture(path: Path, size: int) -> None:
     with open(path, "wb") as handle:
         for _ in range(size // len(block)):
             handle.write(block)
-
-
-def expected_object(context: dict) -> str:
-    """The hash of the fixture the setup script committed, read from its symlink."""
-    link = context["repo"] / "data" / "blob.bin"
-    return os.readlink(link).rsplit("/", 1)[-1]
 
 
 def main() -> None:

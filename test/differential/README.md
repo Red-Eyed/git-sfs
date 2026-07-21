@@ -46,17 +46,23 @@ Exits non-zero when any pair diverges, printing a unified diff of the manifests.
 ## Layout
 
 ```
-snapshot.py         tree -> canonical manifest. Reusable on its own.
-harness.py          shared by all three entry points: binaries, workspaces, polling
-run.py              driver: run scenarios, snapshot, diff
-lib.sh              helpers available to every scenario
-scenarios/          one scenario per file
-fake-rclone/        recording, fault-injecting stand-in for rclone
-lock_contention.py  second entry point; see below
-lock-setup.sh       workspace prep for it
-cancellation.py     third entry point; see below
-cancel-setup.sh     workspace prep for it
+snapshot.py            tree -> canonical manifest. Reusable on its own.
+harness.py             binaries, workspaces, polling. Knows nothing about git-sfs.
+cache_state.py         queries over a cache tree: object paths, modes, hashes.
+run.py                 driver: run scenarios, snapshot, diff
+lib.sh                 helpers available to every scenario
+scenarios/             one scenario per file
+fake-rclone/           recording, fault-injecting stand-in for rclone
+replicated-setup.sh    fixture: object cached, committed, and on the remote
+lock_contention.py     second entry point; see below
+lock-setup.sh          workspace prep for it
+cancellation.py        third entry point; see below
+mode_preservation.py   fourth entry point; see below
 ```
+
+`harness.py` and `cache_state.py` split along a deliberate line: the first would
+work for any CLI, the second encodes the layout contract-spec §4 freezes. The
+entry points then hold only what is distinct about them.
 
 ## Lock contention
 
@@ -151,6 +157,76 @@ mutant Go binaries were built and caught.
 The second mutant is why the invariant is checked at two points rather than one:
 with the check only after the interrupt, it passed while the mutant was actively
 producing the exact state the check exists to forbid.
+
+## Mode preservation
+
+`mode_preservation.py` covers the one contract-spec calls "the single most
+dangerous invariant in the contract" (§4.1). The read-only bit on a cache object
+is not decoration — `HasValid` treats it as *proof the bytes were hash-verified
+when written*, and therefore never re-hashes. Everything downstream inherits
+that trust.
+
+The spec then lists the environments where the bit can lie: exFAT/FAT, some FUSE
+and network mounts, SMB/NFS with unusual id mapping, Docker volume copies,
+`rsync` without `-p`, archive extraction. Any of them can hand you unverified
+bytes wearing a read-only bit.
+
+```sh
+just mode-preservation
+```
+
+Mounting exFAT in CI is not portable, so the harness constructs the **state**
+such a filesystem leaves behind rather than intercepting the chmod that produces
+it. Three combinations of (mode, content) are reachable and each is built
+directly:
+
+| Mode | Content | What it models | Expected |
+|---|---|---|---|
+| writable | intact | older cache, or a copy that dropped the bit | §4.1's MUST: hash-verify, then protect in place |
+| writable | rotted | the same, plus real damage | the write bit forces a re-hash, so `pull` repairs from the remote |
+| protected | rotted | `rsync -a` without `-p`, archive extraction, bit rot | **v1 trusts it forever** |
+
+The third row is the hazard, so plain commands there are OBSERVE — v1 is
+permitted to be wrong and v2 is encouraged to diverge. What *is* asserted is
+that `verify --with-integrity` and `verify --rehash` still catch it: whatever a
+version decides about trusting the bit, a command whose entire job is re-hashing
+must not miss corruption.
+
+The second row doubles as a test of replication-as-repair-source
+(rust-rewrite-plan §8): one copy means rot is fatal, two means it is repairable.
+
+### What this cannot cover
+
+A chmod that **silently fails at the moment of writing**. Detecting that needs a
+real `LD_PRELOAD` / `DYLD_INSERT_LIBRARIES` interposer, which costs a C shim and
+a compiler in CI. It is deferred deliberately: it only becomes testable behavior
+once v2 ships the §7b probe that checks whether the cache filesystem preserves
+modes at all. Until then there is nothing for it to assert against.
+
+### Trusting it
+
+Same bar again — proven to fail before being trusted to pass:
+
+- `HasValid` returning `true` for any file that exists, mode and content unread:
+  three assertions fail on the rotted-writable case.
+- Re-protection required **two** mutations to trip, which is a finding in itself:
+  `HasValid` chmods legacy files ([cache.go:76](../../internal/cache/cache.go#L76))
+  *and* `Protect` chmods them again, so disabling either alone changes nothing.
+  Only with both disabled does the assertion fire.
+
+### It found a live defect
+
+The push case was written as an assertion and failed against v1, which is how
+contract-spec §13.4's first entry came to exist. `push` admits an object on
+`HasValid` alone — for a read-only file that is the mode bit and nothing else,
+no bytes read — and `CopyToRemote` omits `--ignore-existing`, so the upload
+overwrites. A locally rotted object therefore **destroys the good remote copy**
+and `push` exits `0`. Replication running backwards: the tier that exists to
+repair the other is overwritten by the damaged one.
+
+It is OBSERVE today only so the v1 baseline stays green. Flipping it to a
+positive assertion of v2's behavior is the outstanding Phase 0 item "encode each
+§13 divergence as a positive assertion".
 
 ## Writing a scenario
 

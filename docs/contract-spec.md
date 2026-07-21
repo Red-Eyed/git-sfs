@@ -756,6 +756,23 @@ regression.
 
 ### 13.4 Trusting the mover
 
+- **Push replicates local rot over a good remote copy, and exits `0`.** `push`
+  admits an object on `HasValid` alone (`push.go`), which for a read-only file is
+  the §4.1 mode bit and nothing else — no bytes are read. `CopyToRemote` omits
+  `--ignore-existing` (`command.go:272` uses it only on the pull direction), so
+  the upload **overwrites**. A locally rotted object therefore destroys the one
+  good replica, silently.
+
+  This is the replication-as-repair-source model (rust-rewrite-plan §8) running
+  backwards: the tier that exists to repair the other is overwritten *by* the
+  damaged one. Rot that was recoverable a moment earlier becomes unrecoverable,
+  and nothing reports it — verified end to end against v1, remote hash before and
+  after, exit `0`.
+
+  It compounds with the two entries below: nothing verifies the upload
+  afterwards, and `verify --check-remote` then accepts the result (§9.2). v2 must
+  not push bytes it has not read, and must not overwrite a remote object with
+  content that does not match the hash naming it.
 - **Push verifies nothing after upload** (`push.go:40-50`). The remote copy —
   which exists precisely so the cache is not the only copy — is the only artifact
   never hash-verified on write. v2 should confirm what landed, at minimum by size.

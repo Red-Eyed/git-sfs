@@ -41,7 +41,12 @@ lock-contention: build
 cancellation: build
     python3 test/differential/cancellation.py --binary v1=./git-sfs
 
-check: fmt test build workflows differential lock-contention cancellation
+# Mode/content disagreement (contract-spec 4.1): what happens when the read-only
+# bit that stands in for "hash-verified" no longer tells the truth.
+mode-preservation: build
+    python3 test/differential/mode_preservation.py --binary v1=./git-sfs
+
+check: fmt test build workflows differential lock-contention cancellation mode-preservation
     git --no-pager diff --check
 
 release-snapshot:

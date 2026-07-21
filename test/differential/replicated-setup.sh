@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Prepares a repo whose object is committed, cached, and already on the remote,
-# so the cancellation harness can interrupt a transfer in either direction.
+# Prepares a repo whose object is committed, cached, and already on the remote.
+# Shared by the entry points that need a replicated starting state: cancellation
+# interrupts a transfer in either direction, mode_preservation corrupts the local
+# copy and leans on the remote to repair it.
 # Sourced with lib.sh already loaded, exactly like a scenario.
 set -uo pipefail
 
