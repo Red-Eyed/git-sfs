@@ -63,7 +63,8 @@ Required checks after code changes:
 just check
 ```
 
-If `just` is unavailable, run the commands in `Justfile` manually.
+If `just` is unavailable, run the commands from `Justfile` and the files it
+imports (`just/go.just`, `just/conformance.just`) manually.
 
 Common user request: when asked to commit, push, and update version after changes, stage the finished changes, commit them with a focused message, create the next sequential version tag unless a specific version is named, push `main`, and push the new tag.
 

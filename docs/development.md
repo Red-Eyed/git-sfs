@@ -3,15 +3,21 @@
 Use `just` for common commands:
 
 ```sh
-just --list
-just fmt
-just test
-just workflows
-just coverage
-just bench
-just release-snapshot
-just check
+just --list          # grouped by go / conformance / repo
+just check           # everything CI runs
 ```
+
+Recipes are split by lifetime rather than by size:
+
+| File | Contents |
+|---|---|
+| `Justfile` | variables, `check`, repo chores |
+| `just/go.just` | Go toolchain — retired at the Rust cutover |
+| `just/conformance.just` | the harness that decides whether a replacement is acceptable |
+
+The conformance recipes all accept `--binary NAME=PATH` and default to the Go
+binary, so the same commands drive a second implementation by pointing them
+elsewhere. See [../test/differential/README.md](../test/differential/README.md).
 
 ## Local Go Paths
 
