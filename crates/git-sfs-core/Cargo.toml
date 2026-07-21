@@ -1,0 +1,21 @@
+[package]
+name = "git-sfs-core"
+description = "git-sfs library: domain types, planning, and ports. Cannot print and cannot exit."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+camino.workspace = true
+hex.workspace = true
+path-clean.workspace = true
+pathdiff.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

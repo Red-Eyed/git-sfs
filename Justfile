@@ -6,6 +6,7 @@
 # on, and `check` has to depend on all of them.
 
 import 'just/go.just'
+import 'just/rust.just'
 import 'just/conformance.just'
 
 go := env_var_or_default("GO", "go")
@@ -18,7 +19,7 @@ default:
 
 [group('repo')]
 [doc('everything CI runs: format, tests, workflows, full conformance harness')]
-check: fmt test build workflows differential lock-contention cancellation mode-preservation downgrade spec-coverage
+check: fmt test build rust-check workflows differential lock-contention cancellation mode-preservation downgrade spec-coverage
     git --no-pager diff --check
 
 [group('repo')]

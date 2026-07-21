@@ -1,0 +1,26 @@
+[package]
+name = "git-sfs"
+description = "store large file bytes outside Git while Git tracks symlinks"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "git-sfs"
+path = "src/main.rs"
+
+[dependencies]
+git-sfs-core.workspace = true
+
+camino.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+# Unused until `self update` lands in phase 6. Declared now so that the TLS
+# backend is resolved, locked, and proven statically linkable against musl by
+# CI from phase 1 onward -- see the note in the workspace manifest.
+ureq.workspace = true
+
+[lints]
+workspace = true

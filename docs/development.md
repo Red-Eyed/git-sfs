@@ -1,10 +1,15 @@
 # Development
 
+git-sfs is mid-rewrite from Go to Rust (see
+[../docs/rust-rewrite-plan.md](rust-rewrite-plan.md)). `internal/` and `cmd/`
+are the Go original; `crates/` is the Rust rewrite growing in alongside it.
+Both are built and tested from the same `just check`.
+
 Use `just` for common commands:
 
 ```sh
-just --list          # grouped by go / conformance / repo
-just check           # everything CI runs
+just --list          # grouped by go / rust / conformance / repo
+just check           # everything CI runs, both toolchains
 ```
 
 Recipes are split by lifetime rather than by size:
@@ -13,11 +18,24 @@ Recipes are split by lifetime rather than by size:
 |---|---|
 | `Justfile` | variables, `check`, repo chores |
 | `just/go.just` | Go toolchain — retired at the Rust cutover |
+| `just/rust.just` | Rust toolchain — the target implementation |
 | `just/conformance.just` | the harness that decides whether a replacement is acceptable |
 
 The conformance recipes all accept `--binary NAME=PATH` and default to the Go
 binary, so the same commands drive a second implementation by pointing them
-elsewhere. See [../test/differential/README.md](../test/differential/README.md).
+elsewhere — e.g. `./target/release/git-sfs` once a command is ported. See
+[../test/differential/README.md](../test/differential/README.md).
+
+## Rust
+
+```sh
+just rust-check      # fmt --check, clippy -D warnings, test, release build
+just rust-build      # ./target/release/git-sfs
+```
+
+Or drive `cargo` directly from the workspace root — `cargo build --workspace`,
+`cargo test --workspace`, `cargo clippy --workspace --all-targets`. `cargo fmt`
+rewrites files in place; re-read anything it touches before further edits.
 
 ## Local Go Paths
 

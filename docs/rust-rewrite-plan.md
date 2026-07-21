@@ -466,18 +466,63 @@ before it becomes load-bearing.
 
 ### Phase 1 — skeleton + docs
 
-- Workspace: `git-sfs-core` + `git-sfs`
-- Full clap surface, all 14 commands parsing, correct exit codes
-- **Rewrite `AGENTS.md`** — it currently instructs contributors to hand-roll
-  progress and avoid dependencies, which now contradicts the codebase. Not
-  bookkeeping: stale guidance actively misleads future contributors and agents
-- Rust `Justfile`, CI workflow
+- [x] Workspace: `git-sfs-core` (lib, cannot print/exit) + `git-sfs` (bin).
+      `unsafe_code = "forbid"` and `clippy::let_underscore_must_use = "deny"`
+      set at the workspace level — §2.5 as a compiler setting, not a convention
+- [x] Full clap surface, all 14 commands parsing. Every command is currently a
+      stub returning `Error::NotImplemented` (exit 70, `sysexits.h`
+      `EX_SOFTWARE`, deliberately outside git-sfs's own 1–5/130 range) rather
+      than succeeding quietly — an unported command must fail loudly, not read
+      as success to the differential harness. The exit-code *taxonomy* itself
+      (§9: Usage/Config/Integrity/Missing/Unavailable/Canceled, non-exhaustive
+      by construction so a new variant fails to compile until classified) is
+      designed and tested; per-command correctness of *which* code a given
+      failure produces waits for Phase 4, when there are real failures to map
+- [x] **Rewrite `AGENTS.md`** — split Go-minimalism vs. Rust-generosity
+      Dependencies/Style sections instead of one contradicting the other, plus
+      a "Status: mid-rewrite" orientation section for the two-tree reality
+- [x] Rust `Justfile` (`just/rust.just`, wired into root `check`), CI workflow —
+      a `rust` job (fmt/clippy/test/build) plus a `rust-musl` job proving the
+      static-link requirement (§8) from Phase 1 rather than discovering it at
+      Phase 6. The musl job is unverified on a real Linux runner as of this
+      writing — it could not be tested locally on Darwin and needs its first
+      GitHub Actions run to confirm
 
 ### Phase 2 — domain + pure plan layer
 
 Newtypes, typed errors, pure `plan_*` functions. Unit-tested with zero
 filesystem. **This is where the correctness thesis pays out** — get it wrong and
 everything above it inherits the mistake.
+
+- [x] `Sha256` (§2.1) — `crates/git-sfs-core/src/domain/hash.rs`. Only
+      `parse()`/`from_digest()` construct one, so `prefix()` is total and the
+      Go `len(s) < 2` guard is deleted, not ported. Proptest round-trips any
+      32-byte digest and fuzzes `parse()` for panics
+- [x] Symlink construction + validation (§3.1/§3.2) —
+      `crates/git-sfs-core/src/domain/symlink.rs`. All six validation rules,
+      taking the `readlink()` text as a plain argument so nothing touches a
+      real symlink. Found a real bug in-flight: `pathdiff` returns `""` for
+      identical paths where Go's `filepath.Rel` returns `"."`, which would have
+      let a target pointing exactly at the cache root slip past the
+      containment check; fixed, with a regression test
+- [x] Remote naming + URL composition (§5.1) —
+      `crates/git-sfs-core/src/domain/remote.rs`, ported from the actual
+      `command.go` branches rather than the spec's own prose summary of them
+      (the prose elides that `newRcloneRemote` trims trailing slashes on every
+      branch). Every row of the spec's composition table is asserted verbatim
+- [x] Version-floor comparison (§6.6) —
+      `crates/git-sfs-core/src/domain/version_floor.rs`. Hand-rolled and
+      deliberately not the `semver` crate: bare semver rejects git-sfs's own
+      `v1.21.0` tag form, which would break every repo with
+      `min_git_sfs_version` set in one release
+- [ ] `config.toml` schema, validation, and the dual-parser divergence check
+      (§6.2/§6.3/§6.5) — **the plan's own "highest-risk item for the
+      rewrite."** Not started; deserves a dedicated pass rather than being
+      folded into the same session as the above
+- [ ] Pure `plan_push`/`plan_pull`/`plan_verify` — deliberately deferred until
+      Phase 3's `Store`/`Remote` port traits are sketched, so plan's input data
+      shape is informed by what those ports can cheaply observe rather than
+      guessed at in isolation and redesigned later
 
 ### Phase 3 — ports
 
