@@ -26,6 +26,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import divergences
 import snapshot
 from harness import Binary, parse_binary
 
@@ -82,8 +83,13 @@ def _replacements(work: Path) -> list[tuple[bytes, bytes]]:
     return [(literal.encode(), b"{WORK}") for literal in literals]
 
 
-def execute(scenario: Scenario, binary: Binary, work: Path) -> str:
-    """Run one scenario in a fresh workspace and return its manifest."""
+def execute(scenario: Scenario, binary: Binary, work: Path) -> list[tuple[str, str]]:
+    """Run one scenario in a fresh workspace and return its manifest sections.
+
+    Sections stay separate rather than pre-joined so a declared divergence can
+    normalize the one it names (see divergences.py) without re-parsing text the
+    driver just assembled.
+    """
     repo = work / "repo"
     cache = work / "cache"
     remote = work / "remote"
@@ -128,7 +134,42 @@ def execute(scenario: Scenario, binary: Binary, work: Path) -> str:
         ("cache", _manifest(cache, replacements)),
         ("remote", _manifest(remote, replacements)),
     ]
-    return compose_report(sections)
+    assert [label for label, _ in sections] == list(divergences.SECTION_LABELS), (
+        "manifest sections drifted from divergences.SECTION_LABELS"
+    )
+    return sections
+
+
+def compare(
+    base: Binary,
+    other: Binary,
+    reports: dict[str, list[tuple[str, str]]],
+    applicable: list[divergences.Divergence],
+) -> tuple[str, list[str]]:
+    """Diff two runs, and report on every divergence declared for them.
+
+    Returns the unified diff (empty when they agree) and one status line per
+    declared divergence. A declared divergence that did not happen is a failure
+    in its own right: it means v2 kept the behavior 13 says to fix.
+    """
+    base_sections = divergences.normalize_sections(reports[base.name], applicable)
+    other_sections = divergences.normalize_sections(reports[other.name], applicable)
+    delta = diff_reports(
+        base, other, compose_report(base_sections), compose_report(other_sections)
+    )
+
+    notes = []
+    for divergence in applicable:
+        happened = divergence.occurred(
+            divergences.section_body(reports[base.name], divergence.section),
+            divergences.section_body(reports[other.name], divergence.section),
+        )
+        mark = "confirmed" if happened else "MISSING"
+        notes.append(
+            f"     divergence {divergence.spec} {divergence.id}: {mark}"
+            f" -- {divergence.statement}"
+        )
+    return delta, notes
 
 
 def _unmet_precondition(work: Path) -> str:
@@ -163,14 +204,30 @@ def main() -> None:
     parser.add_argument(
         "--keep", action="store_true", help="retain workspaces for inspection"
     )
+    parser.add_argument(
+        "--candidate",
+        metavar="NAME",
+        help="binary expected to implement the contract-spec 13 fixes; enables "
+        "the declared divergences in divergences.py",
+    )
     args = parser.parse_args()
 
     if len(args.binary) < 2:
         sys.exit("run: need at least two --binary arguments to compare")
 
+    names = {binary.name for binary in args.binary}
+    if args.candidate and args.candidate not in names:
+        sys.exit(f"run: --candidate {args.candidate!r} is not one of {sorted(names)}")
+
     scenarios = discover_scenarios(args.scenario)
     if not scenarios:
         sys.exit("run: no scenarios matched")
+
+    # Validated against every scenario, not just the selected ones, so running a
+    # single scenario cannot mask a declaration that has gone stale.
+    problems = divergences.validate([s.name for s in discover_scenarios(None)])
+    if problems:
+        sys.exit("run: bad divergence declaration:\n  " + "\n  ".join(problems))
 
     root = Path(tempfile.mkdtemp(prefix="git-sfs-differential-"))
     failures = 0
@@ -195,15 +252,24 @@ def main() -> None:
                 continue
 
             for other in args.binary[1:]:
-                delta = diff_reports(
-                    base, other, reports[base.name], reports[other.name]
+                # Declarations describe how v2 differs from v1, so they apply
+                # only to a pair where one side is the named candidate. A
+                # self-check must show no divergence at all.
+                applicable = (
+                    divergences.for_scenario(scenario.name)
+                    if other.name == args.candidate
+                    else []
                 )
-                if delta:
+                delta, notes = compare(base, other, reports, applicable)
+                missing = [note for note in notes if "MISSING" in note]
+                if delta or missing:
                     failures += 1
                     print(f"FAIL {scenario.name}: {base.name} vs {other.name}")
-                    print(delta)
+                    print(delta, end="")
                 else:
                     print(f"ok   {scenario.name}: {base.name} == {other.name}")
+                for note in notes:
+                    print(note)
     finally:
         if args.keep:
             print(f"workspaces retained in {root}")

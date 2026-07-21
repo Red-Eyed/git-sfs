@@ -449,9 +449,11 @@ Nothing else starts until this lands.
 - [x] Enumerate every contract-spec clause with its coverage status
       (`test/differential/coverage.py`); 22 asserted, 8 structural, 6 observed,
       30 uncovered
-- [ ] Encode each §13 divergence as a positive assertion (§5.1) — needs v2 for
-      most, plus expected-divergence markers so a §13 fix does not read as a
-      regression in the tree/argv diff
+- [x] Build the expected-divergence mechanism (`test/differential/divergences.py`,
+      `run.py --candidate`) so an enumerated §13 fix is normalized *and* asserted
+      to have happened, rather than reading as a regression
+- [ ] Encode the remaining §13 divergences as positive assertions (§5.1) — one
+      declared so far; most need v2 before their shape is knowable
 
 Proving the harness against the Go binary first is what makes it trustworthy
 before it becomes load-bearing.

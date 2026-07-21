@@ -39,11 +39,12 @@ REPO_ROOT = HARNESS_DIR.parent.parent
 # How a clause is held down, weakest to strongest.
 UNCOVERED = "UNCOVERED"  # nothing tests it
 V2_ONLY = "V2-ONLY"  # untestable until the Rust binary exists
+DECLARED = "DECLARED"  # enumerated in divergences.py; asserts itself once v2 exists
 OBSERVED = "OBSERVED"  # recorded as a v1 baseline; v2 must diverge, so not yet asserted
 STRUCTURAL = "STRUCTURAL"  # any change shows up as a manifest or argv diff
 ASSERTED = "ASSERTED"  # a named assertion fails if violated
 
-ORDER = [ASSERTED, STRUCTURAL, OBSERVED, V2_ONLY, UNCOVERED]
+ORDER = [ASSERTED, STRUCTURAL, DECLARED, OBSERVED, V2_ONLY, UNCOVERED]
 
 
 @dataclass(frozen=True)
@@ -331,11 +332,13 @@ CLAUSES = [
         "cancellation.py",
         "object left on the remote after the interrupt",
     ),
-    # The argv manifest *shows* six lsjson and three copyto attempts for a
-    # permanent 403, but nothing names or asserts it. Worse, when v2 correctly
-    # stops retrying, that manifest changes and the tree diff reports it as a
-    # regression -- see README, "Enumerated divergences will turn the diff red".
-    Clause("13.4", "retries must be limited to transient failure classes", UNCOVERED),
+    Clause(
+        "13.4",
+        "retries must be limited to transient failure classes",
+        DECLARED,
+        "divergences.py",
+        "retry-only-transient",
+    ),
     Clause("13.4", "FileSizes must not be O(entire remote)", UNCOVERED),
     Clause("13.4b", "defaults must not place data in harm's way", UNCOVERED),
     Clause(
@@ -379,6 +382,14 @@ def verify(clause: Clause) -> str | None:
     return None
 
 
+def divergence_problems() -> list[str]:
+    """Declarations in divergences.py that no longer match reality."""
+    import divergences
+
+    scenarios = sorted(p.stem for p in (HARNESS_DIR / "scenarios").glob("*.sh"))
+    return divergences.validate(scenarios)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -392,6 +403,7 @@ def main() -> None:
     args = parser.parse_args()
 
     stale = [(c, problem) for c in CLAUSES if (problem := verify(c))]
+    stale += [(None, problem) for problem in divergence_problems()]
     counts = {status: sum(1 for c in CLAUSES if c.status == status) for status in ORDER}
 
     if args.list:
@@ -410,7 +422,8 @@ def main() -> None:
             f"\n{len(stale)} stale claim(s) -- the map says covered, the file disagrees:"
         )
         for clause, problem in stale:
-            print(f"  §{clause.section} {clause.statement}")
+            if clause is not None:
+                print(f"  §{clause.section} {clause.statement}")
             print(f"    {problem}")
         sys.exit(1)
 

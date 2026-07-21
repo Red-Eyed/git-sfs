@@ -49,6 +49,8 @@ Exits non-zero when any pair diverges, printing a unified diff of the manifests.
 snapshot.py            tree -> canonical manifest. Reusable on its own.
 harness.py             binaries, workspaces, polling. Knows nothing about git-sfs.
 cache_state.py         queries over a cache tree: object paths, modes, hashes.
+divergences.py         differences that are fixes, declared in advance
+coverage.py            contract-spec clause -> the assertion holding it down
 run.py                 driver: run scenarios, snapshot, diff
 lib.sh                 helpers available to every scenario
 scenarios/             one scenario per file
@@ -438,6 +440,7 @@ which is where hand-maintained checklists always end up.
 | `ASSERTED` | a named assertion fails if violated |
 | `STRUCTURAL` | any change surfaces as a manifest or argv diff |
 | `OBSERVED` | recorded as a v1 baseline; v2 must diverge, so not yet an assertion |
+| `DECLARED` | enumerated in `divergences.py`; asserts itself once v2 exists |
 | `V2-ONLY` | untestable until the Rust binary exists |
 | `UNCOVERED` | nothing tests it |
 
@@ -451,22 +454,57 @@ threshold when it only printed ratios — the fragment matched, the guarantee di
 not exist. (That gap is now closed; `--max-ratio` fails the run.) Evidence
 fragments therefore name the failure path, not the subject matter.
 
-## Enumerated divergences will turn the diff red
+## Enumerated divergences
 
-A structural consequence worth knowing before it happens, surfaced by the
-coverage audit rather than by a failure.
+Plan §5.1: *"An unenumerated divergence is a regression. An enumerated one is a
+fix. The difference is written down in advance, never adjudicated after a red
+run."* The tree diff and the argv diff cannot tell the two apart — both are just
+differences — so `divergences.py` is where the writing down happens.
 
-Plan §5.1 says an unenumerated divergence is a regression and an enumerated one
-is a fix. The tree diff and the argv diff cannot tell them apart. Scenario 05's
-argv manifest currently records six `lsjson` and three `copyto` attempts against
-a permanent 403 — v1 retrying a failure it should not retry (§13.4). When v2
-correctly stops, **that manifest changes and `run.py` reports a regression.**
+```sh
+run.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs --candidate v2
+```
 
-The same applies anywhere a §13 fix alters observable structure. Nothing here
-distinguishes "v2 is wrong" from "v2 is right and the baseline was the defect",
-so the enumerated cases need per-scenario expected-divergence markers before v2
-lands, or every red run becomes a judgement call — which §5.1 warns is exactly
-how a harness trains people to ignore it.
+Without `--candidate` nothing is declared, nothing is normalized, and the
+comparison is exactly as strict as it has always been. A self-check must show no
+divergence at all.
+
+**Not a suppression list.** Ignoring a known difference would make the harness
+silent about whether v2 actually fixed anything, and an ignore list only grows.
+Each declaration does two jobs:
+
+| | |
+|---|---|
+| `normalize` | collapses the dimension allowed to differ, applied to **both** sides. Everything outside it still compares strictly. |
+| `occurred` | asserts the divergence **did** happen. A v2 that quietly kept v1's behavior fails. |
+
+The second is the half a suppression list can never provide.
+
+Declared today: **§13.4 `retry-only-transient`** — v1 reissues identical argv on
+failure, so scenario 05's manifest records a permanent 403 attempted three times.
+`collapse_repeats` folds runs of adjacent identical lines, so the comparison sees
+*what* was attempted without asserting *how many times*; `fewer_lines` then
+requires the candidate to have actually stopped.
+
+### Trusting it
+
+Four properties, each proven against a Go binary mutated to behave like a v2
+that fixed §13.4 (`retryLoop` capped at one attempt):
+
+| Setup | Required | Result |
+|---|---|---|
+| fix, no `--candidate` | reads as a regression | FAIL, argv diff |
+| fix, `--candidate v2` | passes, divergence confirmed | ok + `confirmed` |
+| **no fix**, `--candidate v2` | fails — v2 kept the defect | FAIL + `MISSING` |
+| fix **plus** an unrelated regression | still caught | FAIL on `mode=0444` → `0644` |
+
+The third row is the one that matters, and the fourth shows the normalization
+stays scoped to the section and scenario that declared it.
+
+A declaration naming a scenario or section that does not exist would be inert —
+normalizing nothing, asserting nothing, while reading as handled. Both `run.py`
+and `coverage.py` reject that, and `run.py` validates against *all* scenarios so
+running one cannot mask a stale declaration elsewhere.
 
 ## Determinism
 
