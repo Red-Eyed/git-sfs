@@ -22,7 +22,9 @@ hex = "0.4"
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 proptest = "1.11"
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
+toml = "1.1"
 
 # rust-rewrite-plan 8: a client that pulls native-tls/OpenSSL cannot be linked
 # statically against musl, and contract-spec 11 requires a static Linux binary.

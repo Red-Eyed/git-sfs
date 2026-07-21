@@ -515,10 +515,24 @@ everything above it inherits the mistake.
       deliberately not the `semver` crate: bare semver rejects git-sfs's own
       `v1.21.0` tag form, which would break every repo with
       `min_git_sfs_version` set in one release
-- [ ] `config.toml` schema, validation, and the dual-parser divergence check
+- [x] `config.toml` schema, validation, and the dual-parser divergence check
       (§6.2/§6.3/§6.5) — **the plan's own "highest-risk item for the
-      rewrite."** Not started; deserves a dedicated pass rather than being
-      folded into the same session as the above
+      rewrite."** `crates/git-sfs-core/src/domain/config/`: `mod.rs` runs real
+      TOML (`serde`+`toml`, `deny_unknown_fields` at every level, encoding most
+      of §6.2's closed schema structurally rather than as hand-written checks
+      — e.g. `n_jobs: Option<u32>` makes a negative value a deserialize error
+      instead of a runtime one) alongside `legacy_scanner.rs`, a faithful port
+      of v1's hand-rolled line scanner kept as its own module specifically
+      because no generic parser could replicate its quirks. Reconciliation
+      distinguishes a genuine TOML *grammar* failure (defers to v1's reading,
+      §6.5 row 3) from a *semantic* one (always errors, regardless of what v1
+      made of the same text) — found during testing that collapsing this
+      distinction would have let `[remotes.""]` (valid TOML for an empty key,
+      but invisible as such to v1's quote-unaware header parsing) and a
+      truncated `algorithm = "sha256#not-sha256"` both slip through silently.
+      The exact ambiguity message contract-spec §6.5 specifies is asserted
+      character-for-character, and the `init` template is asserted to parse
+      identically under both parsers (§6.4)
 - [ ] Pure `plan_push`/`plan_pull`/`plan_verify` — deliberately deferred until
       Phase 3's `Store`/`Remote` port traits are sketched, so plan's input data
       shape is informed by what those ports can cheaply observe rather than

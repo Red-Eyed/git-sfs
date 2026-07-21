@@ -9,11 +9,22 @@
 //! summary of it — the prose collapses two `TrimRight` calls into one
 //! "unchanged" step that the code does not actually skip.
 
+use std::borrow::Borrow;
+
 use thiserror::Error;
 
 /// The name a remote is registered under in `config.toml`'s `[remotes.<name>]`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RemoteName(String);
+
+/// Lets a `BTreeMap<RemoteName, _>`/`HashMap<RemoteName, _>` be looked up with
+/// a plain `&str` (`map.get("default")`) instead of requiring a `RemoteName`
+/// to be constructed just to query one, e.g. from a `-r`/`--remote` flag.
+impl Borrow<str> for RemoteName {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
 
 /// The remote name every command falls back to when `-r`/`--remote` is absent.
 pub const DEFAULT_REMOTE_NAME: &str = "default";

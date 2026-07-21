@@ -8,11 +8,13 @@
 //! interpret. That split is what makes this module testable with zero
 //! filesystem and is why every test in it runs in milliseconds.
 
+pub mod config;
 pub mod hash;
 pub mod remote;
 pub mod symlink;
 pub mod version_floor;
 
+pub use config::{Config, ConfigError, RemoteConfig, Settings};
 pub use hash::{HashParseError, Sha256};
 pub use remote::{DEFAULT_REMOTE_NAME, EmptyRemoteName, RemoteName, compose_remote_url};
 pub use symlink::{
