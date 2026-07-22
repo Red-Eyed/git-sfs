@@ -18,7 +18,9 @@ pub mod version_floor;
 pub use cache_layout::{locks_dir, object_path, tmp_dir, trash_dir};
 pub use config::{Config, ConfigError, RemoteConfig, Settings};
 pub use hash::{HashParseError, Sha256};
-pub use remote::{DEFAULT_REMOTE_NAME, EmptyRemoteName, RemoteName, compose_remote_url};
+pub use remote::{
+    DEFAULT_REMOTE_NAME, EmptyRemoteName, RemoteName, compose_remote_url, object_url,
+};
 pub use symlink::{
     InvalidSymlinkTarget, NoRelativePath, cache_link_file, git_link_target, validate_symlink_target,
 };

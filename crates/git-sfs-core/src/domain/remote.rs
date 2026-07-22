@@ -13,6 +13,8 @@ use std::borrow::Borrow;
 
 use thiserror::Error;
 
+use super::hash::{ALGORITHM, Sha256};
+
 /// The name a remote is registered under in `config.toml`'s `[remotes.<name>]`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RemoteName(String);
@@ -92,6 +94,19 @@ pub fn compose_remote_url(backend: &str, path: &str) -> String {
     url.trim_end_matches('/').to_owned()
 }
 
+/// The remote object path for `hash`, mirroring the local cache's
+/// `files/sha256/<prefix>/<hash>` layout at the far end of a
+/// [`compose_remote_url`]'d `<url>` (contract-spec §5: "mirrors the local
+/// cache layout").
+#[must_use]
+pub fn object_url(url: &str, hash: Sha256) -> String {
+    format!(
+        "{url}/files/{ALGORITHM}/{}/{}",
+        hash.prefix(),
+        hash.to_hex()
+    )
+}
+
 /// `command.go:62-64`: `len(path) >= 3 && path[1] == ':' && path[2] == '/'`.
 /// Byte indexing is safe here without a UTF-8 boundary check because the
 /// bytes being compared (`:`, `/`) are single-byte ASCII regardless of what
@@ -155,6 +170,21 @@ mod tests {
         // trimming still gets its leading slash stripped, per the `else`
         // branch of the ported algorithm.
         assert_eq!(compose_remote_url("s3", "/nested/path"), "s3:/nested/path");
+    }
+
+    #[test]
+    fn object_url_mirrors_the_local_cache_layout() {
+        let hash =
+            Sha256::parse("ab3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a")
+                .unwrap();
+        assert_eq!(
+            object_url("s3:bucket/prefix", hash),
+            format!(
+                "s3:bucket/prefix/files/sha256/{}/{}",
+                hash.prefix(),
+                hash.to_hex()
+            )
+        );
     }
 
     #[test]

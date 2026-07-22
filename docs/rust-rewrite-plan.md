@@ -605,11 +605,56 @@ fakes.
       the cache." Test coverage includes a real blocking-then-release case
       and a real dead-process case (spawn-and-reap a child for a
       deterministic dead PID), not just the mechanism in isolation
-- [ ] `Remote` trait + rclone subprocess implementation + fake — not started.
-      The real implementation must fix the asymmetry just found in v1: `push`
-      never sets rclone's own `--temp-dir` at all, and `pull` only warns (not
-      errors) when it is unset — both must become hard requirements, matching
-      the no-system-tmp rule `Store` already enforces
+- [x] `Remote` trait + rclone subprocess implementation + fake —
+      `crates/git-sfs-core/src/ports/remote.rs`. `RcloneRemote` (real) +
+      `FakeRemote` (in-memory) is the pair that earns the trait per §3.3;
+      `rclone` stays the only backend (AGENTS.md), so this is not
+      multi-backend polymorphism. Three fixes over v1, all policy, not
+      mechanism (the five rclone subcommands and the `<url>/files/sha256/...`
+      layout are unchanged):
+      1. Error classification by rclone's own documented exit codes
+         (3/4 = confirmed not found, 5 = temporary, everything else
+         permanent — <https://rclone.org/docs/#exit-code>) instead of
+         `isRemotePathNotFound`'s English-substring grep (§13.3). `has_file`/
+         `file_size`/`file_sizes` return three states — confirmed-absent,
+         present, or `Err` when the question could not be answered — closing
+         the exact `sizes, _ := r.FileSizes(...)` defect (§2.5) this rewrite
+         exists to fix; a fake-rclone-on-PATH unit test
+         (`has_file_returns_an_error_when_the_remote_cannot_be_reached`)
+         asserts an unreachable remote is `Err`, never a silent `false`.
+      2. `--temp-dir` is a required constructor argument routed through both
+         copy directions, not optional-and-warned-on-pull/omitted-on-push
+         (`command.go:234-274`) — the fix this checklist item was written to
+         require, closing the full-system-`/tmp` outage class `Store`
+         already refuses to reproduce.
+      3. `copy_to_remote` gains `--ignore-existing`, which v1's push lacks —
+         without it, push overwrites an already-good remote object with a
+         locally-rotted read-only file trusted without re-hashing
+         (`Store::verified`), destroying the one replica that could have
+         repaired it (§13.4: "push replicates local rot over a good remote
+         copy, and exits 0"). This one is not explicitly named by this
+         checklist item; recorded here as a deliberate addition, not an
+         oversight.
+
+      Retries are restricted to rclone's own exit-5 "temporary" class,
+      unlike v1's `retryLoop`, which retries every failure including bad
+      credentials (§13.4) — verified by a unit test asserting a permanent
+      failure is attempted exactly once regardless of `retry_max`.
+      Cancellation polls and kills the child (100ms cadence, matching
+      `Lock`'s poll interval) rather than checking per read chunk like
+      `Cancellable`, since the byte-moving loop belongs to the rclone
+      subprocess, not to this process; stdout/stderr are drained on their own
+      threads so a chatty `copy` cannot deadlock the poll loop by filling its
+      pipe buffer first. `git-sfs-core` cannot print, so no progress/debug
+      writer is threaded through — rclone's output is captured and surfaces
+      only in `RemoteError::Failed`'s message; live progress rendering
+      belongs to Phase 5. Hashing-with-cancellation is shared with `Store` via
+      a new private `ports::hashing` module rather than duplicated a second
+      time. Unit tests drive a small fake `rclone` POSIX-sh fixture on an
+      absolute path (never `PATH` — safe under `cargo test`'s parallel
+      execution, unlike mutating the process-global `PATH` or env vars would
+      be) for argv/exit-code behavior, plus `FakeRemote` contract tests
+      proving it honors the same three-state shape.
 - [ ] `Repo` trait (symlink scanning, §3.3/§5b operation scope) — not started
 
 ### Phase 4 — commands

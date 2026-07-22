@@ -26,6 +26,7 @@ use crate::domain::hash::Sha256;
 use crate::error::Error;
 
 use super::cancellable_io::{Cancellable, is_canceled};
+use super::hashing;
 
 /// Proof that a hash's bytes are, at time of construction, verified present in
 /// the cache.
@@ -537,38 +538,15 @@ fn classify_copy_error(err: io::Error, source: &Utf8Path) -> StoreError {
     }
 }
 
-/// Hashes the file at `path`, checking `cancel` every chunk via
-/// [`Cancellable`] rather than reading it in one shot.
+/// Hashes the file at `path`, checking `cancel` every chunk, and classifies
+/// any failure as this store's own error type.
 fn hash_file(path: &Utf8Path, cancel: &Cancel) -> Result<Sha256, StoreError> {
-    let file = File::open(path).map_err(|source| StoreError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    hash_reader(&file, cancel).map_err(|err| classify_copy_error(err, path))
+    hashing::hash_file(path, cancel).map_err(|err| classify_copy_error(err, path))
 }
 
 /// Hashes `reader`'s remaining bytes, checking `cancel` every chunk.
-///
-/// A manual read loop rather than `io::copy`: `sha2`'s hasher does not
-/// implement [`io::Write`], so there is no writer side for `io::copy` to
-/// target. Reading through [`Cancellable`] still checks `cancel` on every
-/// chunk, which is the property that actually matters here.
 fn hash_reader(reader: impl io::Read, cancel: &Cancel) -> io::Result<Sha256> {
-    use std::io::Read as _;
-
-    use sha2::{Digest, Sha256 as Sha256Hasher};
-
-    let mut cancellable = Cancellable::new(reader, cancel.clone());
-    let mut hasher = Sha256Hasher::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = cancellable.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(Sha256::from_digest(hasher.finalize().into()))
+    hashing::hash_reader(reader, cancel)
 }
 
 /// Fsyncs a directory's entries — opening a directory read-only and syncing
