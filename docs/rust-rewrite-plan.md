@@ -655,7 +655,52 @@ fakes.
       execution, unlike mutating the process-global `PATH` or env vars would
       be) for argv/exit-code behavior, plus `FakeRemote` contract tests
       proving it honors the same three-state shape.
-- [ ] `Repo` trait (symlink scanning, §3.3/§5b operation scope) — not started
+- [x] `Repo` trait (symlink scanning, §3.3/§5b operation scope) —
+      `crates/git-sfs-core/src/ports/repo.rs`. `FsRepo` (real, `walkdir`-backed)
+      + `FakeRepo` (in-memory) earns the trait per §3.3. `Repo::scan` is one
+      shared mechanism standing in for v1's *two* walks over the same tree:
+      `collectGitSFSSymlinks` (`walk.go:18`, used by `push`/`pull`/`status`/
+      `init`), which silently drops anything invalid, and `verify`'s own walk
+      (`verify.go:120-155`), which reports each invalid one as a "broken git
+      symlink" issue. `scan` returns every candidate —
+      `ScannedEntry::Tracked`/`Invalid`/`Unrepresentable` — so which policy a
+      command applies (drop vs. report) is a Phase 4 decision, not baked into
+      the walk; `git-sfs-core` cannot print, so even the "report" side stays
+      data here, to be rendered by a command layer, not this port.
+      `should_skip` (`walk.go:58-65`) is ported onto the repo-relative path
+      instead of v1's three separate absolute-path string comparisons: "any
+      path component equals `.git-sfs`" is one check that produces the
+      identical excluded set, verified by a test constructing the case where
+      the two approaches could in principle diverge (a `.git-sfs`-named
+      directory nested below root). A directory-read failure or a
+      non-existent scope aborts the whole scan (§2.5: "cannot determine" is
+      an error, not a partial silent result); a single symlink failing
+      validation does not, matching v1's per-entry skip exactly.
+
+      One case decided by discussion rather than by a v1 precedent: a
+      symlink whose own *filename* (not its target) is not valid UTF-8. v1
+      has no equivalent concern (Go strings are arbitrary bytes). Chosen
+      behavior — skip it, but report it as `ScannedEntry::Unrepresentable`
+      (a lossy display string, since there is no lossless `Utf8PathBuf` to
+      give it) rather than aborting the whole scan or dropping it silently —
+      keeps every other file in a large tree unblocked by one oddly-named
+      entry while still surfacing it for a command layer to warn about.
+      Tested on Linux only: Darwin's APFS enforces valid UTF-8 in filenames
+      at the syscall level, so the scenario cannot even be constructed there
+      (`symlink()` itself fails with `EILSEQ`).
+
+      `FakeRepo` is seeded with raw target *text*, not a pre-classified
+      Tracked/Invalid, and runs it through the exact same
+      `validate_symlink_target` real repos use — a fake that let a test
+      hand-declare an entry's classification could disagree with real
+      validation and pass higher-layer tests against behavior no real `Repo`
+      would produce. `walkdir` (rust-rewrite-plan §4.1) is a new runtime
+      dependency, finally pulled in here.
+
+**Phase 3 complete** — `Store`, `Lock`, `Remote`, `Repo` are all built. Phase
+4 (commands) can begin; Phase 2's deferred `plan_push`/`plan_pull`/
+`plan_verify` are unblocked too, now that all three port shapes exist to
+design their input data around.
 
 ### Phase 4 — commands
 

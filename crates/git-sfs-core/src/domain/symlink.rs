@@ -177,7 +177,11 @@ pub fn validate_symlink_target(
 /// Lexically normalizes `.`/`..` components without touching the filesystem —
 /// the `Utf8Path` equivalent of Go's `filepath.Clean`, needed because
 /// `Utf8Path::join` (like `Path::join`) does not resolve them on its own.
-fn clean_utf8(path: &Utf8Path) -> Utf8PathBuf {
+///
+/// `pub(crate)`: [`super::super::ports::repo`] reuses this for the same
+/// reason (`absFromRepo`'s `filepath.Clean` on an absolute scope argument)
+/// rather than duplicating a second lexical-clean helper.
+pub(crate) fn clean_utf8(path: &Utf8Path) -> Utf8PathBuf {
     let cleaned = path.as_std_path().clean();
     Utf8PathBuf::from_path_buf(cleaned)
         .expect("cleaning a UTF-8 path cannot introduce invalid UTF-8")

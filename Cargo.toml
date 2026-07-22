@@ -40,6 +40,10 @@ toml = "1.1"
 # problem, and it would surface only in the release phase. Pinning it here makes
 # the choice explicit and the CI musl job proves it holds.
 ureq = { version = "3.3", default-features = false, features = ["rustls", "gzip"] }
+# Repo tree walking (ports::repo) -- symlink-loop handling (default
+# follow_links = false) and the deterministic ordering rust-rewrite-plan
+# §4.1 names this crate for.
+walkdir = "2.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
