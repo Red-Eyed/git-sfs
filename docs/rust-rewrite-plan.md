@@ -720,6 +720,81 @@ Dependency order: `init`/`setup` → `add`/`import`/`mv` → `status`/`remotes` 
 `push`/`pull` → `verify`/`doctor`. Differential harness runs continuously from
 the first command.
 
+- [ ] `init`/`setup` — **deliberately skipped, not merely deferred.** In
+      review, their own purpose turned out to be unclear: v1's `init`
+      (first-time repo setup) and `setup` (clone bootstrap: bind a
+      machine-local cache, then re-materialize whichever tracked symlinks
+      happen to already be in it) overlap heavily in mechanism but serve
+      different moments, and it was not obvious the v2 shape should be the
+      same two commands with the same split. Also open: how a chosen cache
+      location should persist locally (a `.git-sfs/cache` symlink, matching
+      v1, vs. some other local-config form), and where the cache should
+      default to when neither `--cache` nor `GIT_SFS_CACHE` is given —
+      contract-spec §13.4b requires moving it outside the working tree
+      (today's `.git-sfs/.cache` default is deleted by `git clean -x`), and
+      a Git LFS comparison surfaced a cheap option not previously
+      considered: storing the cache *inside* `.git/` exploits `clean`'s
+      existing working-tree-only boundary for free, at the cost of not
+      protecting against `rm -rf` on the whole clone the way a fully
+      external `~/.cache/git-sfs/...` location would. None of this is
+      resolved. `add` was built next specifically because Phase 3's ports
+      work with any cache root regardless of how it was chosen, so nothing
+      after this item was actually blocked on it.
+- [x] `add` — `crates/git-sfs-core/src/exec/add.rs`, ported from `add.go`.
+      Needed three pieces of new port-layer plumbing along the way, added in
+      the same commit:
+      - `ports::local_state` (`discover_repo`/`resolve_cache_root`) — but
+        deliberately only the *read* half of contract-spec §7 (walk up for
+        `.git`; the frozen `--cache` flag → `GIT_SFS_CACHE` env →
+        `.git-sfs/cache` symlink precedence). Cache *creation*/*binding*
+        stays out, which is what let this land without resolving the
+        init/setup question above — if nothing is bound yet, resolution
+        just fails with the same config error v1 gives. Side-effecting
+        inputs (cwd, the env var) are read once by the caller and passed in
+        rather than read internally, both for injection/testability and
+        because mutating a real env var from a test is unsafe under `cargo
+        test`'s parallel execution.
+      - `Repo::find_files` — a second trait method alongside `scan`, finding
+        regular files instead of symlinks under a scope, for `add`'s own
+        candidate discovery. Shares `scan`'s `should_skip`/walk mechanics via
+        a new `filtered_walk` helper (only the walkdir/filter_entry setup is
+        factored out — the trickiest closure-capture part — not the two
+        loop bodies, which stayed separate since forcing them through one
+        generic shape got awkward). A non-UTF-8-named candidate is skipped
+        and reported as `FoundEntry::Unrepresentable`, not silently dropped
+        and not an aborting error — the same treatment `scan` already gives
+        this case, settled by discussion rather than any v1 precedent (Go
+        strings are raw bytes, so v1 has no equivalent situation): CJK and
+        other non-ASCII Unicode names are unaffected either way, since
+        UTF-8 encodes all of it; this is only about byte sequences that
+        are not valid UTF-8 at all.
+      - `ports::hashing` made `pub` (was `pub(crate)`, shared only between
+        `Store` and `Remote` until now) — `add` needs to hash an arbitrary
+        source file before handing it to `Store::store`, and that is a
+        different concern from either port's own object store.
+
+      `add::add` returns `Result<AddOutcome, AddFailure>`, where
+      `AddFailure` bundles whatever succeeded *before* the failure alongside
+      it (boxed, since `AddError`'s largest variant carries a full
+      `StoreError` and clippy's `result_large_err` correctly objects to that
+      living unboxed in every `Ok` return path too) — this is what lets the
+      binary still report partial progress without Phase 5's `Event` stream
+      existing yet. Two more deliberate simplifications for this pass, both
+      called out in the module doc rather than silently assumed: sequential
+      only (no rayon-based parallelism — a performance layer on top of
+      correct sequential behavior, not part of getting it right first), and
+      relative path arguments resolve against the repository root, not the
+      current directory, matching v1's `absFromRepo` exactly even though
+      that is a real usability quirk (`cd data && git-sfs add foo.bin` means
+      `<repo>/foo.bin`, not `<repo>/data/foo.bin`) worth reconsidering later
+      as an argument-semantics decision, not something to silently change
+      while porting. `core.symlinks=false` detection (contract-spec §13.5) is
+      not in this pass either — new v2-only protection, no v1 mechanism to
+      port, same reasoning as the other deferred §7b environmental checks.
+      Verified against the real built binary end to end (hash, store,
+      symlink, content round-trips through the link, re-`add` on an
+      already-converted file is a silent no-op), not just unit tests.
+
 ### Phase 5 — reporting
 
 Event stream → `indicatif`, JSON, quiet. Entirely in the binary crate.

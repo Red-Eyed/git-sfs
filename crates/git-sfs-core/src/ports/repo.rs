@@ -81,6 +81,35 @@ impl ScannedEntry {
     }
 }
 
+/// One regular file [`Repo::find_files`] found at or below the requested
+/// scope — `add`'s candidate set (contract-spec §5b's operation-scope
+/// pattern applied to plain files instead of symlinks).
+#[derive(Debug)]
+pub enum FoundEntry {
+    /// A regular file at this repo-relative path.
+    File(Utf8PathBuf),
+    /// A candidate whose own filename is not valid UTF-8 — skipped rather
+    /// than returned, for the same reason and with the same "report, don't
+    /// silently drop" treatment as [`ScannedEntry::Unrepresentable`].
+    Unrepresentable {
+        /// A lossy, human-readable rendering of the unreadable path, for a
+        /// warning message only.
+        description: String,
+    },
+}
+
+impl FoundEntry {
+    /// This entry's repo-relative path, or `None` for
+    /// [`FoundEntry::Unrepresentable`], which has none.
+    #[must_use]
+    pub fn path(&self) -> Option<&Utf8Path> {
+        match self {
+            Self::File(path) => Some(path),
+            Self::Unrepresentable { .. } => None,
+        }
+    }
+}
+
 /// Why [`Repo::scan`] could not validate a candidate symlink as a git-sfs
 /// link.
 #[derive(Debug, Error)]
@@ -143,6 +172,15 @@ pub trait Repo {
     /// within it could not be read. Returns [`RepoError::Canceled`] if
     /// `cancel` fires.
     fn scan(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<ScannedEntry>, RepoError>;
+
+    /// Every regular file at or below `scope` — `add`'s candidate set.
+    /// `scope` is resolved exactly like [`Repo::scan`]'s. Results are sorted
+    /// by path.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Repo::scan`].
+    fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<FoundEntry>, RepoError>;
 }
 
 /// v1's `shouldSkip` (`walk.go:58-65`), ported: exclude `.git` anywhere, the
@@ -204,20 +242,8 @@ impl FsRepo {
 impl Repo for FsRepo {
     fn scan(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<ScannedEntry>, RepoError> {
         let root = resolve_scope(&self.repo, scope);
-        let repo_for_filter = self.repo.clone();
-        let walker = walkdir::WalkDir::new(root.as_std_path())
-            .into_iter()
-            .filter_entry(move |entry| match Utf8Path::from_path(entry.path()) {
-                Some(abs) => !should_skip(abs.strip_prefix(&repo_for_filter).unwrap_or(abs)),
-                // A non-UTF-8 path can't be classified by should_skip; erring
-                // on the side of not pruning just means walking a bit more,
-                // never a correctness problem (it still can't become a
-                // Tracked entry once reached -- see below).
-                None => true,
-            });
-
         let mut entries = Vec::new();
-        for item in walker {
+        for item in filtered_walk(self.repo.clone(), &root) {
             if cancel.is_canceled() {
                 return Err(RepoError::Canceled);
             }
@@ -225,31 +251,72 @@ impl Repo for FsRepo {
             if !item.file_type().is_symlink() {
                 continue;
             }
-            match Utf8Path::from_path(item.path()) {
+            entries.push(match Utf8Path::from_path(item.path()) {
                 Some(abs) => {
                     let path = abs.strip_prefix(&self.repo).unwrap_or(abs).to_owned();
-                    entries.push(match read_symlink_target(abs) {
+                    match read_symlink_target(abs) {
                         Ok(target) => match read_and_validate(&self.repo, abs, &target) {
                             Ok(hash) => ScannedEntry::Tracked { path, hash },
                             Err(reason) => ScannedEntry::Invalid { path, reason },
                         },
                         Err(reason) => ScannedEntry::Invalid { path, reason },
-                    });
+                    }
                 }
-                None => {
-                    let relative = item
-                        .path()
-                        .strip_prefix(self.repo.as_std_path())
-                        .unwrap_or(item.path());
-                    entries.push(ScannedEntry::Unrepresentable {
-                        description: relative.to_string_lossy().into_owned(),
-                    });
-                }
-            }
+                None => ScannedEntry::Unrepresentable {
+                    description: lossy_relative(&self.repo, item.path()),
+                },
+            });
         }
         entries.sort_by(|a, b| a.path().cmp(&b.path()));
         Ok(entries)
     }
+
+    fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<FoundEntry>, RepoError> {
+        let root = resolve_scope(&self.repo, scope);
+        let mut entries = Vec::new();
+        for item in filtered_walk(self.repo.clone(), &root) {
+            if cancel.is_canceled() {
+                return Err(RepoError::Canceled);
+            }
+            let item = item?;
+            if !item.file_type().is_file() {
+                continue;
+            }
+            entries.push(match Utf8Path::from_path(item.path()) {
+                Some(abs) => {
+                    let path = abs.strip_prefix(&self.repo).unwrap_or(abs).to_owned();
+                    FoundEntry::File(path)
+                }
+                None => FoundEntry::Unrepresentable {
+                    description: lossy_relative(&self.repo, item.path()),
+                },
+            });
+        }
+        entries.sort_by(|a, b| a.path().cmp(&b.path()));
+        Ok(entries)
+    }
+}
+
+/// A [`walkdir`] iterator over `root`, pruning subtrees [`should_skip`]
+/// excludes. Shared by [`Repo::scan`] and [`Repo::find_files`]: both need
+/// identical traversal/exclusion rules and differ only in which entry type
+/// they keep and how they classify a match, so only this setup — the part
+/// with the trickiest closure-capture semantics — is factored out, not the
+/// two loop bodies themselves.
+fn filtered_walk(
+    repo: Utf8PathBuf,
+    root: &Utf8Path,
+) -> impl Iterator<Item = walkdir::Result<walkdir::DirEntry>> {
+    walkdir::WalkDir::new(root.as_std_path())
+        .into_iter()
+        .filter_entry(move |entry| match Utf8Path::from_path(entry.path()) {
+            Some(abs) => !should_skip(abs.strip_prefix(&repo).unwrap_or(abs)),
+            // A non-UTF-8 path can't be classified by should_skip; erring on
+            // the side of not pruning just means walking a bit more, never a
+            // correctness problem (it still can't become a Tracked/File
+            // entry once reached by the caller's own loop).
+            None => true,
+        })
 }
 
 /// `readlink()`, classifying the two ways it can fail to hand back usable
@@ -261,6 +328,18 @@ fn read_symlink_target(path: &Utf8Path) -> Result<String, InvalidReason> {
         .into_os_string()
         .into_string()
         .map_err(|_| InvalidReason::TargetNotUtf8)
+}
+
+/// A best-effort, display-only rendering of `absolute` relative to `repo`,
+/// for the one case a real repo-relative `Utf8PathBuf` cannot be produced —
+/// `absolute` itself is not valid UTF-8. See
+/// [`ScannedEntry::Unrepresentable`]/[`FoundEntry::Unrepresentable`].
+fn lossy_relative(repo: &Utf8Path, absolute: &std::path::Path) -> String {
+    absolute
+        .strip_prefix(repo.as_std_path())
+        .unwrap_or(absolute)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// An in-memory [`Repo`], for tests above this layer that need a repository
@@ -276,15 +355,17 @@ fn read_symlink_target(path: &Utf8Path) -> Result<String, InvalidReason> {
 pub struct FakeRepo {
     repo: Utf8PathBuf,
     links: Mutex<BTreeMap<Utf8PathBuf, String>>,
+    files: Mutex<std::collections::BTreeSet<Utf8PathBuf>>,
 }
 
 impl FakeRepo {
-    /// A repo rooted at `repo`, with no symlinks seeded yet.
+    /// A repo rooted at `repo`, with nothing seeded yet.
     #[must_use]
     pub fn new(repo: impl Into<Utf8PathBuf>) -> Self {
         Self {
             repo: repo.into(),
             links: Mutex::default(),
+            files: Mutex::default(),
         }
     }
 
@@ -298,15 +379,41 @@ impl FakeRepo {
             .expect("fake repo mutex poisoned")
             .insert(path.into(), raw_target.into());
     }
+
+    /// Seeds a regular file at repo-relative `path`, for
+    /// [`Repo::find_files`] tests. No content: `find_files` only reports
+    /// paths, never reads bytes -- an `add` orchestration test still needs a
+    /// real file on disk for the hashing step regardless of which `Repo` it
+    /// uses, so this fake's job is only to exercise selection/scoping, not
+    /// to avoid the filesystem entirely.
+    pub fn seed_file(&self, path: impl Into<Utf8PathBuf>) {
+        self.files
+            .lock()
+            .expect("fake repo mutex poisoned")
+            .insert(path.into());
+    }
+}
+
+/// `scope`, resolved and expressed relative to `repo` — the form
+/// [`FakeRepo::scan`]/[`FakeRepo::find_files`] both filter seeded
+/// repo-relative paths against.
+fn fake_scope_rel(repo: &Utf8Path, scope: &Utf8Path) -> Utf8PathBuf {
+    let resolved = resolve_scope(repo, scope);
+    resolved
+        .strip_prefix(repo)
+        .map(Utf8Path::to_owned)
+        .unwrap_or_else(|_| resolved.clone())
+}
+
+/// Whether repo-relative `path` falls within `scope_rel` (contract-spec §5b:
+/// "at or below the path"; `.` means everything).
+fn in_scope(scope_rel: &Utf8Path, path: &Utf8Path) -> bool {
+    scope_rel == Utf8Path::new(".") || path.starts_with(scope_rel)
 }
 
 impl Repo for FakeRepo {
     fn scan(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<ScannedEntry>, RepoError> {
-        let resolved = resolve_scope(&self.repo, scope);
-        let scope_rel = resolved
-            .strip_prefix(&self.repo)
-            .map(Utf8Path::to_owned)
-            .unwrap_or_else(|_| resolved.clone());
+        let scope_rel = fake_scope_rel(&self.repo, scope);
 
         let links = self.links.lock().expect("fake repo mutex poisoned");
         let mut entries = Vec::new();
@@ -314,10 +421,7 @@ impl Repo for FakeRepo {
             if cancel.is_canceled() {
                 return Err(RepoError::Canceled);
             }
-            if scope_rel != Utf8Path::new(".") && !path.starts_with(&scope_rel) {
-                continue;
-            }
-            if should_skip(path) {
+            if !in_scope(&scope_rel, path) || should_skip(path) {
                 continue;
             }
             let abs_path = self.repo.join(path);
@@ -333,6 +437,24 @@ impl Repo for FakeRepo {
             });
         }
         // BTreeMap iteration is already sorted by key (path).
+        Ok(entries)
+    }
+
+    fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<FoundEntry>, RepoError> {
+        let scope_rel = fake_scope_rel(&self.repo, scope);
+
+        let files = self.files.lock().expect("fake repo mutex poisoned");
+        let mut entries = Vec::new();
+        for path in files.iter() {
+            if cancel.is_canceled() {
+                return Err(RepoError::Canceled);
+            }
+            if !in_scope(&scope_rel, path) || should_skip(path) {
+                continue;
+            }
+            entries.push(FoundEntry::File(path.clone()));
+        }
+        // BTreeSet iteration is already sorted.
         Ok(entries)
     }
 }
@@ -565,6 +687,54 @@ mod tests {
         fake.seed(".git-sfs/rogue", "/etc/passwd");
 
         let entries = fake.scan(Utf8Path::new("keep"), &Cancel::new()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path(), Some(Utf8Path::new("keep/a.bin")));
+    }
+
+    #[test]
+    fn find_files_finds_regular_files_but_not_symlinks() {
+        let dir = init_repo();
+        let repo = utf8(&dir);
+        std::fs::write(repo.join("plain.bin"), b"regular file bytes").unwrap();
+        link_valid(&repo, "linked.bin", a_hash());
+
+        let entries = FsRepo::new(repo)
+            .find_files(Utf8Path::new("."), &Cancel::new())
+            .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path(), Some(Utf8Path::new("plain.bin")));
+    }
+
+    #[test]
+    fn find_files_excludes_git_and_git_sfs_and_respects_scope() {
+        let dir = init_repo();
+        let repo = utf8(&dir);
+        std::fs::create_dir_all(repo.join("keep")).unwrap();
+        std::fs::write(repo.join("keep/a.bin"), b"a").unwrap();
+        std::fs::create_dir_all(repo.join("elsewhere")).unwrap();
+        std::fs::write(repo.join("elsewhere/b.bin"), b"b").unwrap();
+        std::fs::write(repo.join(".git/inside.bin"), b"never").unwrap();
+
+        let entries = FsRepo::new(repo)
+            .find_files(Utf8Path::new("keep"), &Cancel::new())
+            .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path(), Some(Utf8Path::new("keep/a.bin")));
+    }
+
+    #[test]
+    fn fake_repo_find_files_respects_scope_and_skip_rules() {
+        let repo = Utf8PathBuf::from("/repo");
+        let fake = FakeRepo::new(repo);
+        fake.seed_file("keep/a.bin");
+        fake.seed_file("elsewhere/b.bin");
+        fake.seed_file(".git-sfs/rogue.bin");
+
+        let entries = fake
+            .find_files(Utf8Path::new("keep"), &Cancel::new())
+            .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path(), Some(Utf8Path::new("keep/a.bin")));
     }

@@ -16,6 +16,7 @@
 pub mod cancel;
 pub mod domain;
 pub mod error;
+pub mod exec;
 pub mod plan;
 pub mod ports;
 

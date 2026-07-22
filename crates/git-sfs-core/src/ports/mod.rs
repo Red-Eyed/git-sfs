@@ -10,18 +10,22 @@
 //! implementations each — a real one plus a test fake — which is the bar
 //! rust-rewrite-plan §3.3 sets for introducing one at all. `Lock`
 //! deliberately does not: one real implementation, no second one
-//! contemplated.
-
-mod hashing;
+//! contemplated. `local_state` isn't a trait either, for the same reason as
+//! `Lock` — there is exactly one way to walk up for `.git` or read a
+//! symlink, no second implementation on the horizon.
 
 pub mod cancellable_io;
+pub mod hashing;
+pub mod local_state;
 pub mod lock;
 pub mod remote;
 pub mod repo;
 pub mod store;
 
 pub use cancellable_io::{Cancellable, is_canceled};
+pub use hashing::{hash_file, hash_reader};
+pub use local_state::{LocalStateError, discover_repo, resolve_cache_root};
 pub use lock::{Lock, LockError, LockName};
 pub use remote::{FakeRemote, RcloneRemote, Remote, RemoteError};
-pub use repo::{FakeRepo, FsRepo, InvalidReason, Repo, RepoError, ScannedEntry};
-pub use store::{CacheEntry, FsStore, Store, StoreError};
+pub use repo::{FakeRepo, FoundEntry, FsRepo, InvalidReason, Repo, RepoError, ScannedEntry};
+pub use store::{CacheEntry, FakeStore, FsStore, Store, StoreError};
