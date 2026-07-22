@@ -794,6 +794,53 @@ the first command.
       Verified against the real built binary end to end (hash, store,
       symlink, content round-trips through the link, re-`add` on an
       already-converted file is a silent no-op), not just unit tests.
+- [x] `mv` — `crates/git-sfs-core/src/exec/mv.rs`, ported from `mv.go`.
+      Smaller than `add`: contract-spec §3.3 is explicit that a committed
+      symlink is the unit of operation, not the object behind it, so `mv`
+      never touches the cache or the `Store` port at all, needs no lock (v1's
+      `mv.go` takes none either — locks exist to serialize cache mutation,
+      and `mv` never mutates the cache), and needed no new port-layer
+      plumbing beyond bumping `ports::repo::resolve_scope` (v1's
+      `absFromRepo`) to `pub(crate)` so `mv`'s own `src`/`dest` resolve the
+      same way `Repo::scan`'s scope argument does, rather than duplicating
+      that absolute-vs-relative branch a third time.
+
+      Two cases, both ported behavior-for-behavior from v1's `mvLink`/`mvDir`
+      (`mv.go:35-117`), including the sequencing choices that are load-bearing
+      rather than stylistic:
+      - **Single symlink.** Validate `src` as a git-sfs symlink (any failure —
+        not a symlink, non-UTF-8 target, a target failing contract-spec
+        §3.2's rules — reported uniformly as `MvError::NotATrackedLink`,
+        matching v1's own undifferentiated wrap), apply POSIX
+        place-inside-an-existing-directory semantics to `dst`, write the new
+        symlink *before* removing the old one, and roll the new one back if
+        removing the old one fails — never a window with neither in place.
+      - **Directory.** Collect every `Repo::scan`-`Tracked` symlink under
+        `src` *before* renaming anything (a relative target only validates
+        against its current location), perform the whole move as one atomic
+        `rename()`, then rewrite each relocated symlink's target for its new
+        depth from the repository root. Entries `scan` reports as `Invalid`
+        or `Unrepresentable` ride along with the rename untouched — same
+        "skip, don't abort" policy as v1's inline walk, which silently
+        `return nil`s past a `ParseGitSymlink` failure rather than treating
+        it as an error.
+
+      `mv::mv` returns `Result<Vec<MovedLink>, MvFailure>` — same
+      outcome-so-far-plus-boxed-error shape as `AddFailure`, since the
+      directory case's retargeting loop can fail partway through and a
+      caller should still see which links already moved. Fixed a related gap
+      surfaced while writing this: `AddError`'s own `From` impl classified a
+      `RepoError::Canceled` bubbling through `AddError::Repo(_)` as
+      `Error::Unavailable` instead of `Error::Canceled`, losing cancellation's
+      precedence over every other classification — corrected alongside `mv`'s
+      own (correct from the start) handling of the same case.
+
+      Verified against the real built binary end to end: single-file mv
+      within a directory, mv across a depth change (confirms the climb count
+      in the rewritten target actually changes, not just that *a* target is
+      written), and a whole-directory mv containing two tracked links at
+      different depths, each confirmed still readable through its rewritten
+      symlink afterward.
 
 ### Phase 5 — reporting
 

@@ -10,3 +10,4 @@
 //! command as it's ported.
 
 pub mod add;
+pub mod mv;

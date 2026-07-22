@@ -114,13 +114,18 @@ pub enum AddError {
 impl From<AddError> for Error {
     fn from(err: AddError) -> Self {
         match &err {
+            // A RepoError::Canceled reaching here means find_files noticed
+            // the cancellation before add's own per-file loop got a chance
+            // to; it must still classify as Canceled, not Unavailable --
+            // cancellation outranks every other classification (see the
+            // Error::Canceled doc).
+            AddError::Repo(RepoError::Canceled) | AddError::Canceled => Error::Canceled,
             AddError::Repo(_) | AddError::Store { .. } | AddError::Io { .. } => {
                 Error::Unavailable(err.to_string())
             }
             AddError::CacheLinkUnreachable { .. } | AddError::NoRelativePath { .. } => {
                 Error::Config(err.to_string())
             }
-            AddError::Canceled => Error::Canceled,
         }
     }
 }

@@ -11,10 +11,11 @@
 
 use camino::Utf8PathBuf;
 use git_sfs_core::exec::add::{self, AddOutcome};
+use git_sfs_core::exec::mv::{self, MovedLink};
 use git_sfs_core::ports::{FsRepo, FsStore, Lock, LockName, discover_repo, resolve_cache_root};
 use git_sfs_core::{Cancel, Error, Result};
 
-use crate::cli::{AddArgs, Cli, Command, SelfCommand};
+use crate::cli::{AddArgs, Cli, Command, MvArgs, SelfCommand};
 
 /// Runs the requested command.
 ///
@@ -26,7 +27,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Init(_) => unimplemented("init"),
         Command::Setup => unimplemented("setup"),
         Command::Add(args) => run_add(cli, args, cancel),
-        Command::Mv(_) => unimplemented("mv"),
+        Command::Mv(args) => run_mv(args, cancel),
         Command::Import(_) => unimplemented("import"),
         Command::Verify(_) => unimplemented("verify"),
         Command::Status(_) => unimplemented("status"),
@@ -86,6 +87,41 @@ fn print_add_outcome(outcome: &AddOutcome) {
     }
     for description in &outcome.unrepresentable {
         eprintln!("git-sfs: warning: skipped {description} (not a valid UTF-8 path)");
+    }
+}
+
+/// `git-sfs mv <source> <dest>` — moves a git-sfs symlink (or a directory of
+/// them) and rewrites the relative targets for their new location. Never
+/// touches the cache, so unlike `add` this needs no cache resolution and no
+/// lock (contract-spec §3.3; v1's `mv.go` takes no lock either).
+fn run_mv(args: &MvArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = std::env::current_dir().map_err(|err| {
+        Error::Unavailable(format!("could not determine the current directory: {err}"))
+    })?;
+    let cwd = Utf8PathBuf::from_path_buf(cwd)
+        .map_err(|_| Error::Unavailable("current directory is not valid UTF-8".to_owned()))?;
+
+    let repo = discover_repo(&cwd)?;
+    let repo_port = FsRepo::new(repo.clone());
+
+    match mv::mv(&repo_port, &repo, &args.source, &args.dest, cancel) {
+        Ok(moved) => {
+            print_moved(&moved);
+            Ok(())
+        }
+        Err(failure) => {
+            print_moved(&failure.moved);
+            Err((*failure.error).into())
+        }
+    }
+}
+
+/// Prints each relocated link, matching v1's per-link `moved <old> -> <new>`
+/// line (`mv.go:61,114`), though the exact wording is unfrozen (contract-spec
+/// 12).
+fn print_moved(moved: &[MovedLink]) {
+    for link in moved {
+        println!("moved {} -> {}", link.old_path, link.new_path);
     }
 }
 

@@ -206,7 +206,11 @@ fn should_skip(repo_relative: &Utf8Path) -> bool {
 
 /// v1's `absFromRepo` (`walk.go:80-85`): an absolute `scope` is used as-is
 /// (lexically cleaned), a relative one is resolved against `repo`.
-fn resolve_scope(repo: &Utf8Path, scope: &Utf8Path) -> Utf8PathBuf {
+///
+/// `pub(crate)`: [`super::super::exec::mv`] resolves its `src`/`dest`
+/// arguments the same way `Repo::scan`'s own `scope` does, so it reuses this
+/// rather than duplicating the absolute-vs-relative branch a third time.
+pub(crate) fn resolve_scope(repo: &Utf8Path, scope: &Utf8Path) -> Utf8PathBuf {
     if scope.is_absolute() {
         clean_utf8(scope)
     } else {
