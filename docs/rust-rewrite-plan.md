@@ -537,6 +537,18 @@ everything above it inherits the mistake.
       Phase 3's `Store`/`Remote` port traits are sketched, so plan's input data
       shape is informed by what those ports can cheaply observe rather than
       guessed at in isolation and redesigned later
+      - [x] `plan_push` + `plan_pull` — `crates/git-sfs-core/src/plan/`
+      - [ ] `plan_verify` — deferred alongside the `verify` command itself
+            (Phase 4): its planning shape is a genuinely different size than
+            push/pull's binary present/absent split. Note for that design,
+            surfaced in review of this step: `Remote::verify_file`'s
+            download-then-hash-locally is not the only mechanism available —
+            some backends (SFTP servers exposing the checksum extension; rclone's
+            own `hashsum`/`--checksum` machinery more generally) can return a
+            hash without transferring the object, cheaper than a full download.
+            Whether to special-case that, and how to detect it without
+            per-backend guesswork, is open — resolve it when `plan_verify`'s
+            cheap-vs-expensive tiering is actually designed, not before
 
 ### Phase 3 — ports
 
