@@ -31,6 +31,8 @@ use crate::error::Error;
 use crate::ports::repo::resolve_scope;
 use crate::ports::{Repo, RepoError, ScannedEntry};
 
+use super::repo_relative;
+
 /// One symlink `mv` relocated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MovedLink {
@@ -341,11 +343,6 @@ fn mv_dir(
         });
     }
     Ok(moved)
-}
-
-/// `absolute`, expressed relative to `repo` -- v1's `rel()` (`walk.go:87`).
-fn repo_relative(repo: &Utf8Path, absolute: &Utf8Path) -> Utf8PathBuf {
-    absolute.strip_prefix(repo).unwrap_or(absolute).to_owned()
 }
 
 #[cfg(test)]

@@ -196,7 +196,11 @@ pub trait Repo {
 /// approach prunes does not change *what* ends up in the final symlink list,
 /// since directories are never candidates either way. See the port's test
 /// suite for cases exercising this directly.
-fn should_skip(repo_relative: &Utf8Path) -> bool {
+///
+/// `pub(crate)`: [`super::super::exec::import`] reuses this for its own
+/// "destination must not be inside `.git-sfs`" check rather than duplicating
+/// the same component comparison a third time.
+pub(crate) fn should_skip(repo_relative: &Utf8Path) -> bool {
     repo_relative.file_name() == Some(".git")
         || repo_relative
             .components()

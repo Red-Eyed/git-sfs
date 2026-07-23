@@ -11,11 +11,12 @@
 
 use camino::Utf8PathBuf;
 use git_sfs_core::exec::add::{self, AddOutcome};
+use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
 use git_sfs_core::exec::mv::{self, MovedLink};
 use git_sfs_core::ports::{FsRepo, FsStore, Lock, LockName, discover_repo, resolve_cache_root};
 use git_sfs_core::{Cancel, Error, Result};
 
-use crate::cli::{AddArgs, Cli, Command, MvArgs, SelfCommand};
+use crate::cli::{AddArgs, Cli, Command, ImportArgs, MvArgs, SelfCommand};
 
 /// Runs the requested command.
 ///
@@ -28,7 +29,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Setup => unimplemented("setup"),
         Command::Add(args) => run_add(cli, args, cancel),
         Command::Mv(args) => run_mv(args, cancel),
-        Command::Import(_) => unimplemented("import"),
+        Command::Import(args) => run_import(cli, args, cancel),
         Command::Verify(_) => unimplemented("verify"),
         Command::Status(_) => unimplemented("status"),
         Command::Remotes(_) => unimplemented("remotes"),
@@ -48,12 +49,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
 /// `ports::local_state`'s module doc for why that stays a separate, still
 /// open question.
 fn run_add(cli: &Cli, args: &AddArgs, cancel: &Cancel) -> Result<()> {
-    let cwd = std::env::current_dir().map_err(|err| {
-        Error::Unavailable(format!("could not determine the current directory: {err}"))
-    })?;
-    let cwd = Utf8PathBuf::from_path_buf(cwd)
-        .map_err(|_| Error::Unavailable("current directory is not valid UTF-8".to_owned()))?;
-
+    let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
     let cache_root = resolve_cache_root(
         &repo,
@@ -95,12 +91,7 @@ fn print_add_outcome(outcome: &AddOutcome) {
 /// touches the cache, so unlike `add` this needs no cache resolution and no
 /// lock (contract-spec §3.3; v1's `mv.go` takes no lock either).
 fn run_mv(args: &MvArgs, cancel: &Cancel) -> Result<()> {
-    let cwd = std::env::current_dir().map_err(|err| {
-        Error::Unavailable(format!("could not determine the current directory: {err}"))
-    })?;
-    let cwd = Utf8PathBuf::from_path_buf(cwd)
-        .map_err(|_| Error::Unavailable("current directory is not valid UTF-8".to_owned()))?;
-
+    let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
     let repo_port = FsRepo::new(repo.clone());
 
@@ -123,6 +114,72 @@ fn print_moved(moved: &[MovedLink]) {
     for link in moved {
         println!("moved {} -> {}", link.old_path, link.new_path);
     }
+}
+
+/// `git-sfs import <source> <dest>` — ingests an external file or directory
+/// into the cache and creates git-sfs symlinks at `dest`. Requires an
+/// already-bound cache and takes the `import` lock, like `add` and unlike
+/// `mv` (contract-spec §3.3 exempts `mv` alone from touching the cache).
+fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let cache_root = resolve_cache_root(
+        &repo,
+        cli.global.cache.as_deref(),
+        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
+    )?;
+
+    let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
+    let store = FsStore::new(cache_root);
+    let _lock = Lock::acquire(&locks_dir, LockName::Import, cancel)?;
+
+    let options = ImportOptions {
+        move_source: args.move_source,
+        follow_symlinks: args.follow_symlinks,
+    };
+    match import::import(
+        &store,
+        &repo,
+        &cwd,
+        &args.source,
+        &args.dest,
+        options,
+        cancel,
+    ) {
+        Ok(outcome) => {
+            print_import_outcome(&outcome);
+            Ok(())
+        }
+        Err(failure) => {
+            print_import_outcome(&failure.outcome);
+            Err((*failure.error).into())
+        }
+    }
+}
+
+/// Prints each imported file and any skipped-for-encoding candidates,
+/// matching v1's per-file `imported <src> -> <dst> -> <hash>` line
+/// (`import.go:101`), though the exact wording is unfrozen (contract-spec
+/// 12).
+fn print_import_outcome(outcome: &ImportOutcome) {
+    for file in &outcome.imported {
+        println!("imported {} -> {} -> {}", file.src, file.dst, file.hash);
+    }
+    for description in &outcome.unrepresentable {
+        eprintln!("git-sfs: warning: skipped {description} (not a valid UTF-8 path)");
+    }
+}
+
+/// The current directory as a validated UTF-8 path — every command that
+/// resolves a relative argument needs it, either against the repo root
+/// (`add`, `mv`) or, for `import`'s external `src`, against the directory
+/// itself.
+fn current_dir_utf8() -> Result<Utf8PathBuf> {
+    let cwd = std::env::current_dir().map_err(|err| {
+        Error::Unavailable(format!("could not determine the current directory: {err}"))
+    })?;
+    Utf8PathBuf::from_path_buf(cwd)
+        .map_err(|_| Error::Unavailable("current directory is not valid UTF-8".to_owned()))
 }
 
 /// Writes the top-level help, as both a bare `git-sfs` and `git-sfs help` do.

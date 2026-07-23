@@ -841,6 +841,86 @@ the first command.
       written), and a whole-directory mv containing two tracked links at
       different depths, each confirmed still readable through its rewritten
       symlink afterward.
+- [x] `import` — `crates/git-sfs-core/src/exec/import.rs`, ported from
+      `import.go`, with one deliberate sequencing change contract-spec §13.1
+      requires rather than permits: v1's `ImportWithOptions` runs a parallel
+      "prepare" phase that hashes and `--move`s *every* source into the
+      cache first (`import.go:70-79`), and only afterward, in a second
+      serial pass, creates any destination symlinks (`import.go:80-102`). A
+      crash between the two phases leaves a file gone from its external
+      location with no symlink yet reaching it — safe in the cache by hash,
+      but unreachable from the working tree. Here, each source is hashed,
+      cached, verified reachable, and symlinked back-to-back before the next
+      source is even looked at, so at most one file is ever mid-flight
+      instead of the whole import.
+
+      This reopened a real design question during review: `Store::adopt`
+      (Phase 3's `--move` primitive, a same-filesystem rename with a
+      verified-copy-then-remove fallback across a device boundary) removes
+      its source as an inherent side effect of succeeding, one step before
+      the caller can create any symlink — so even perfect per-file
+      interleaving can't make `adopt`-then-symlink satisfy "publish before
+      remove" for that one file. The alternative (always `Store::store` —
+      copy — then delete the original only after publish) was rejected on
+      the user's own correctness ground, not just style: for the large
+      datasets this project targets, requiring a full second copy before
+      deleting the original needs roughly double the free disk space to
+      move data that already fits once, which can turn an otherwise-routine
+      `--move` of a mostly-full drive into an impossible one. `adopt` stays
+      the `--move` primitive; what changed is *when* it's called (per file,
+      immediately followed by that file's own symlink) rather than *what*
+      it does.
+
+      Two more things follow directly from `import`'s source living outside
+      the repository, unlike every other Phase 4 command's arguments:
+      - `src` resolves against the *current directory*, not the repository
+        root (v1's `filepath.Abs`, `import.go:161`) — `dst` still resolves
+        against `repo`, like everywhere else. `exec::import` is the first
+        command needing both, so `import()` takes `cwd` as an explicit
+        parameter (`dispatch.rs`'s three commands needing it now share one
+        `current_dir_utf8()` helper instead of repeating the same two-line
+        UTF-8-validation dance).
+      - A directory source's destination-collision validation, `-L`
+        symlink handling, and empty-git-sfs-directory rejection are batched
+        entirely up front and read-only (`plan_import`, not a `crate::plan`
+        function despite the name — it does real filesystem I/O, so it
+        lives in `exec` instead) — contract-spec §5b.2 requires a rejected
+        import to be a no-op, and validating before any byte moves is what
+        makes that true regardless of the sequencing change above. Also
+        preserved from v1: two source paths resolving to the same canonical
+        file (`std::fs::canonicalize`, matching `filepath.EvalSymlinks`) are
+        deduplicated so the underlying file is only hashed/cached once, and
+        a directory source merges its contents directly into an existing
+        destination directory rather than nesting under the source's own
+        basename — deliberately different from `mv`'s placement rule,
+        since nothing flags v1's import behavior here as a defect.
+
+      Same simplifications as `add`, called out for the same reason
+      (flagged, not silently assumed): no auto-`init`/cache-creation
+      (requires an already-bound cache — the init/setup question stays
+      parked), sequential only, no progress callback.
+
+      Fixed a related classification gap while writing this module's own
+      `From<ImportError> for Error`: fully delegating a wrapped `StoreError`
+      to its own classification (`HashMismatch` → `Integrity`, `Canceled` →
+      `Canceled`) rather than the blanket `Unavailable` `AddError`'s
+      equivalent conversion currently uses — noted here rather than changed
+      there, since unlike the `RepoError::Canceled` gap fixed alongside
+      `mv`, this one is a closer judgment call (whether a same-file
+      TOCTOU hash mismatch during `add` is better read as "integrity" or
+      "retry might help") that deserves its own decision, not a drive-by.
+
+      Verified against the real built binary end to end: copy-by-default
+      leaves the source intact, `--move` removes it only after the
+      destination is confirmed published, a directory import merges into an
+      existing destination directory, and both rejection paths (destination
+      already exists; a symlink source without `-L`) leave every involved
+      path — source, symlink, existing destination — completely untouched.
+
+      Also surfaced, unrelated to this change: `ports::remote::tests::
+      cancellation_stops_promptly_even_mid_subprocess` is intermittently
+      flaky (timing-sensitive subprocess-cancellation assertion, not touched
+      this pass) — noted for a separate look, not investigated here.
 
 ### Phase 5 — reporting
 

@@ -10,4 +10,14 @@
 //! command as it's ported.
 
 pub mod add;
+pub mod import;
 pub mod mv;
+
+use camino::{Utf8Path, Utf8PathBuf};
+
+/// `absolute`, expressed relative to `repo` -- v1's `rel()` (`walk.go:87`).
+/// Shared by [`mv`] and [`import`], both of which report paths relative to
+/// the repository root rather than as absolute filesystem paths.
+pub(crate) fn repo_relative(repo: &Utf8Path, absolute: &Utf8Path) -> Utf8PathBuf {
+    absolute.strip_prefix(repo).unwrap_or(absolute).to_owned()
+}
