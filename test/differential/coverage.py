@@ -463,6 +463,9 @@ CLAUSES = [
     Clause(
         "13.5", "environmental assumptions are checked where they are chosen", UNCOVERED
     ),
+    Clause(
+        "13.7", "add must refuse a candidate already tracked by Git", UNCOVERED
+    ),
     # -- §7c downgrade -------------------------------------------------------
     Clause(
         "7c",

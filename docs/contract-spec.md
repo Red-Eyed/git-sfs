@@ -1135,6 +1135,18 @@ and connectivity — none of the four above. v2's `doctor` should cover them.
 outside its own test — a loaded gun for the first caller reaching for a
 containment check. v2 must not port the bug along with the function.
 
+### 13.7 `add` doesn't check whether a candidate is already tracked by Git
+
+`add`'s walk (`add.go:46-65`) converts every regular file it finds under the
+given paths — `shouldSkip` (`walk.go:58-65`) only excludes `.git`, `.git-sfs`,
+and the top-level `.gitignore`. Nothing asks Git whether a candidate is already
+in its index, so `git-sfs add .`, or any glob that sweeps up a committed source
+file or README alongside real data, silently deletes that file's content and
+replaces it with a git-sfs symlink — see failure-modes §1e. v2 must check a
+candidate against Git's index (e.g. `git ls-files`) and refuse to convert a
+file that is already tracked, the same way `import` refuses a symlinked source
+rather than silently ingesting the wrong thing (§5b.2).
+
 ---
 
 ## 14. Open divergences requiring a decision

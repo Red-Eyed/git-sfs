@@ -114,6 +114,34 @@ hook or a cheap `status` check, not a `verify` run the user has to remember.
 
 ---
 
+## 1e. `add` doesn't check whether a file is already tracked by Git
+
+`Add`'s walk collects every regular file under the given paths and converts each
+one — `os.Remove` then `os.Symlink`
+([add.go:46-65](../internal/core/add.go#L46-L65), [add.go:88-93](../internal/core/add.go#L88-L93)).
+`shouldSkip` only excludes `.git`, `.git-sfs`, and the top-level `.gitignore`
+([walk.go:58-65](../internal/core/walk.go#L58-L65)) — nothing asks Git whether the
+candidate is already in its index.
+
+- [ ] **A file Git already tracks can be silently converted into a symlink.**
+      `git-sfs add .`, or any glob that happens to sweep up a committed source
+      file, README, or config alongside real data, deletes that file's content
+      and replaces it with a git-sfs symlink. The next `git status` shows it as
+      a modified file (content → symlink target text), and the file's actual
+      content now exists only in Git history and the git-sfs cache — not in the
+      form the rest of the repo, and every tool that reads it, expects.
+- [ ] **The failure is easy to trigger and easy to miss.** Nothing distinguishes
+      "a data file the user meant to add" from "a tracked file caught by a wide
+      argument" until the user notices `git diff` showing a symlink where source
+      code used to be.
+
+**Never go there:** `add` should ask Git whether a candidate is already tracked
+(e.g. `git ls-files`) and refuse to convert it, the same way `import` refuses a
+symlinked source (contract-spec §5b.2) rather than silently doing the wrong
+thing.
+
+---
+
 ## 2. Integrity rests on a filesystem permission bit
 
 `HasValid` treats *"the file is read-only"* as proof *"the bytes were hash-verified"*
