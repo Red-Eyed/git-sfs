@@ -138,6 +138,17 @@ pub trait Store {
     /// reason other than absence.
     fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError>;
 
+    /// Bytes available on the filesystem that stores this cache.
+    ///
+    /// Used by `pull` before downloads, so the command fails before rclone
+    /// starts writing when the cache volume is known not to have enough room.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Io`] if the filesystem capacity could not be
+    /// determined.
+    fn available_bytes(&self) -> Result<u64, StoreError>;
+
     /// Copies `source`'s bytes into the store under `hash`, verifying the
     /// written bytes before the object becomes visible at its final path.
     /// A no-op if `hash` is already present and verified.
@@ -184,6 +195,18 @@ pub trait Store {
         hash: Sha256,
         cancel: &Cancel,
     ) -> Result<CacheEntry, StoreError>;
+
+    /// Removes `hash`'s object if it exists.
+    ///
+    /// This is intentionally a blunt cache-object primitive for `pull`'s
+    /// pre-download cleanup of known-untrusted bytes. Callers must decide the
+    /// policy before invoking it; a store cannot tell whether the caller has a
+    /// remote source ready to repair the object.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Io`] if an existing object could not be removed.
+    fn remove_object(&self, hash: Sha256) -> Result<(), StoreError>;
 }
 
 /// The real, filesystem-backed [`Store`].
@@ -249,6 +272,16 @@ impl Store for FsStore {
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(source) => Err(StoreError::Io { path, source }),
         }
+    }
+
+    fn available_bytes(&self) -> Result<u64, StoreError> {
+        let stats = nix::sys::statvfs::statvfs(self.root.as_std_path()).map_err(|errno| {
+            StoreError::Io {
+                path: self.root.clone(),
+                source: io::Error::from_raw_os_error(errno as i32),
+            }
+        })?;
+        Ok((stats.blocks_available() as u64).saturating_mul(stats.fragment_size()))
     }
 
     fn store(
@@ -506,6 +539,15 @@ impl Store for FsStore {
 
         Ok(CacheEntry { hash })
     }
+
+    fn remove_object(&self, hash: Sha256) -> Result<(), StoreError> {
+        let path = self.object_path(hash);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(StoreError::Io { path, source }),
+        }
+    }
 }
 
 /// Whether `a` and `b` name the same file, by device+inode rather than path
@@ -608,6 +650,10 @@ impl Store for FakeStore {
         Ok(objects.get(&hash).map(|bytes| bytes.len() as u64))
     }
 
+    fn available_bytes(&self) -> Result<u64, StoreError> {
+        Ok(u64::MAX)
+    }
+
     fn store(
         &self,
         source: &Utf8Path,
@@ -654,6 +700,14 @@ impl Store for FakeStore {
             source: source_err,
         })?;
         Ok(entry)
+    }
+
+    fn remove_object(&self, hash: Sha256) -> Result<(), StoreError> {
+        self.objects
+            .lock()
+            .expect("fake store mutex poisoned")
+            .remove(&hash);
+        Ok(())
     }
 }
 
@@ -860,6 +914,31 @@ mod tests {
         let entry = store.store(&source, hash, &cancel).unwrap();
         assert_eq!(entry.hash(), hash);
         assert!(store.verified(hash, &cancel).unwrap().is_some());
+    }
+
+    #[test]
+    fn remove_object_deletes_present_objects_and_accepts_absence() {
+        let cache = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        let cancel = Cancel::new();
+        let content = b"remove me before redownload";
+        let source = write_temp_file(&source_dir, "data.bin", content);
+        let hash = hash_of(content);
+
+        store.store(&source, hash, &cancel).unwrap();
+        assert!(store.object_path(hash).exists());
+
+        store.remove_object(hash).unwrap();
+        assert!(!store.object_path(hash).exists());
+        store.remove_object(hash).unwrap();
+    }
+
+    #[test]
+    fn available_bytes_reports_cache_volume_capacity() {
+        let cache = tempfile::tempdir().unwrap();
+        let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
+        assert!(store.available_bytes().unwrap() > 0);
     }
 
     #[test]

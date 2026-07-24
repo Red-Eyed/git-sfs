@@ -16,6 +16,7 @@ use git_sfs_core::domain::{
 use git_sfs_core::exec::add::{self, AddOutcome};
 use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
 use git_sfs_core::exec::mv::{self, MovedLink};
+use git_sfs_core::exec::pull::{self, PullOutcome};
 use git_sfs_core::exec::push::{self, PushOutcome};
 use git_sfs_core::exec::remotes::{self, RemoteEntry};
 use git_sfs_core::exec::status;
@@ -26,7 +27,8 @@ use git_sfs_core::{Cancel, Error, Result};
 use serde::Serialize;
 
 use crate::cli::{
-    AddArgs, Cli, Command, ImportArgs, MvArgs, PushArgs, RemotesArgs, SelfCommand, StatusArgs,
+    AddArgs, Cli, Command, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs, SelfCommand,
+    StatusArgs,
 };
 
 /// Runs the requested command.
@@ -45,7 +47,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Status(args) => run_status(cli, args, cancel),
         Command::Remotes(args) => run_remotes(cli, args),
         Command::Push(args) => run_push(cli, args, cancel),
-        Command::Pull(_) => unimplemented("pull"),
+        Command::Pull(args) => run_pull(cli, args, cancel),
         Command::Doctor(_) => unimplemented("doctor"),
         Command::SelfCmd(SelfCommand::Update) => unimplemented("self update"),
         Command::LlmsTxt => unimplemented("llms-txt"),
@@ -324,6 +326,50 @@ fn print_skipped_push_objects(outcome: &PushOutcome) {
         );
     }
     eprintln!("  run: git-sfs pull <path> to restore them");
+}
+
+/// `git-sfs pull` — download referenced remote objects missing from the cache.
+fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let config = load_config(&config_path)?;
+    check_git_sfs_floor(&config)?;
+    let cache_root = resolve_cache_root(
+        &repo,
+        cli.global.cache.as_deref(),
+        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
+    )?;
+
+    let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
+    let remote = build_rclone_remote(&config, remote_name, config_path.parent(), &cache_root)?;
+    remote.require_exists(cancel)?;
+
+    let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
+    let _lock = Lock::acquire(&locks_dir, LockName::Pull, cancel)?;
+    let store = FsStore::new(cache_root.clone());
+    let repo_port = FsRepo::new(repo);
+    let cache_files_dir = cache_root.join("files");
+
+    let outcome = pull::pull(
+        &repo_port,
+        &store,
+        &remote,
+        &cache_files_dir,
+        &args.path,
+        cancel,
+    )?;
+    print_pull_outcome(&outcome, cli.global.quiet);
+    Ok(())
+}
+
+fn print_pull_outcome(outcome: &PullOutcome, quiet: bool) {
+    if !quiet && !outcome.downloaded.is_empty() {
+        println!(
+            "pull: downloaded {} file(s) from remote",
+            outcome.downloaded.len()
+        );
+    }
 }
 
 fn print_remotes_text(entries: &[RemoteEntry]) {

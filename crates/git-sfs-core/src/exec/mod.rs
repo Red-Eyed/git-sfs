@@ -12,6 +12,7 @@
 pub mod add;
 pub mod import;
 pub mod mv;
+pub mod pull;
 pub mod push;
 pub mod remotes;
 pub mod status;

@@ -425,6 +425,9 @@ mod tests {
             fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
                 self.0.object_size(hash)
             }
+            fn available_bytes(&self) -> Result<u64, StoreError> {
+                self.0.available_bytes()
+            }
             fn store(
                 &self,
                 _source: &Utf8Path,
@@ -444,6 +447,9 @@ mod tests {
                 cancel: &Cancel,
             ) -> Result<crate::ports::CacheEntry, StoreError> {
                 self.0.adopt(source, hash, cancel)
+            }
+            fn remove_object(&self, hash: Sha256) -> Result<(), StoreError> {
+                self.0.remove_object(hash)
             }
         }
 

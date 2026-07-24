@@ -933,6 +933,24 @@ the first command.
       cancellation_stops_promptly_even_mid_subprocess` is intermittently
       flaky (timing-sensitive subprocess-cancellation assertion, not touched
       this pass) — noted for a separate look, not investigated here.
+- [x] `status`/`remotes` — `crates/git-sfs-core/src/exec/status.rs`,
+      `crates/git-sfs-core/src/exec/remotes.rs`, and
+      `crates/git-sfs/src/status_output.rs`. `status` scans once, deduplicates
+      by hash for object counts, and uses `Remote::file_sizes` for remote
+      metadata so a broken remote reports `unknown` rather than "absent".
+      `remotes` reads committed config only and never contacts rclone.
+- [x] `push` — `crates/git-sfs-core/src/exec/push.rs`, with the CLI wiring in
+      `crates/git-sfs/src/dispatch.rs`. The command verifies local cache
+      objects before planning, honors `--skip-missing`, and hands the complete
+      upload set to `Remote::copy_to_remote` as one batch rather than one
+      rclone call per object. The project-wide rclone batching rule is now
+      recorded in AGENTS.md and §5.2b above.
+- [x] `pull` — `crates/git-sfs-core/src/exec/pull.rs`, with the CLI wiring in
+      `crates/git-sfs/src/dispatch.rs`. The command scans once, treats
+      writable hash mismatches as untrusted bytes to remove before download,
+      performs one batched remote size listing for the disk-space guard, and
+      performs one batched `copy_from_remote` before verifying the downloaded
+      objects through `Store::verified`.
 
 ### Phase 5 — reporting
 
