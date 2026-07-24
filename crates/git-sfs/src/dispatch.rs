@@ -20,6 +20,7 @@ use git_sfs_core::exec::pull::{self, PullOutcome};
 use git_sfs_core::exec::push::{self, PushOutcome};
 use git_sfs_core::exec::remotes::{self, RemoteEntry};
 use git_sfs_core::exec::status;
+use git_sfs_core::exec::verify::{self, VerifyError, VerifyIssue, VerifyReport};
 use git_sfs_core::ports::{
     FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, discover_repo, resolve_cache_root,
 };
@@ -28,7 +29,7 @@ use serde::Serialize;
 
 use crate::cli::{
     AddArgs, Cli, Command, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs, SelfCommand,
-    StatusArgs,
+    StatusArgs, VerifyArgs,
 };
 
 /// Runs the requested command.
@@ -43,7 +44,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Add(args) => run_add(cli, args, cancel),
         Command::Mv(args) => run_mv(args, cancel),
         Command::Import(args) => run_import(cli, args, cancel),
-        Command::Verify(_) => unimplemented("verify"),
+        Command::Verify(args) => run_verify(cli, args, cancel),
         Command::Status(args) => run_status(cli, args, cancel),
         Command::Remotes(args) => run_remotes(cli, args),
         Command::Push(args) => run_push(cli, args, cancel),
@@ -370,6 +371,90 @@ fn print_pull_outcome(outcome: &PullOutcome, quiet: bool) {
             outcome.downloaded.len()
         );
     }
+}
+
+/// `git-sfs verify` — strict local and optional remote integrity checks.
+fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let config = load_config(&config_path)?;
+    check_git_sfs_floor(&config)?;
+    let cache_root = resolve_cache_root(
+        &repo,
+        cli.global.cache.as_deref(),
+        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
+    )?;
+
+    let store = FsStore::new(cache_root.clone());
+    let repo_port = FsRepo::new(repo);
+    let remote = if args.check_remote() {
+        let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
+        let remote = build_rclone_remote(&config, remote_name, config_path.parent(), &cache_root)?;
+        remote.require_exists(cancel)?;
+        Some(remote)
+    } else {
+        None
+    };
+
+    match verify::verify(
+        &repo_port,
+        &store,
+        remote.as_ref().map(|remote| remote as &dyn Remote),
+        &tmp_dir(&cache_root),
+        &args.path,
+        args.with_integrity,
+        cancel,
+    ) {
+        Ok(report) => {
+            print_verify_report(&report);
+            if !cli.global.quiet {
+                println!("verify ok");
+            }
+            Ok(())
+        }
+        Err(error @ VerifyError::Failed { .. }) => {
+            if let Some(report) = error.report() {
+                print_verify_report(report);
+            }
+            Err(error.into())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn print_verify_report(report: &VerifyReport) {
+    let counts = report.counts();
+    println!("tracked symlinks: {}", report.tracked_symlinks);
+    for kind in verify::ISSUE_KINDS {
+        println!("{}: {}", kind.plural(), counts.get(kind).unwrap_or(&0));
+    }
+    if report.orphan_count > 0 {
+        println!("# {} orphaned cache object(s)", report.orphan_count);
+    }
+    if report.issues.is_empty() {
+        return;
+    }
+    println!("details:");
+    for issue in &report.issues {
+        println!("{}", format_verify_issue(issue));
+    }
+}
+
+fn format_verify_issue(issue: &VerifyIssue) -> String {
+    let mut parts = vec![issue.kind.singular().to_owned()];
+    if let Some(path) = &issue.path {
+        parts.push(path.to_string());
+    }
+    if let Some(hash) = issue.hash {
+        parts.push(hash.to_string());
+    }
+    let mut line = parts.join(": ");
+    if let Some(detail) = &issue.detail {
+        line.push_str(": ");
+        line.push_str(detail);
+    }
+    line
 }
 
 fn print_remotes_text(entries: &[RemoteEntry]) {

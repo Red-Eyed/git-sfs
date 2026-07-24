@@ -951,6 +951,13 @@ the first command.
       performs one batched remote size listing for the disk-space guard, and
       performs one batched `copy_from_remote` before verifying the downloaded
       objects through `Store::verified`.
+- [x] `verify` — `crates/git-sfs-core/src/exec/verify.rs`, with CLI wiring in
+      `crates/git-sfs/src/dispatch.rs`. The command reports invalid symlinks,
+      missing/corrupt local objects, missing remote objects, remote size
+      mismatches, and advisory orphan counts. Default remote checks use one
+      batched `Remote::file_sizes` call; `--with-integrity` still avoids a
+      per-object rclone loop by batch-downloading the remote object set to a
+      scratch tree with `copy_from_remote` and hashing those bytes locally.
 
 ### Phase 5 — reporting
 

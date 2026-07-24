@@ -16,6 +16,7 @@ pub mod pull;
 pub mod push;
 pub mod remotes;
 pub mod status;
+pub mod verify;
 
 use camino::{Utf8Path, Utf8PathBuf};
 

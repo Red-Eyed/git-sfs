@@ -219,15 +219,6 @@ impl VerifyArgs {
     /// wins and `--no-check-remote --check-remote` re-enables the check. The
     /// pair is private and reachable only through here, so no caller can read
     /// one flag and forget the other.
-    //
-    // Only genuinely dead outside `cfg(test)`: the tests below call it, but
-    // nothing in `dispatch` does until phase 4 wires `verify` up. Scoping the
-    // expectation to non-test builds means the attribute itself starts failing
-    // the moment that call is added, instead of silently tolerating it forever.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "called from dispatch in phase 4")
-    )]
     #[must_use]
     pub fn check_remote(&self) -> bool {
         !self.no_check_remote

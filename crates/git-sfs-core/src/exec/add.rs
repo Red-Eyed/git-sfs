@@ -422,8 +422,18 @@ mod tests {
             ) -> Result<Option<crate::ports::CacheEntry>, StoreError> {
                 self.0.verified(hash, cancel)
             }
+            fn rehash_object(
+                &self,
+                hash: Sha256,
+                cancel: &Cancel,
+            ) -> Result<Option<crate::ports::CacheEntry>, StoreError> {
+                self.0.rehash_object(hash, cancel)
+            }
             fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
                 self.0.object_size(hash)
+            }
+            fn object_hashes(&self) -> Result<Vec<Sha256>, StoreError> {
+                self.0.object_hashes()
             }
             fn available_bytes(&self) -> Result<u64, StoreError> {
                 self.0.available_bytes()

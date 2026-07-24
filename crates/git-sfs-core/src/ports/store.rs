@@ -22,7 +22,7 @@ use thiserror::Error;
 
 use crate::cancel::Cancel;
 use crate::domain::cache_layout::{object_path, tmp_dir};
-use crate::domain::hash::Sha256;
+use crate::domain::hash::{ALGORITHM, Sha256};
 use crate::error::Error;
 
 use super::cancellable_io::{Cancellable, is_canceled};
@@ -126,6 +126,24 @@ pub trait Store {
     /// content does not match `hash` — corrupt, not absent.
     fn verified(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError>;
 
+    /// Force-hash `hash`'s local bytes, returning `None` only when the object
+    /// is confirmed absent.
+    ///
+    /// This is the expensive local half of `verify --with-integrity`.
+    /// Ordinary commands use [`Store::verified`], which can trust read-only
+    /// objects without re-reading them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::HashMismatch`] if the bytes do not hash to
+    /// `hash`, [`StoreError::Io`] if presence could not be determined, and
+    /// [`StoreError::Canceled`] if `cancel` fires.
+    fn rehash_object(
+        &self,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<Option<CacheEntry>, StoreError>;
+
     /// `hash`'s local cache size, or `None` if it is absent.
     ///
     /// This is a metadata query for `status`, not an integrity check: it
@@ -137,6 +155,17 @@ pub trait Store {
     /// Returns [`StoreError::Io`] if the size could not be determined for a
     /// reason other than absence.
     fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError>;
+
+    /// Every valid hash-named object currently present in the cache.
+    ///
+    /// Used by `verify` for orphan reporting only. Invalid names are ignored:
+    /// they are not reachable by git-sfs symlinks and cannot be acted on as
+    /// content-addressed objects.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Io`] if the object tree cannot be listed.
+    fn object_hashes(&self) -> Result<Vec<Sha256>, StoreError>;
 
     /// Bytes available on the filesystem that stores this cache.
     ///
@@ -265,6 +294,37 @@ impl Store for FsStore {
         Ok(Some(CacheEntry { hash }))
     }
 
+    fn rehash_object(
+        &self,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<Option<CacheEntry>, StoreError> {
+        let path = self.object_path(hash);
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(StoreError::Io { path, source }),
+        };
+        let got = hash_file(&path, cancel)?;
+        if got != hash {
+            return Err(StoreError::HashMismatch {
+                path,
+                want: hash,
+                got,
+            });
+        }
+        let mode = metadata.permissions().mode();
+        if mode & 0o222 != 0 {
+            let mut perms = metadata.permissions();
+            perms.set_mode(mode & !0o222);
+            std::fs::set_permissions(&path, perms).map_err(|source| StoreError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        }
+        Ok(Some(CacheEntry { hash }))
+    }
+
     fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
         let path = self.object_path(hash);
         match std::fs::metadata(&path) {
@@ -272,6 +332,69 @@ impl Store for FsStore {
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(source) => Err(StoreError::Io { path, source }),
         }
+    }
+
+    fn object_hashes(&self) -> Result<Vec<Sha256>, StoreError> {
+        let root = self.root.join("files").join(ALGORITHM);
+        let metadata = match std::fs::symlink_metadata(&root) {
+            Ok(metadata) => metadata,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => return Err(StoreError::Io { path: root, source }),
+        };
+        if !metadata.is_dir() {
+            return Ok(Vec::new());
+        }
+
+        let mut hashes = Vec::new();
+        for prefix in std::fs::read_dir(&root).map_err(|source| StoreError::Io {
+            path: root.clone(),
+            source,
+        })? {
+            let prefix = prefix.map_err(|source| StoreError::Io {
+                path: root.clone(),
+                source,
+            })?;
+            let prefix_path =
+                Utf8PathBuf::from_path_buf(prefix.path()).map_err(|path| StoreError::Io {
+                    path: root.clone(),
+                    source: io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("cache path is not valid UTF-8: {}", path.display()),
+                    ),
+                })?;
+            let prefix_metadata =
+                std::fs::symlink_metadata(&prefix_path).map_err(|source| StoreError::Io {
+                    path: prefix_path.clone(),
+                    source,
+                })?;
+            if !prefix_metadata.is_dir() {
+                continue;
+            }
+
+            let Some(prefix_name) = prefix.file_name().to_str().map(ToOwned::to_owned) else {
+                continue;
+            };
+            for object in std::fs::read_dir(&prefix_path).map_err(|source| StoreError::Io {
+                path: prefix_path.clone(),
+                source,
+            })? {
+                let object = object.map_err(|source| StoreError::Io {
+                    path: prefix_path.clone(),
+                    source,
+                })?;
+                let Some(name) = object.file_name().to_str().map(ToOwned::to_owned) else {
+                    continue;
+                };
+                if let Ok(hash) = Sha256::parse(&name)
+                    && hash.prefix() == prefix_name
+                {
+                    hashes.push(hash);
+                }
+            }
+        }
+        hashes.sort_unstable();
+        hashes.dedup();
+        Ok(hashes)
     }
 
     fn available_bytes(&self) -> Result<u64, StoreError> {
@@ -645,9 +768,39 @@ impl Store for FakeStore {
         Ok(objects.get(&hash).map(|_| CacheEntry { hash }))
     }
 
+    fn rehash_object(
+        &self,
+        hash: Sha256,
+        _cancel: &Cancel,
+    ) -> Result<Option<CacheEntry>, StoreError> {
+        let objects = self.objects.lock().expect("fake store mutex poisoned");
+        let Some(bytes) = objects.get(&hash) else {
+            return Ok(None);
+        };
+        let got = {
+            use sha2::{Digest, Sha256 as Sha256Hasher};
+            Sha256::from_digest(Sha256Hasher::digest(bytes).into())
+        };
+        if got != hash {
+            return Err(StoreError::HashMismatch {
+                path: self.object_path(hash),
+                want: hash,
+                got,
+            });
+        }
+        Ok(Some(CacheEntry { hash }))
+    }
+
     fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
         let objects = self.objects.lock().expect("fake store mutex poisoned");
         Ok(objects.get(&hash).map(|bytes| bytes.len() as u64))
+    }
+
+    fn object_hashes(&self) -> Result<Vec<Sha256>, StoreError> {
+        let objects = self.objects.lock().expect("fake store mutex poisoned");
+        let mut hashes = objects.keys().copied().collect::<Vec<_>>();
+        hashes.sort_unstable();
+        Ok(hashes)
     }
 
     fn available_bytes(&self) -> Result<u64, StoreError> {
