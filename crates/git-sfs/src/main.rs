@@ -9,6 +9,7 @@
 mod cli;
 mod dispatch;
 mod exit;
+mod progress;
 mod reporting;
 mod status_output;
 mod version;

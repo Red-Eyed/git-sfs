@@ -17,6 +17,7 @@ git-sfs-core.workspace = true
 camino.workspace = true
 clap.workspace = true
 ctrlc.workspace = true
+indicatif.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # Unused until `self update` lands in phase 6. Declared now so that the TLS

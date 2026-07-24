@@ -36,6 +36,7 @@ use crate::cli::{
     AddArgs, Cli, Command, DoctorArgs, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs,
     SelfCommand, StatusArgs, VerifyArgs,
 };
+use crate::progress::ProgressRemote;
 use crate::reporting::{self, RenderMode};
 
 /// Runs the requested command.
@@ -176,7 +177,8 @@ fn run_status(cli: &Cli, args: &StatusArgs, cancel: &Cancel) -> Result<()> {
     let store = FsStore::new(cache_root.clone());
     let repo_port = FsRepo::new(repo);
     let remote = match args.remote.as_deref() {
-        Some(name) => Some(build_rclone_remote(
+        Some(name) => Some(build_progress_remote(
+            cli,
             &config,
             name,
             config_path.parent(),
@@ -231,7 +233,8 @@ fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
     )?;
 
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
-    let remote = build_rclone_remote(&config, remote_name, config_path.parent(), &cache_root)?;
+    let remote =
+        build_progress_remote(cli, &config, remote_name, config_path.parent(), &cache_root)?;
     remote.require_exists(cancel)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
@@ -275,7 +278,8 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
     )?;
 
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
-    let remote = build_rclone_remote(&config, remote_name, config_path.parent(), &cache_root)?;
+    let remote =
+        build_progress_remote(cli, &config, remote_name, config_path.parent(), &cache_root)?;
     remote.require_exists(cancel)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
@@ -663,7 +667,8 @@ fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
     let repo_port = FsRepo::new(repo);
     let remote = if args.check_remote() {
         let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
-        let remote = build_rclone_remote(&config, remote_name, config_path.parent(), &cache_root)?;
+        let remote =
+            build_progress_remote(cli, &config, remote_name, config_path.parent(), &cache_root)?;
         remote.require_exists(cancel)?;
         Some(remote)
     } else {
@@ -733,6 +738,17 @@ fn build_rclone_remote(
         remote = remote.with_retry_max(retry_max);
     }
     Ok(remote)
+}
+
+fn build_progress_remote(
+    cli: &Cli,
+    config: &Config,
+    name: &str,
+    config_dir: Option<&camino::Utf8Path>,
+    cache_root: &camino::Utf8Path,
+) -> Result<ProgressRemote<RcloneRemote>> {
+    let remote = build_rclone_remote(config, name, config_dir, cache_root)?;
+    Ok(ProgressRemote::new(remote, !cli.global.quiet))
 }
 
 fn rclone_remote_from_config(

@@ -978,11 +978,13 @@ the first command.
       failure reports, and primary command output (`status`, `remotes`,
       `doctor`) stay visible. Core remains untouched and still takes no
       writer, quiet flag, or progress callback.
-- [ ] Live progress/event stream → `indicatif`. Still entirely in the binary
-      crate. The next slice should wrap the existing `Store`/`Remote`/`Repo`
-      ports at the construction site, or add a real core event stream only if
-      progress needs facts that wrappers cannot observe without changing
-      command semantics.
+- [x] Live progress foundation → `indicatif`. `crates/git-sfs/src/progress.rs`
+      wraps the existing `Remote` port at construction sites, so `push`,
+      `pull`, `status --remote`, and remote `verify` show coarse rclone-call
+      progress without adding writers, quiet flags, or callbacks to core. This
+      deliberately stops at wrapper-visible facts; a richer core event stream
+      should only be added if later UX needs per-file or per-byte details that
+      cannot be observed at the binary edge.
 - [ ] JSON output review. `status --json` and `remotes --json` exist; any
       further JSON shape work belongs here, not in command execution.
 
