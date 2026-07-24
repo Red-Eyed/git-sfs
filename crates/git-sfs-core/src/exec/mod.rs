@@ -10,6 +10,7 @@
 //! command as it's ported.
 
 pub mod add;
+pub mod doctor;
 pub mod import;
 pub mod mv;
 pub mod pull;

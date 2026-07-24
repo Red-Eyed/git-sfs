@@ -10,10 +10,15 @@
 //! a failure instead of as a run that did nothing.
 
 use camino::Utf8PathBuf;
+use std::io::Write as _;
+use std::os::unix::fs::PermissionsExt as _;
+
 use git_sfs_core::domain::{
-    Config, DEFAULT_REMOTE_NAME, RemoteConfig, check_git_sfs_version, compose_remote_url, tmp_dir,
+    Config, DEFAULT_REMOTE_NAME, RemoteConfig, check_git_sfs_version, check_rclone_version,
+    compose_remote_url, tmp_dir,
 };
 use git_sfs_core::exec::add::{self, AddOutcome};
+use git_sfs_core::exec::doctor::{self, DoctorReport, DoctorStatus};
 use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
 use git_sfs_core::exec::mv::{self, MovedLink};
 use git_sfs_core::exec::pull::{self, PullOutcome};
@@ -22,14 +27,15 @@ use git_sfs_core::exec::remotes::{self, RemoteEntry};
 use git_sfs_core::exec::status;
 use git_sfs_core::exec::verify::{self, VerifyError, VerifyIssue, VerifyReport};
 use git_sfs_core::ports::{
-    FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, discover_repo, resolve_cache_root,
+    FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, detect_rclone_version, discover_repo,
+    resolve_cache_root,
 };
 use git_sfs_core::{Cancel, Error, Result};
 use serde::Serialize;
 
 use crate::cli::{
-    AddArgs, Cli, Command, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs, SelfCommand,
-    StatusArgs, VerifyArgs,
+    AddArgs, Cli, Command, DoctorArgs, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs,
+    SelfCommand, StatusArgs, VerifyArgs,
 };
 
 /// Runs the requested command.
@@ -49,7 +55,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Remotes(args) => run_remotes(cli, args),
         Command::Push(args) => run_push(cli, args, cancel),
         Command::Pull(args) => run_pull(cli, args, cancel),
-        Command::Doctor(_) => unimplemented("doctor"),
+        Command::Doctor(args) => run_doctor(cli, args, cancel),
         Command::SelfCmd(SelfCommand::Update) => unimplemented("self update"),
         Command::LlmsTxt => unimplemented("llms-txt"),
     }
@@ -370,6 +376,395 @@ fn print_pull_outcome(outcome: &PullOutcome, quiet: bool) {
             "pull: downloaded {} file(s) from remote",
             outcome.downloaded.len()
         );
+    }
+}
+
+/// `git-sfs doctor` — diagnose repository, cache, rclone, and remote setup.
+fn run_doctor(cli: &Cli, args: &DoctorArgs, cancel: &Cancel) -> Result<()> {
+    let mut report = DoctorReport::new();
+    println!();
+
+    let repo = match check_value(&mut report, "git repository", || {
+        let cwd = current_dir_utf8().map_err(|err| err.to_string())?;
+        let repo = discover_repo(&cwd).map_err(|err| err.to_string())?;
+        Ok((repo.to_string(), repo))
+    }) {
+        Some(repo) => repo,
+        None => {
+            report.skip_all(&[
+                "git-sfs config",
+                "git-sfs version",
+                "git core.symlinks",
+                "cache config",
+                "cache directory",
+                "cache permissions",
+                "rclone binary",
+                "rclone version",
+            ]);
+            return finish_doctor(report);
+        }
+    };
+
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let config = match check_value(&mut report, "git-sfs config", || {
+        let config = load_config(&config_path).map_err(|err| err.to_string())?;
+        Ok((config_path.to_string(), config))
+    }) {
+        Some(config) => config,
+        None => {
+            report.skip_all(&[
+                "git-sfs version",
+                "git core.symlinks",
+                "cache config",
+                "cache directory",
+                "cache permissions",
+                "rclone binary",
+                "rclone version",
+            ]);
+            return finish_doctor(report);
+        }
+    };
+
+    check_git_sfs_version_for_doctor(&mut report, &config);
+    check_core_symlinks(&mut report, &repo);
+
+    let cache_root = match check_value(&mut report, "cache config", || {
+        let cache_root = resolve_cache_root(
+            &repo,
+            cli.global.cache.as_deref(),
+            std::env::var("GIT_SFS_CACHE").ok().as_deref(),
+        )
+        .map_err(|err| err.to_string())?;
+        Ok((cache_root.to_string(), cache_root))
+    }) {
+        Some(cache_root) => cache_root,
+        None => {
+            report.skip_all(&[
+                "cache directory",
+                "cache permissions",
+                "rclone binary",
+                "rclone version",
+            ]);
+            return finish_doctor(report);
+        }
+    };
+
+    check_cache_directory(&mut report, &cache_root);
+    check_cache_permissions(&mut report, &cache_root);
+
+    match find_rclone_binary() {
+        Ok(path) => report.pass("rclone binary", path.to_string()),
+        Err(err) => {
+            report.fail("rclone binary", err);
+            report.skip("rclone version");
+            return finish_doctor(report);
+        }
+    }
+    check_rclone_version_for_doctor(&mut report, &config, cancel);
+    check_doctor_remotes(
+        &mut report,
+        &config,
+        args.remote.as_deref(),
+        &config_path,
+        &cache_root,
+        cancel,
+    );
+    finish_doctor(report)
+}
+
+fn check_value<T>(
+    report: &mut DoctorReport,
+    label: &str,
+    check: impl FnOnce() -> std::result::Result<(String, T), String>,
+) -> Option<T> {
+    match check() {
+        Ok((detail, value)) => {
+            report.pass(label, detail);
+            Some(value)
+        }
+        Err(err) => {
+            report.fail(label, err);
+            None
+        }
+    }
+}
+
+fn check_git_sfs_version_for_doctor(report: &mut DoctorReport, config: &Config) {
+    let version = crate::version::VERSION;
+    match &config.settings.min_git_sfs_version {
+        Some(minimum) => match check_git_sfs_version(version, minimum) {
+            Ok(()) => report.pass("git-sfs version", format!("{version} (min: {minimum})")),
+            Err(err) => report.fail("git-sfs version", err.to_string()),
+        },
+        None => report.pass("git-sfs version", version),
+    }
+}
+
+fn check_core_symlinks(report: &mut DoctorReport, repo: &camino::Utf8Path) {
+    match git_core_symlinks(repo) {
+        Ok(CoreSymlinks::True { explicit }) => {
+            let detail = if explicit { "true" } else { "true (default)" };
+            report.pass("git core.symlinks", detail);
+        }
+        Ok(CoreSymlinks::False) => {
+            report.fail("git core.symlinks", "core.symlinks is false");
+        }
+        Err(err) => report.fail("git core.symlinks", err),
+    }
+}
+
+fn check_cache_directory(report: &mut DoctorReport, cache_root: &camino::Utf8Path) {
+    let result = (|| {
+        let metadata = std::fs::metadata(cache_root)
+            .map_err(|err| format!("does not exist or is unreadable: {cache_root}: {err}"))?;
+        if !metadata.is_dir() {
+            return Err(format!("not a directory: {cache_root}"));
+        }
+        let cache_tmp = tmp_dir(cache_root);
+        std::fs::create_dir_all(&cache_tmp)
+            .map_err(|err| format!("create cache tmp {cache_tmp}: {err}"))?;
+        let (_file, path) = create_probe_file(&cache_tmp, ".git-sfs-doctor")
+            .map_err(|err| format!("not writable: {err}"))?;
+        cleanup_probe_file(&path);
+        Ok(format!("{cache_root} (tmp writable)"))
+    })();
+    match result {
+        Ok(detail) => report.pass("cache directory", detail),
+        Err(err) => report.fail("cache directory", err),
+    }
+}
+
+fn check_cache_permissions(report: &mut DoctorReport, cache_root: &camino::Utf8Path) {
+    let cache_tmp = tmp_dir(cache_root);
+    let result = (|| {
+        std::fs::create_dir_all(&cache_tmp)
+            .map_err(|err| format!("create cache tmp {cache_tmp}: {err}"))?;
+        let (mut file, path) = create_probe_file(&cache_tmp, ".git-sfs-doctor-mode")?;
+        file.write_all(b"git-sfs doctor\n")
+            .map_err(|err| format!("write mode probe {path}: {err}"))?;
+        let mut permissions = file
+            .metadata()
+            .map_err(|err| format!("stat mode probe {path}: {err}"))?
+            .permissions();
+        permissions.set_mode(0o444);
+        std::fs::set_permissions(&path, permissions)
+            .map_err(|err| format!("chmod mode probe {path}: {err}"))?;
+        let mode = std::fs::metadata(&path)
+            .map_err(|err| format!("restat mode probe {path}: {err}"))?
+            .permissions()
+            .mode();
+        cleanup_probe_file(&path);
+        if mode & 0o222 == 0 {
+            Ok("read-only mode preserved".to_owned())
+        } else {
+            Err("filesystem does not preserve read-only mode bits".to_owned())
+        }
+    })();
+    match result {
+        Ok(detail) => report.pass("cache permissions", detail),
+        Err(err) => report.fail("cache permissions", err),
+    }
+}
+
+fn check_rclone_version_for_doctor(report: &mut DoctorReport, config: &Config, cancel: &Cancel) {
+    match detect_rclone_version(cancel) {
+        Ok(version) => match &config.settings.min_rclone_version {
+            Some(minimum) => match check_rclone_version(&version, minimum) {
+                Ok(()) => report.pass("rclone version", format!("v{version} (min: {minimum})")),
+                Err(err) => report.fail("rclone version", err.to_string()),
+            },
+            None => report.pass("rclone version", format!("v{version}")),
+        },
+        Err(err) => report.fail("rclone version", err.to_string()),
+    }
+}
+
+fn check_doctor_remotes(
+    report: &mut DoctorReport,
+    config: &Config,
+    remote_filter: Option<&str>,
+    config_path: &camino::Utf8Path,
+    cache_root: &camino::Utf8Path,
+    cancel: &Cancel,
+) {
+    let config_dir = config_path.parent();
+    for name in doctor::remote_names(config, remote_filter) {
+        report.section(format!("remote: {name}"));
+        let Some(remote_config) = config.remotes.get(name.as_str()) else {
+            report.fail("config", format!("remote {name:?} is not configured"));
+            continue;
+        };
+        if !check_rclone_config_file(report, remote_config, config_dir) {
+            report.skip_all(&["remote backend", "remote path"]);
+            continue;
+        }
+        let remote = match build_rclone_remote(config, &name, config_dir, cache_root) {
+            Ok(remote) => remote,
+            Err(err) => {
+                report.fail("remote backend", err.to_string());
+                report.skip("remote path");
+                continue;
+            }
+        };
+        if let Err(err) = remote.check_backend(cancel) {
+            report.fail("remote backend", err.to_string());
+            report.skip("remote path");
+            continue;
+        }
+        report.pass("remote backend", format!("{}:", remote_config.backend));
+        match remote.check_path(cancel) {
+            Ok(()) => report.pass("remote path", remote_url_for_doctor(remote_config)),
+            Err(err) => report.fail("remote path", err.to_string()),
+        }
+    }
+}
+
+fn check_rclone_config_file(
+    report: &mut DoctorReport,
+    remote_config: &RemoteConfig,
+    config_dir: Option<&camino::Utf8Path>,
+) -> bool {
+    let Some(config_path) = &remote_config.rclone_config_path else {
+        report.pass(
+            "rclone config file",
+            "using rclone default (~/.config/rclone/rclone.conf)",
+        );
+        return true;
+    };
+    let resolved = resolve_rclone_config_path(config_dir, config_path);
+    if resolved.is_file() {
+        report.pass("rclone config file", resolved.to_string());
+        true
+    } else {
+        report.fail("rclone config file", format!("file not found: {resolved}"));
+        false
+    }
+}
+
+fn remote_url_for_doctor(remote_config: &RemoteConfig) -> String {
+    compose_remote_url(
+        &remote_config.backend,
+        remote_config.path.as_deref().unwrap_or(""),
+    )
+}
+
+fn finish_doctor(report: DoctorReport) -> Result<()> {
+    print_doctor_report(&report);
+    if report.has_failures() {
+        return Err(Error::Unavailable(format!(
+            "doctor: {} check(s) failed",
+            report.failed()
+        )));
+    }
+    Ok(())
+}
+
+fn print_doctor_report(report: &DoctorReport) {
+    for section in report.sections() {
+        if let Some(title) = section.title() {
+            println!("\n  [{title}]");
+        }
+        for check in section.checks() {
+            print_doctor_check(check.label(), check.status());
+        }
+    }
+    println!();
+    match (report.failed(), report.skipped()) {
+        (0, 0) => println!("doctor: all {} checks passed", report.passed()),
+        (0, skipped) => println!("doctor: {} passed, {skipped} skipped", report.passed()),
+        (failed, skipped) => {
+            println!(
+                "doctor: {} passed, {failed} failed, {skipped} skipped",
+                report.passed()
+            );
+        }
+    }
+}
+
+fn print_doctor_check(label: &str, status: &DoctorStatus) {
+    match status {
+        DoctorStatus::Pass { detail } if detail.is_empty() => {
+            println!("  {label:<24} ok", label = format!("{label}:"));
+        }
+        DoctorStatus::Pass { detail } => {
+            println!("  {label:<24} ok  ({detail})", label = format!("{label}:"));
+        }
+        DoctorStatus::Fail { detail } => {
+            println!("  {label:<24} FAIL: {detail}", label = format!("{label}:"));
+        }
+        DoctorStatus::Skip => {
+            println!("  {label:<24} skip", label = format!("{label}:"));
+        }
+    }
+}
+
+enum CoreSymlinks {
+    True { explicit: bool },
+    False,
+}
+
+fn git_core_symlinks(repo: &camino::Utf8Path) -> std::result::Result<CoreSymlinks, String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", "--get", "--bool", "core.symlinks"])
+        .output()
+        .map_err(|err| format!("run git config: {err}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if output.status.success() {
+        return match stdout.as_str() {
+            "true" => Ok(CoreSymlinks::True { explicit: true }),
+            "false" => Ok(CoreSymlinks::False),
+            other => Err(format!("unexpected core.symlinks value: {other:?}")),
+        };
+    }
+    if output.status.code() == Some(1) && stdout.is_empty() {
+        return Ok(CoreSymlinks::True { explicit: false });
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    Err(format!("git config failed: {stderr}"))
+}
+
+fn find_rclone_binary() -> std::result::Result<Utf8PathBuf, String> {
+    let path = std::env::var_os("PATH").ok_or_else(|| "PATH is not set".to_owned())?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("rclone");
+        let Ok(metadata) = std::fs::metadata(&candidate) else {
+            continue;
+        };
+        if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+            return Utf8PathBuf::from_path_buf(candidate)
+                .map_err(|path| format!("rclone path is not valid UTF-8: {}", path.display()));
+        }
+    }
+    Err("rclone not found on PATH: install from https://rclone.org/downloads/".to_owned())
+}
+
+fn create_probe_file(
+    dir: &camino::Utf8Path,
+    prefix: &str,
+) -> std::result::Result<(std::fs::File, Utf8PathBuf), String> {
+    let pid = std::process::id();
+    for attempt in 0..100u32 {
+        let path = dir.join(format!("{prefix}-{pid}-{attempt}"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((file, path)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("{path}: {err}")),
+        }
+    }
+    Err(format!("could not create a unique probe file in {dir}"))
+}
+
+fn cleanup_probe_file(path: &camino::Utf8Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {}
     }
 }
 

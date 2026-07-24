@@ -26,6 +26,6 @@ pub use cancellable_io::{Cancellable, is_canceled};
 pub use hashing::{hash_file, hash_reader};
 pub use local_state::{LocalStateError, discover_repo, resolve_cache_root};
 pub use lock::{Lock, LockError, LockName};
-pub use remote::{FakeRemote, RcloneRemote, Remote, RemoteError};
+pub use remote::{FakeRemote, RcloneRemote, Remote, RemoteError, detect_rclone_version};
 pub use repo::{FakeRepo, FoundEntry, FsRepo, InvalidReason, Repo, RepoError, ScannedEntry};
 pub use store::{CacheEntry, FakeStore, FsStore, Store, StoreError};

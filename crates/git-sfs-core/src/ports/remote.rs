@@ -108,6 +108,17 @@ pub enum RemoteError {
     Canceled,
 }
 
+/// Runs `rclone version` and returns the detected version string, e.g.
+/// `"1.67.0"`.
+///
+/// # Errors
+///
+/// Returns [`RemoteError::Failed`] if rclone cannot run or its output cannot
+/// be parsed, and [`RemoteError::Canceled`] if `cancel` fires.
+pub fn detect_rclone_version(cancel: &Cancel) -> Result<String, RemoteError> {
+    RcloneRemote::new("", ".").detect_version(cancel)
+}
+
 impl From<RemoteError> for Error {
     fn from(err: RemoteError) -> Self {
         match err {
@@ -469,6 +480,15 @@ impl RcloneRemote {
         }
     }
 
+    fn detect_version(&self, cancel: &Cancel) -> Result<String, RemoteError> {
+        let output = self.run(&["version".to_owned()], cancel)?;
+        parse_rclone_version(&output).ok_or_else(|| RemoteError::Failed {
+            command: "rclone version".to_owned(),
+            exit_code: None,
+            message: format!("could not parse rclone version from output: {output:?}"),
+        })
+    }
+
     /// Fails fast, before any rclone invocation, if a configured rclone
     /// config file does not exist — a wrong or missing path then produces a
     /// clear error instead of an errno surfacing deep inside a copy.
@@ -649,6 +669,16 @@ impl RcloneRemote {
         })?;
         Ok(file)
     }
+}
+
+fn parse_rclone_version(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("rclone v")
+            .and_then(|rest| rest.split_whitespace().next())
+            .filter(|version| !version.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 impl Remote for RcloneRemote {
@@ -1438,5 +1468,17 @@ exit 0
         remote.set_unreachable();
         let err = remote.has_file(a_hash(), &Cancel::new()).unwrap_err();
         assert!(matches!(err, RemoteError::Failed { .. }));
+    }
+
+    #[test]
+    fn parses_the_first_rclone_version_line() {
+        let output = "rclone v1.67.0\n- os/version: darwin\n";
+
+        assert_eq!(parse_rclone_version(output), Some("1.67.0".to_owned()));
+    }
+
+    #[test]
+    fn rejects_rclone_version_output_without_a_version_line() {
+        assert_eq!(parse_rclone_version("not rclone\n"), None);
     }
 }

@@ -958,6 +958,13 @@ the first command.
       batched `Remote::file_sizes` call; `--with-integrity` still avoids a
       per-object rclone loop by batch-downloading the remote object set to a
       scratch tree with `copy_from_remote` and hashing those bytes locally.
+- [x] `doctor` — `crates/git-sfs-core/src/exec/doctor.rs`, with CLI wiring in
+      `crates/git-sfs/src/dispatch.rs`. The command reports repository,
+      config, version, cache, rclone, and per-remote diagnostics; v2 adds the
+      cheap environmental checks called out in §7b (`core.symlinks` and cache
+      permission-bit preservation). Rclone work is intentionally minimal:
+      detect the rclone version once, then run backend/path checks only for
+      the requested remote set.
 
 ### Phase 5 — reporting
 
