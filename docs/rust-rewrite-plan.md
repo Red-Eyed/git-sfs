@@ -321,6 +321,14 @@ must log the file's contents and discard its path, or the most important part of
 a push becomes invisible while noise makes the stream nondeterministic. `copyto`
 likewise targets a randomly named temp file, which is canonicalized away.
 
+The batching rule applies to every rclone command path, not just `push`.
+Command code should minimize rclone subprocesses by calling batched remote port
+methods (`copy_to_remote`, `copy_from_remote`, `file_sizes`) and formatting
+object lists into rclone inputs such as `--files-from`. Loops over objects are
+for local classification, planning, or integrity checks; if a caller needs one
+rclone invocation per object, the operation must genuinely lack a batch form
+and say why.
+
 | Half | Differential artifact |
 |---|---|
 | Local | Filesystem tree — symlink targets, cache paths, modes, content hashes |
@@ -621,7 +629,11 @@ fakes.
       `crates/git-sfs-core/src/ports/remote.rs`. `RcloneRemote` (real) +
       `FakeRemote` (in-memory) is the pair that earns the trait per §3.3;
       `rclone` stays the only backend (AGENTS.md), so this is not
-      multi-backend polymorphism. Three fixes over v1, all policy, not
+      multi-backend polymorphism. Its methods are deliberately batch-shaped:
+      `copy_to_remote`/`copy_from_remote` write rclone file lists, and
+      `file_sizes` answers many metadata questions from one listing. Command
+      implementations should compose those methods rather than loop over
+      per-object rclone subprocesses. Three fixes over v1, all policy, not
       mechanism (the five rclone subcommands and the `<url>/files/sha256/...`
       layout are unchanged):
       1. Error classification by rclone's own documented exit codes

@@ -11,11 +11,12 @@
 
 use camino::Utf8PathBuf;
 use git_sfs_core::domain::{
-    Config, RemoteConfig, check_git_sfs_version, compose_remote_url, tmp_dir,
+    Config, DEFAULT_REMOTE_NAME, RemoteConfig, check_git_sfs_version, compose_remote_url, tmp_dir,
 };
 use git_sfs_core::exec::add::{self, AddOutcome};
 use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
 use git_sfs_core::exec::mv::{self, MovedLink};
+use git_sfs_core::exec::push::{self, PushOutcome};
 use git_sfs_core::exec::remotes::{self, RemoteEntry};
 use git_sfs_core::exec::status;
 use git_sfs_core::ports::{
@@ -24,7 +25,9 @@ use git_sfs_core::ports::{
 use git_sfs_core::{Cancel, Error, Result};
 use serde::Serialize;
 
-use crate::cli::{AddArgs, Cli, Command, ImportArgs, MvArgs, RemotesArgs, SelfCommand, StatusArgs};
+use crate::cli::{
+    AddArgs, Cli, Command, ImportArgs, MvArgs, PushArgs, RemotesArgs, SelfCommand, StatusArgs,
+};
 
 /// Runs the requested command.
 ///
@@ -41,7 +44,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Verify(_) => unimplemented("verify"),
         Command::Status(args) => run_status(cli, args, cancel),
         Command::Remotes(args) => run_remotes(cli, args),
-        Command::Push(_) => unimplemented("push"),
+        Command::Push(args) => run_push(cli, args, cancel),
         Command::Pull(_) => unimplemented("pull"),
         Command::Doctor(_) => unimplemented("doctor"),
         Command::SelfCmd(SelfCommand::Update) => unimplemented("self update"),
@@ -234,6 +237,93 @@ fn run_remotes(cli: &Cli, args: &RemotesArgs) -> Result<()> {
         print_remotes_text(&entries);
         Ok(())
     }
+}
+
+/// `git-sfs push` — upload referenced cache objects to the configured remote.
+fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let config = load_config(&config_path)?;
+    check_git_sfs_floor(&config)?;
+    let cache_root = resolve_cache_root(
+        &repo,
+        cli.global.cache.as_deref(),
+        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
+    )?;
+
+    let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
+    let remote = build_rclone_remote(&config, remote_name, config_path.parent(), &cache_root)?;
+    remote.require_exists(cancel)?;
+
+    let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
+    let _lock = Lock::acquire(&locks_dir, LockName::Push, cancel)?;
+    let store = FsStore::new(cache_root.clone());
+    let repo_port = FsRepo::new(repo);
+    let cache_files_dir = cache_root.join("files");
+
+    match push::push(
+        &repo_port,
+        &store,
+        &remote,
+        &cache_files_dir,
+        &args.path,
+        args.skip_missing,
+        cancel,
+    ) {
+        Ok(outcome) => {
+            print_push_outcome(&outcome, cli.global.quiet);
+            Ok(())
+        }
+        Err(failure) => {
+            print_push_outcome(&failure.outcome, cli.global.quiet);
+            Err((*failure.error).into())
+        }
+    }
+}
+
+fn print_push_outcome(outcome: &PushOutcome, quiet: bool) {
+    print_skipped_push_objects(outcome);
+    if !quiet && !outcome.uploaded.is_empty() {
+        println!(
+            "push: uploaded {} file(s) to remote",
+            outcome.uploaded.len()
+        );
+    }
+}
+
+fn print_skipped_push_objects(outcome: &PushOutcome) {
+    if outcome.skipped.is_empty() {
+        return;
+    }
+
+    const MAX_WARNINGS: usize = 10;
+    let mut skipped_paths = outcome
+        .skipped
+        .iter()
+        .flat_map(|object| {
+            object
+                .paths
+                .iter()
+                .map(move |path| (path.to_owned(), object.hash))
+        })
+        .collect::<Vec<_>>();
+    skipped_paths.sort_by(|left, right| left.0.cmp(&right.0));
+
+    eprintln!(
+        "git-sfs: warning: push skipped {} missing cached object(s)",
+        outcome.skipped.len()
+    );
+    for (path, hash) in skipped_paths.iter().take(MAX_WARNINGS) {
+        eprintln!("  {path} ({})", hash.short());
+    }
+    if skipped_paths.len() > MAX_WARNINGS {
+        eprintln!(
+            "  ... {} more path(s) skipped",
+            skipped_paths.len() - MAX_WARNINGS
+        );
+    }
+    eprintln!("  run: git-sfs pull <path> to restore them");
 }
 
 fn print_remotes_text(entries: &[RemoteEntry]) {

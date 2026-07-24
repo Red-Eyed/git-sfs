@@ -42,6 +42,11 @@ Project direction:
 - Treat it as a layer on top of Git, the filesystem, and well-known file movers.
 - Prefer plain files, symlinks, directories, and subprocess calls over custom state.
 - `rclone` is the only supported remote tool.
+- Minimize rclone invocations for every remote command. Transfers must batch
+  object paths into rclone (for example with `--files-from`) instead of spawning
+  one rclone process per object; metadata checks should use one listing call
+  where possible. Per-object rclone calls are only acceptable when the operation
+  genuinely cannot be expressed as a batch, and the reason should be explicit.
 - Do not add manifests, databases, background services, custom protocols, or hidden metadata.
 - If a feature needs a new internal format, first ask whether Git or the filesystem already provides the needed state.
 - Progress output: Go hand-rolls it (`internal/progress`); Rust uses `indicatif` (rust-rewrite-plan §4.1) — this is the generous-dependency decision at work, not a tree that forgot the other's rule.
