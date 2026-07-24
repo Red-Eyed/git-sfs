@@ -13,10 +13,12 @@ use camino::Utf8PathBuf;
 use git_sfs_core::exec::add::{self, AddOutcome};
 use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
 use git_sfs_core::exec::mv::{self, MovedLink};
+use git_sfs_core::exec::remotes::{self, RemoteEntry};
 use git_sfs_core::ports::{FsRepo, FsStore, Lock, LockName, discover_repo, resolve_cache_root};
 use git_sfs_core::{Cancel, Error, Result};
+use serde::Serialize;
 
-use crate::cli::{AddArgs, Cli, Command, ImportArgs, MvArgs, SelfCommand};
+use crate::cli::{AddArgs, Cli, Command, ImportArgs, MvArgs, RemotesArgs, SelfCommand};
 
 /// Runs the requested command.
 ///
@@ -32,7 +34,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Import(args) => run_import(cli, args, cancel),
         Command::Verify(_) => unimplemented("verify"),
         Command::Status(_) => unimplemented("status"),
-        Command::Remotes(_) => unimplemented("remotes"),
+        Command::Remotes(args) => run_remotes(cli, args),
         Command::Push(_) => unimplemented("push"),
         Command::Pull(_) => unimplemented("pull"),
         Command::Doctor(_) => unimplemented("doctor"),
@@ -170,6 +172,59 @@ fn print_import_outcome(outcome: &ImportOutcome) {
     }
 }
 
+/// `git-sfs remotes` — list configured remotes from the committed
+/// `.git-sfs/config.toml` only. This never contacts rclone; `doctor` owns
+/// connectivity checks.
+fn run_remotes(cli: &Cli, args: &RemotesArgs) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let entries = remotes::remotes(&config_path)?;
+
+    if args.json {
+        print_remotes_json(&entries)
+    } else {
+        print_remotes_text(&entries);
+        Ok(())
+    }
+}
+
+fn print_remotes_text(entries: &[RemoteEntry]) {
+    println!("remotes: {}", entries.len());
+    for entry in entries {
+        println!("{}", format_remote_line(entry));
+    }
+}
+
+fn format_remote_line(entry: &RemoteEntry) -> String {
+    let mut line = format!("{}: backend={}", entry.name, entry.backend);
+    if let Some(path) = &entry.path {
+        line.push_str(" path=");
+        line.push_str(path);
+    }
+    if let Some(config) = &entry.config {
+        line.push_str(" config=");
+        line.push_str(config);
+    }
+    if entry.default {
+        line.push_str(" (default)");
+    }
+    line
+}
+
+#[derive(Serialize)]
+struct RemotesJson<'a> {
+    remotes: &'a [RemoteEntry],
+}
+
+fn print_remotes_json(entries: &[RemoteEntry]) -> Result<()> {
+    let payload = RemotesJson { remotes: entries };
+    serde_json::to_writer_pretty(std::io::stdout(), &payload)
+        .map_err(|err| Error::Unavailable(format!("could not write remotes JSON: {err}")))?;
+    println!();
+    Ok(())
+}
+
 /// The current directory as a validated UTF-8 path — every command that
 /// resolves a relative argument needs it, either against the repo root
 /// (`add`, `mv`) or, for `import`'s external `src`, against the directory
@@ -180,6 +235,14 @@ fn current_dir_utf8() -> Result<Utf8PathBuf> {
     })?;
     Utf8PathBuf::from_path_buf(cwd)
         .map_err(|_| Error::Unavailable("current directory is not valid UTF-8".to_owned()))
+}
+
+fn resolved_config_path(repo: &camino::Utf8Path, config: &camino::Utf8Path) -> Utf8PathBuf {
+    if config.is_absolute() {
+        config.to_owned()
+    } else {
+        repo.join(config)
+    }
 }
 
 /// Writes the top-level help, as both a bare `git-sfs` and `git-sfs help` do.

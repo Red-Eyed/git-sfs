@@ -342,6 +342,8 @@ dependencies = [
  "clap",
  "ctrlc",
  "git-sfs-core",
+ "serde",
+ "serde_json",
  "ureq",
 ]
 
