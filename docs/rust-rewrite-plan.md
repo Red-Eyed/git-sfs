@@ -732,6 +732,11 @@ Dependency order: `init`/`setup` → `add`/`import`/`mv` → `status`/`remotes` 
 `push`/`pull` → `verify`/`doctor`. Differential harness runs continuously from
 the first command.
 
+`self update` is intentionally not part of this command phase. Unlike the normal
+repository commands, it cannot be validated before Rust release artifacts and
+checksum metadata exist; updating without something released to update to is a
+fake test.
+
 - [x] `init`/`setup` — `crates/git-sfs-core/src/exec/init.rs` and
       `crates/git-sfs-core/src/exec/setup.rs`, with CLI wiring in
       `crates/git-sfs/src/dispatch.rs`. `init` owns new project metadata and
@@ -978,11 +983,20 @@ the first command.
 
 ### Phase 6 — release
 
-zigbuild, musl targets, `ureq`+rustls, archive naming per spec §11. **The risk
-phase** — no test coverage, and mistakes here are user-visible and hard to
-reverse.
+Build and CI packaging come here, near the end, because they are the surface
+users actually install. This phase produces the release artifacts that
+`self update` can later consume: zigbuild, musl targets, `ureq`+rustls, archive
+naming per spec §11, checksum generation, and release workflow wiring. **The
+risk phase** — mistakes here are user-visible and hard to reverse.
 
-### Phase 7 — cutover
+### Phase 7 — self update
+
+Implement and test `git-sfs self update` only after Phase 6 can produce a real
+Rust release artifact and checksum metadata. The command should exercise the
+same download-verify-replace path a user will hit, against either an actual
+release or a local release fixture shaped exactly like one.
+
+### Phase 8 — cutover
 
 **Acceptance gate — literal, not vibes.** contract-spec §15 states that clauses
 without assertions are aspirational. The gate is therefore: **every contract-spec
@@ -1224,7 +1238,7 @@ identical cache layout, identical remote layout, identical lock protocol. v2 was
 already forbidden from writing anything v1 cannot read. Stating it as an
 invariant makes it *testable* rather than incidental:
 
-- **Downgrade test, in Phase 0 scaffolding and Phase 7 gating:** run a full
+- **Downgrade test, in Phase 0 scaffolding and Phase 8 gating:** run a full
   workflow under v2, install v1 over it, run the same workflow again. Cache,
   symlinks, config, and remote must all still work.
 - v1 binaries and their `SHA256SUMS` remain published permanently. A downgrade
@@ -1347,7 +1361,7 @@ being run:
 | `verify` over a large tree | Walk plus stat cost |
 | `verify --rehash` | Full re-read; the worst case |
 
-Phase 7 gates on no regression past a stated threshold. Today the entire
+Phase 8 gates on no regression past a stated threshold. Today the entire
 benchmark surface is `BenchmarkStore8MiB`.
 
 ### Captured — and what the numbers may be used for
