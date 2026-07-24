@@ -13,6 +13,7 @@ pub mod add;
 pub mod import;
 pub mod mv;
 pub mod remotes;
+pub mod status;
 
 use camino::{Utf8Path, Utf8PathBuf};
 

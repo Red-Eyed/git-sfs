@@ -10,15 +10,21 @@
 //! a failure instead of as a run that did nothing.
 
 use camino::Utf8PathBuf;
+use git_sfs_core::domain::{
+    Config, RemoteConfig, check_git_sfs_version, compose_remote_url, tmp_dir,
+};
 use git_sfs_core::exec::add::{self, AddOutcome};
 use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
 use git_sfs_core::exec::mv::{self, MovedLink};
 use git_sfs_core::exec::remotes::{self, RemoteEntry};
-use git_sfs_core::ports::{FsRepo, FsStore, Lock, LockName, discover_repo, resolve_cache_root};
+use git_sfs_core::exec::status;
+use git_sfs_core::ports::{
+    FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, discover_repo, resolve_cache_root,
+};
 use git_sfs_core::{Cancel, Error, Result};
 use serde::Serialize;
 
-use crate::cli::{AddArgs, Cli, Command, ImportArgs, MvArgs, RemotesArgs, SelfCommand};
+use crate::cli::{AddArgs, Cli, Command, ImportArgs, MvArgs, RemotesArgs, SelfCommand, StatusArgs};
 
 /// Runs the requested command.
 ///
@@ -33,7 +39,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Mv(args) => run_mv(args, cancel),
         Command::Import(args) => run_import(cli, args, cancel),
         Command::Verify(_) => unimplemented("verify"),
-        Command::Status(_) => unimplemented("status"),
+        Command::Status(args) => run_status(cli, args, cancel),
         Command::Remotes(args) => run_remotes(cli, args),
         Command::Push(_) => unimplemented("push"),
         Command::Pull(_) => unimplemented("pull"),
@@ -172,6 +178,47 @@ fn print_import_outcome(outcome: &ImportOutcome) {
     }
 }
 
+/// `git-sfs status` — inspect tracked symlinks and cache/remote metadata
+/// without moving bytes.
+fn run_status(cli: &Cli, args: &StatusArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let config = load_config(&config_path)?;
+    check_git_sfs_floor(&config)?;
+    let cache_root = resolve_cache_root(
+        &repo,
+        cli.global.cache.as_deref(),
+        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
+    )?;
+
+    let store = FsStore::new(cache_root.clone());
+    let repo_port = FsRepo::new(repo);
+    let remote = match args.remote.as_deref() {
+        Some(name) => Some(build_rclone_remote(
+            &config,
+            name,
+            config_path.parent(),
+            &cache_root,
+        )?),
+        None => None,
+    };
+    let report = status::status(
+        &repo_port,
+        &store,
+        remote.as_ref().map(|r| r as &dyn Remote),
+        &args.path,
+        cancel,
+    )?;
+
+    if args.json {
+        crate::status_output::print_json(&report)
+    } else {
+        crate::status_output::print_text(&report, cli.global.verbose);
+        Ok(())
+    }
+}
+
 /// `git-sfs remotes` — list configured remotes from the committed
 /// `.git-sfs/config.toml` only. This never contacts rclone; `doctor` owns
 /// connectivity checks.
@@ -223,6 +270,77 @@ fn print_remotes_json(entries: &[RemoteEntry]) -> Result<()> {
         .map_err(|err| Error::Unavailable(format!("could not write remotes JSON: {err}")))?;
     println!();
     Ok(())
+}
+
+fn load_config(config_path: &camino::Utf8Path) -> Result<Config> {
+    let text = std::fs::read_to_string(config_path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            Error::Config(format!(
+                "config file not found: {config_path} (run git-sfs init)"
+            ))
+        } else {
+            Error::Unavailable(format!("open config {config_path}: {err}"))
+        }
+    })?;
+    git_sfs_core::domain::config::parse_and_validate(&text)
+        .map_err(|err| Error::Config(err.to_string()))
+}
+
+fn check_git_sfs_floor(config: &Config) -> Result<()> {
+    let Some(minimum) = &config.settings.min_git_sfs_version else {
+        return Ok(());
+    };
+    check_git_sfs_version(crate::version::VERSION, minimum)
+        .map_err(|err| Error::Config(format!("git-sfs version check failed: {err}")))
+}
+
+fn build_rclone_remote(
+    config: &Config,
+    name: &str,
+    config_dir: Option<&camino::Utf8Path>,
+    cache_root: &camino::Utf8Path,
+) -> Result<RcloneRemote> {
+    let remote_config = config
+        .remotes
+        .get(name)
+        .ok_or_else(|| Error::Config(format!("remote {name:?} is not configured")))?;
+    let mut remote = rclone_remote_from_config(remote_config, config_dir, cache_root);
+    if let Some(retry_max) = config.settings.retry_max
+        && let Ok(retry_max) = u32::try_from(retry_max)
+        && retry_max > 0
+    {
+        remote = remote.with_retry_max(retry_max);
+    }
+    Ok(remote)
+}
+
+fn rclone_remote_from_config(
+    remote_config: &RemoteConfig,
+    config_dir: Option<&camino::Utf8Path>,
+    cache_root: &camino::Utf8Path,
+) -> RcloneRemote {
+    let url = compose_remote_url(
+        &remote_config.backend,
+        remote_config.path.as_deref().unwrap_or(""),
+    );
+    let mut remote = RcloneRemote::new(url, tmp_dir(cache_root));
+    if let Some(config_path) = &remote_config.rclone_config_path {
+        remote = remote.with_config(resolve_rclone_config_path(config_dir, config_path));
+    }
+    remote
+}
+
+fn resolve_rclone_config_path(
+    config_dir: Option<&camino::Utf8Path>,
+    config_path: &camino::Utf8Path,
+) -> Utf8PathBuf {
+    if config_path.is_absolute() {
+        config_path.to_owned()
+    } else {
+        config_dir
+            .unwrap_or_else(|| camino::Utf8Path::new("."))
+            .join(config_path)
+    }
 }
 
 /// The current directory as a validated UTF-8 path — every command that

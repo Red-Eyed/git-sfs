@@ -126,6 +126,18 @@ pub trait Store {
     /// content does not match `hash` — corrupt, not absent.
     fn verified(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError>;
 
+    /// `hash`'s local cache size, or `None` if it is absent.
+    ///
+    /// This is a metadata query for `status`, not an integrity check: it
+    /// deliberately does not hash bytes or repair writable legacy objects.
+    /// Commands that need trustworthy bytes use [`Store::verified`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Io`] if the size could not be determined for a
+    /// reason other than absence.
+    fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError>;
+
     /// Copies `source`'s bytes into the store under `hash`, verifying the
     /// written bytes before the object becomes visible at its final path.
     /// A no-op if `hash` is already present and verified.
@@ -228,6 +240,15 @@ impl Store for FsStore {
             source,
         })?;
         Ok(Some(CacheEntry { hash }))
+    }
+
+    fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
+        let path = self.object_path(hash);
+        match std::fs::metadata(&path) {
+            Ok(metadata) => Ok(Some(metadata.len())),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(StoreError::Io { path, source }),
+        }
     }
 
     fn store(
@@ -580,6 +601,11 @@ impl Store for FakeStore {
     fn verified(&self, hash: Sha256, _cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError> {
         let objects = self.objects.lock().expect("fake store mutex poisoned");
         Ok(objects.get(&hash).map(|_| CacheEntry { hash }))
+    }
+
+    fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
+        let objects = self.objects.lock().expect("fake store mutex poisoned");
+        Ok(objects.get(&hash).map(|bytes| bytes.len() as u64))
     }
 
     fn store(

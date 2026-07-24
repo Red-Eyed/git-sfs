@@ -422,6 +422,9 @@ mod tests {
             ) -> Result<Option<crate::ports::CacheEntry>, StoreError> {
                 self.0.verified(hash, cancel)
             }
+            fn object_size(&self, hash: Sha256) -> Result<Option<u64>, StoreError> {
+                self.0.object_size(hash)
+            }
             fn store(
                 &self,
                 _source: &Utf8Path,

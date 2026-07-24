@@ -9,6 +9,7 @@
 mod cli;
 mod dispatch;
 mod exit;
+mod status_output;
 mod version;
 
 use std::process::ExitCode;
