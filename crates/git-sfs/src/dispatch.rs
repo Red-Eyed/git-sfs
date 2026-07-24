@@ -17,26 +17,26 @@ use git_sfs_core::domain::{
     Config, DEFAULT_REMOTE_NAME, RemoteConfig, check_git_sfs_version, check_rclone_version,
     compose_remote_url, tmp_dir,
 };
-use git_sfs_core::exec::add::{self, AddOutcome};
-use git_sfs_core::exec::doctor::{self, DoctorReport, DoctorStatus};
-use git_sfs_core::exec::import::{self, ImportOptions, ImportOutcome};
-use git_sfs_core::exec::mv::{self, MovedLink};
-use git_sfs_core::exec::pull::{self, PullOutcome};
-use git_sfs_core::exec::push::{self, PushOutcome};
-use git_sfs_core::exec::remotes::{self, RemoteEntry};
+use git_sfs_core::exec::add;
+use git_sfs_core::exec::doctor::{self, DoctorReport};
+use git_sfs_core::exec::import::{self, ImportOptions};
+use git_sfs_core::exec::mv;
+use git_sfs_core::exec::pull;
+use git_sfs_core::exec::push;
+use git_sfs_core::exec::remotes;
 use git_sfs_core::exec::status;
-use git_sfs_core::exec::verify::{self, VerifyError, VerifyIssue, VerifyReport};
+use git_sfs_core::exec::verify::{self, VerifyError};
 use git_sfs_core::ports::{
     FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, detect_rclone_version, discover_repo,
     resolve_cache_root,
 };
 use git_sfs_core::{Cancel, Error, Result};
-use serde::Serialize;
 
 use crate::cli::{
     AddArgs, Cli, Command, DoctorArgs, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs,
     SelfCommand, StatusArgs, VerifyArgs,
 };
+use crate::reporting::{self, RenderMode};
 
 /// Runs the requested command.
 ///
@@ -48,7 +48,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Init(_) => unimplemented("init"),
         Command::Setup => unimplemented("setup"),
         Command::Add(args) => run_add(cli, args, cancel),
-        Command::Mv(args) => run_mv(args, cancel),
+        Command::Mv(args) => run_mv(cli, args, cancel),
         Command::Import(args) => run_import(cli, args, cancel),
         Command::Verify(args) => run_verify(cli, args, cancel),
         Command::Status(args) => run_status(cli, args, cancel),
@@ -81,28 +81,17 @@ fn run_add(cli: &Cli, args: &AddArgs, cancel: &Cancel) -> Result<()> {
     let store = FsStore::new(cache_root);
     let repo_port = FsRepo::new(repo.clone());
     let _lock = Lock::acquire(&locks_dir, LockName::Add, cancel)?;
+    let mode = RenderMode::from_quiet(cli.global.quiet);
 
     match add::add(&repo_port, &store, &repo, &args.paths, cancel) {
         Ok(outcome) => {
-            print_add_outcome(&outcome);
+            reporting::add_outcome(&outcome, mode);
             Ok(())
         }
         Err(failure) => {
-            print_add_outcome(&failure.outcome);
+            reporting::add_outcome(&failure.outcome, mode);
             Err((*failure.error).into())
         }
-    }
-}
-
-/// Prints each converted file and any skipped-for-encoding candidates, in
-/// that order — matching v1's per-file `added <path> -> <hash>` line
-/// (`add.go:94`), though the exact wording is unfrozen (contract-spec 12).
-fn print_add_outcome(outcome: &AddOutcome) {
-    for file in &outcome.added {
-        println!("added {} -> {}", file.path, file.hash);
-    }
-    for description in &outcome.unrepresentable {
-        eprintln!("git-sfs: warning: skipped {description} (not a valid UTF-8 path)");
     }
 }
 
@@ -110,29 +99,21 @@ fn print_add_outcome(outcome: &AddOutcome) {
 /// them) and rewrites the relative targets for their new location. Never
 /// touches the cache, so unlike `add` this needs no cache resolution and no
 /// lock (contract-spec §3.3; v1's `mv.go` takes no lock either).
-fn run_mv(args: &MvArgs, cancel: &Cancel) -> Result<()> {
+fn run_mv(cli: &Cli, args: &MvArgs, cancel: &Cancel) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
     let repo_port = FsRepo::new(repo.clone());
+    let mode = RenderMode::from_quiet(cli.global.quiet);
 
     match mv::mv(&repo_port, &repo, &args.source, &args.dest, cancel) {
         Ok(moved) => {
-            print_moved(&moved);
+            reporting::moved_links(&moved, mode);
             Ok(())
         }
         Err(failure) => {
-            print_moved(&failure.moved);
+            reporting::moved_links(&failure.moved, mode);
             Err((*failure.error).into())
         }
-    }
-}
-
-/// Prints each relocated link, matching v1's per-link `moved <old> -> <new>`
-/// line (`mv.go:61,114`), though the exact wording is unfrozen (contract-spec
-/// 12).
-fn print_moved(moved: &[MovedLink]) {
-    for link in moved {
-        println!("moved {} -> {}", link.old_path, link.new_path);
     }
 }
 
@@ -152,6 +133,7 @@ fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let store = FsStore::new(cache_root);
     let _lock = Lock::acquire(&locks_dir, LockName::Import, cancel)?;
+    let mode = RenderMode::from_quiet(cli.global.quiet);
 
     let options = ImportOptions {
         move_source: args.move_source,
@@ -167,26 +149,13 @@ fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
         cancel,
     ) {
         Ok(outcome) => {
-            print_import_outcome(&outcome);
+            reporting::import_outcome(&outcome, mode);
             Ok(())
         }
         Err(failure) => {
-            print_import_outcome(&failure.outcome);
+            reporting::import_outcome(&failure.outcome, mode);
             Err((*failure.error).into())
         }
-    }
-}
-
-/// Prints each imported file and any skipped-for-encoding candidates,
-/// matching v1's per-file `imported <src> -> <dst> -> <hash>` line
-/// (`import.go:101`), though the exact wording is unfrozen (contract-spec
-/// 12).
-fn print_import_outcome(outcome: &ImportOutcome) {
-    for file in &outcome.imported {
-        println!("imported {} -> {} -> {}", file.src, file.dst, file.hash);
-    }
-    for description in &outcome.unrepresentable {
-        eprintln!("git-sfs: warning: skipped {description} (not a valid UTF-8 path)");
     }
 }
 
@@ -241,9 +210,9 @@ fn run_remotes(cli: &Cli, args: &RemotesArgs) -> Result<()> {
     let entries = remotes::remotes(&config_path)?;
 
     if args.json {
-        print_remotes_json(&entries)
+        reporting::remotes_json(&entries)
     } else {
-        print_remotes_text(&entries);
+        reporting::remotes_text(&entries);
         Ok(())
     }
 }
@@ -270,6 +239,7 @@ fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
     let store = FsStore::new(cache_root.clone());
     let repo_port = FsRepo::new(repo);
     let cache_files_dir = cache_root.join("files");
+    let mode = RenderMode::from_quiet(cli.global.quiet);
 
     match push::push(
         &repo_port,
@@ -281,58 +251,14 @@ fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
         cancel,
     ) {
         Ok(outcome) => {
-            print_push_outcome(&outcome, cli.global.quiet);
+            reporting::push_outcome(&outcome, mode);
             Ok(())
         }
         Err(failure) => {
-            print_push_outcome(&failure.outcome, cli.global.quiet);
+            reporting::push_outcome(&failure.outcome, mode);
             Err((*failure.error).into())
         }
     }
-}
-
-fn print_push_outcome(outcome: &PushOutcome, quiet: bool) {
-    print_skipped_push_objects(outcome);
-    if !quiet && !outcome.uploaded.is_empty() {
-        println!(
-            "push: uploaded {} file(s) to remote",
-            outcome.uploaded.len()
-        );
-    }
-}
-
-fn print_skipped_push_objects(outcome: &PushOutcome) {
-    if outcome.skipped.is_empty() {
-        return;
-    }
-
-    const MAX_WARNINGS: usize = 10;
-    let mut skipped_paths = outcome
-        .skipped
-        .iter()
-        .flat_map(|object| {
-            object
-                .paths
-                .iter()
-                .map(move |path| (path.to_owned(), object.hash))
-        })
-        .collect::<Vec<_>>();
-    skipped_paths.sort_by(|left, right| left.0.cmp(&right.0));
-
-    eprintln!(
-        "git-sfs: warning: push skipped {} missing cached object(s)",
-        outcome.skipped.len()
-    );
-    for (path, hash) in skipped_paths.iter().take(MAX_WARNINGS) {
-        eprintln!("  {path} ({})", hash.short());
-    }
-    if skipped_paths.len() > MAX_WARNINGS {
-        eprintln!(
-            "  ... {} more path(s) skipped",
-            skipped_paths.len() - MAX_WARNINGS
-        );
-    }
-    eprintln!("  run: git-sfs pull <path> to restore them");
 }
 
 /// `git-sfs pull` — download referenced remote objects missing from the cache.
@@ -366,17 +292,8 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
         &args.path,
         cancel,
     )?;
-    print_pull_outcome(&outcome, cli.global.quiet);
+    reporting::pull_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
     Ok(())
-}
-
-fn print_pull_outcome(outcome: &PullOutcome, quiet: bool) {
-    if !quiet && !outcome.downloaded.is_empty() {
-        println!(
-            "pull: downloaded {} file(s) from remote",
-            outcome.downloaded.len()
-        );
-    }
 }
 
 /// `git-sfs doctor` — diagnose repository, cache, rclone, and remote setup.
@@ -649,7 +566,7 @@ fn remote_url_for_doctor(remote_config: &RemoteConfig) -> String {
 }
 
 fn finish_doctor(report: DoctorReport) -> Result<()> {
-    print_doctor_report(&report);
+    reporting::doctor_report(&report);
     if report.has_failures() {
         return Err(Error::Unavailable(format!(
             "doctor: {} check(s) failed",
@@ -657,45 +574,6 @@ fn finish_doctor(report: DoctorReport) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-fn print_doctor_report(report: &DoctorReport) {
-    for section in report.sections() {
-        if let Some(title) = section.title() {
-            println!("\n  [{title}]");
-        }
-        for check in section.checks() {
-            print_doctor_check(check.label(), check.status());
-        }
-    }
-    println!();
-    match (report.failed(), report.skipped()) {
-        (0, 0) => println!("doctor: all {} checks passed", report.passed()),
-        (0, skipped) => println!("doctor: {} passed, {skipped} skipped", report.passed()),
-        (failed, skipped) => {
-            println!(
-                "doctor: {} passed, {failed} failed, {skipped} skipped",
-                report.passed()
-            );
-        }
-    }
-}
-
-fn print_doctor_check(label: &str, status: &DoctorStatus) {
-    match status {
-        DoctorStatus::Pass { detail } if detail.is_empty() => {
-            println!("  {label:<24} ok", label = format!("{label}:"));
-        }
-        DoctorStatus::Pass { detail } => {
-            println!("  {label:<24} ok  ({detail})", label = format!("{label}:"));
-        }
-        DoctorStatus::Fail { detail } => {
-            println!("  {label:<24} FAIL: {detail}", label = format!("{label}:"));
-        }
-        DoctorStatus::Skip => {
-            println!("  {label:<24} skip", label = format!("{label}:"));
-        }
-    }
 }
 
 enum CoreSymlinks {
@@ -802,90 +680,17 @@ fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
         cancel,
     ) {
         Ok(report) => {
-            print_verify_report(&report);
-            if !cli.global.quiet {
-                println!("verify ok");
-            }
+            reporting::verify_success(&report, RenderMode::from_quiet(cli.global.quiet));
             Ok(())
         }
         Err(error @ VerifyError::Failed { .. }) => {
             if let Some(report) = error.report() {
-                print_verify_report(report);
+                reporting::verify_report(report);
             }
             Err(error.into())
         }
         Err(error) => Err(error.into()),
     }
-}
-
-fn print_verify_report(report: &VerifyReport) {
-    let counts = report.counts();
-    println!("tracked symlinks: {}", report.tracked_symlinks);
-    for kind in verify::ISSUE_KINDS {
-        println!("{}: {}", kind.plural(), counts.get(kind).unwrap_or(&0));
-    }
-    if report.orphan_count > 0 {
-        println!("# {} orphaned cache object(s)", report.orphan_count);
-    }
-    if report.issues.is_empty() {
-        return;
-    }
-    println!("details:");
-    for issue in &report.issues {
-        println!("{}", format_verify_issue(issue));
-    }
-}
-
-fn format_verify_issue(issue: &VerifyIssue) -> String {
-    let mut parts = vec![issue.kind.singular().to_owned()];
-    if let Some(path) = &issue.path {
-        parts.push(path.to_string());
-    }
-    if let Some(hash) = issue.hash {
-        parts.push(hash.to_string());
-    }
-    let mut line = parts.join(": ");
-    if let Some(detail) = &issue.detail {
-        line.push_str(": ");
-        line.push_str(detail);
-    }
-    line
-}
-
-fn print_remotes_text(entries: &[RemoteEntry]) {
-    println!("remotes: {}", entries.len());
-    for entry in entries {
-        println!("{}", format_remote_line(entry));
-    }
-}
-
-fn format_remote_line(entry: &RemoteEntry) -> String {
-    let mut line = format!("{}: backend={}", entry.name, entry.backend);
-    if let Some(path) = &entry.path {
-        line.push_str(" path=");
-        line.push_str(path);
-    }
-    if let Some(config) = &entry.config {
-        line.push_str(" config=");
-        line.push_str(config);
-    }
-    if entry.default {
-        line.push_str(" (default)");
-    }
-    line
-}
-
-#[derive(Serialize)]
-struct RemotesJson<'a> {
-    remotes: &'a [RemoteEntry],
-}
-
-fn print_remotes_json(entries: &[RemoteEntry]) -> Result<()> {
-    let payload = RemotesJson { remotes: entries };
-    serde_json::to_writer_pretty(std::io::stdout(), &payload)
-        .map_err(|err| Error::Unavailable(format!("could not write remotes JSON: {err}")))?;
-    println!();
-    Ok(())
 }
 
 fn load_config(config_path: &camino::Utf8Path) -> Result<Config> {

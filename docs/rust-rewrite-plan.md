@@ -968,7 +968,23 @@ the first command.
 
 ### Phase 5 — reporting
 
-Event stream → `indicatif`, JSON, quiet. Entirely in the binary crate.
+- [x] Binary-side reporting foundation — `crates/git-sfs/src/reporting.rs`.
+      Command rendering moved out of `dispatch.rs`, so orchestration now
+      receives core outcomes and hands them to one terminal-output layer
+      instead of growing ad hoc `println!` helpers beside every command arm.
+      `--quiet` is also centralized as a binary-only `RenderMode`: it
+      suppresses success chatter for byte-moving/renaming commands
+      (`add`/`mv`/`import`/`push`/`pull`) and `verify ok`, while warnings,
+      failure reports, and primary command output (`status`, `remotes`,
+      `doctor`) stay visible. Core remains untouched and still takes no
+      writer, quiet flag, or progress callback.
+- [ ] Live progress/event stream → `indicatif`. Still entirely in the binary
+      crate. The next slice should wrap the existing `Store`/`Remote`/`Repo`
+      ports at the construction site, or add a real core event stream only if
+      progress needs facts that wrappers cannot observe without changing
+      command semantics.
+- [ ] JSON output review. `status --json` and `remotes --json` exist; any
+      further JSON shape work belongs here, not in command execution.
 
 ### Phase 6 — release
 
