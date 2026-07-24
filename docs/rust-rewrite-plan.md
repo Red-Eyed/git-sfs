@@ -732,37 +732,25 @@ Dependency order: `init`/`setup` → `add`/`import`/`mv` → `status`/`remotes` 
 `push`/`pull` → `verify`/`doctor`. Differential harness runs continuously from
 the first command.
 
-- [ ] `init`/`setup` — **deliberately skipped, not merely deferred.** In
-      review, their own purpose turned out to be unclear: v1's `init`
-      (first-time repo setup) and `setup` (clone bootstrap: bind a
-      machine-local cache, then re-materialize whichever tracked symlinks
-      happen to already be in it) overlap heavily in mechanism but serve
-      different moments, and it was not obvious the v2 shape should be the
-      same two commands with the same split. Also open: how a chosen cache
-      location should persist locally (a `.git-sfs/cache` symlink, matching
-      v1, vs. some other local-config form), and where the cache should
-      default to when neither `--cache` nor `GIT_SFS_CACHE` is given —
-      contract-spec §13.4b requires moving it outside the working tree
-      (today's `.git-sfs/.cache` default is deleted by `git clean -x`), and
-      a Git LFS comparison surfaced a cheap option not previously
-      considered: storing the cache *inside* `.git/` exploits `clean`'s
-      existing working-tree-only boundary for free, at the cost of not
-      protecting against `rm -rf` on the whole clone the way a fully
-      external `~/.cache/git-sfs/...` location would. None of this is
-      resolved. `add` was built next specifically because Phase 3's ports
-      work with any cache root regardless of how it was chosen, so nothing
-      after this item was actually blocked on it.
+- [x] `init`/`setup` — `crates/git-sfs-core/src/exec/init.rs` and
+      `crates/git-sfs-core/src/exec/setup.rs`, with CLI wiring in
+      `crates/git-sfs/src/dispatch.rs`. `init` owns new project metadata and
+      cache binding; `setup` owns clone-local cache binding only. Committed
+      project state stays in `.git-sfs/`; local machine state defaults under
+      `<git-dir>/sfs/`, with the cache at `<git-dir>/sfs/cache`. The
+      repo-facing `.git-sfs/cache` symlink remains the single cache handle for
+      normal commands. Existing repos are preserved: an existing cache symlink
+      wins, and an old `.git-sfs/.cache` directory is recognized when the
+      symlink is missing. `setup` does not probe cache objects or rewrite
+      tracked file symlinks; those already point through `.git-sfs/cache`.
 - [x] `add` — `crates/git-sfs-core/src/exec/add.rs`, ported from `add.go`.
       Needed three pieces of new port-layer plumbing along the way, added in
       the same commit:
-      - `ports::local_state` (`discover_repo`/`resolve_cache_root`) — but
-        deliberately only the *read* half of contract-spec §7 (walk up for
-        `.git`; the frozen `--cache` flag → `GIT_SFS_CACHE` env →
-        `.git-sfs/cache` symlink precedence). Cache *creation*/*binding*
-        stays out, which is what let this land without resolving the
-        init/setup question above — if nothing is bound yet, resolution
-        just fails with the same config error v1 gives. Side-effecting
-        inputs (cwd, the env var) are read once by the caller and passed in
+      - `ports::local_state` (`discover_repo`/`resolve_cache_root`) — read
+        normal command cache state from `.git-sfs/cache`; `init`/`setup` use
+        the same module's binding helpers to create that symlink. If nothing
+        is bound yet, resolution fails with a config error. Side-effecting
+        inputs (cwd, requested cache path) are read once by the caller and passed in
         rather than read internally, both for injection/testability and
         because mutating a real env var from a test is unsafe under `cargo
         test`'s parallel execution.

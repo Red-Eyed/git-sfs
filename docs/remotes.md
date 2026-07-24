@@ -25,17 +25,17 @@ Primary form — named remote with a path:
 [remotes.default]
 backend = "remote-name"
 path = "datasets/project"
-config = "rclone.conf"
 ```
 
 `backend` is the rclone remote name as defined in rclone's config. `path` is the
 directory within that backend where git-sfs stores files. `path` is optional;
 omitting it uses the root of the rclone backend.
 
-`config` is optional. When set to a relative path it is resolved from `.git-sfs`,
-so `config = "rclone.conf"` uses `.git-sfs/rclone.conf`. Commit that file only
-when it contains shareable, non-secret rclone settings. Keep tokens, passwords,
-and machine-local credentials in each user's normal rclone config instead.
+`config` is optional. Omit it to use rclone's default config
+(`~/.config/rclone/rclone.conf`). When set, keep it outside `.git-sfs` unless
+the file is intentionally shareable and contains no secrets. Keep tokens,
+passwords, and machine-local credentials in each user's normal rclone config
+instead.
 
 ## Multiple remotes
 

@@ -1,8 +1,7 @@
 //! Pure path arithmetic for the cache root — contract-spec §4.
 //!
-//! `<cache_root>` itself is resolved elsewhere (contract-spec §7.2: `--cache`
-//! flag, then `GIT_SFS_CACHE`, then the `.git-sfs/cache` symlink target — all
-//! of it I/O, all of it a ports concern). Everything here is a deterministic
+//! `<cache_root>` itself is resolved elsewhere through the `.git-sfs/cache`
+//! symlink — all of it I/O, all of it a ports concern. Everything here is a deterministic
 //! function of a root path and, where relevant, a hash — no filesystem access,
 //! so it is exactly as pure as [`super::symlink::cache_link_file`], which
 //! computes the analogous path from the *repository* side of the same

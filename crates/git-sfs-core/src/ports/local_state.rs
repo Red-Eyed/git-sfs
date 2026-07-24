@@ -1,28 +1,14 @@
 //! Reading already-existing local, per-machine state — contract-spec §7.
-//! Both functions here are frozen mechanism with no open design question:
-//! repository discovery walks upward for a `.git` entry (§7.1), and cache
-//! resolution follows a strict three-source precedence (§7.2).
+//! Repository discovery and machine-local state.
 //!
-//! Deliberately **not** cache *creation* or *binding* — that remains an open
-//! design question (the `init`/`setup` commands' own purpose is still being
-//! reconsidered). Keeping this module to read-only resolution lets any
-//! command that only needs an already-bound cache (`add`, and eventually
-//! `push`/`pull`/`status`/`verify`) proceed without waiting on that decision;
-//! if nothing is bound yet, resolution simply fails with
-//! [`LocalStateError::MissingCacheConfig`], matching v1's exact behavior.
-//!
-//! Side-effecting inputs (the current directory, the `GIT_SFS_CACHE`
-//! environment variable) are read once by the caller and passed in, rather
-//! than read internally here — the same "inject the side-effecting
-//! dependency" reasoning [`super::remote`]'s `RcloneRemote` tests lean on:
-//! reading `std::env::var` from inside a library function is invisible
-//! global state a caller cannot substitute for a test, and mutating a real
-//! process-global env var from a test is unsafe under `cargo test`'s
-//! parallel execution.
+//! Normal commands intentionally resolve one cache source: the repo-facing
+//! `.git-sfs/cache` symlink. `init` and `setup` are the only commands that
+//! choose or bind that symlink.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use thiserror::Error;
 
+use crate::domain::hash::ALGORITHM;
 use crate::domain::symlink::clean_utf8;
 use crate::error::Error;
 
@@ -38,7 +24,7 @@ pub enum LocalStateError {
     },
     /// None of the three precedence sources resolved a cache
     /// (contract-spec §7.2).
-    #[error("no cache configured: pass --cache, set GIT_SFS_CACHE, or run git-sfs setup")]
+    #[error("no cache configured: run git-sfs setup")]
     MissingCacheConfig,
     /// The `.git-sfs/cache` symlink exists but its target is not valid
     /// UTF-8 — unrepresentable as the `Utf8PathBuf` this crate's paths are
@@ -47,6 +33,24 @@ pub enum LocalStateError {
     NonUtf8CacheTarget {
         /// The symlink whose target could not be read as UTF-8.
         link: Utf8PathBuf,
+    },
+    /// A `.git` file exists, but it is not the `gitdir: ...` pointer shape
+    /// Git writes for worktrees and submodules.
+    #[error("{path}: unsupported .git file format")]
+    InvalidGitDirFile {
+        /// The `.git` file that could not be interpreted.
+        path: Utf8PathBuf,
+    },
+    /// The repo already has a cache binding and the caller tried to point it
+    /// somewhere else.
+    #[error("cache link {link} points to {existing}, not {target}")]
+    CacheRebind {
+        /// The existing `.git-sfs/cache` link.
+        link: Utf8PathBuf,
+        /// Its existing canonical target.
+        existing: Utf8PathBuf,
+        /// The requested canonical target.
+        target: Utf8PathBuf,
     },
     /// An I/O operation failed while resolving local state.
     #[error("{path}: {source}")]
@@ -64,7 +68,9 @@ impl From<LocalStateError> for Error {
         match err {
             LocalStateError::NoRepository { .. }
             | LocalStateError::MissingCacheConfig
-            | LocalStateError::NonUtf8CacheTarget { .. } => Error::Config(err.to_string()),
+            | LocalStateError::NonUtf8CacheTarget { .. }
+            | LocalStateError::InvalidGitDirFile { .. }
+            | LocalStateError::CacheRebind { .. } => Error::Config(err.to_string()),
             LocalStateError::Io { .. } => Error::Unavailable(err.to_string()),
         }
     }
@@ -107,40 +113,16 @@ pub fn discover_repo(start: &Utf8Path) -> Result<Utf8PathBuf, LocalStateError> {
     }
 }
 
-/// Resolves the cache root by contract-spec §7.2's strict precedence:
-///
-/// 1. `cache_flag`, if given (made absolute if it is not already)
-/// 2. `git_sfs_cache_env`, if given and non-empty (made absolute)
-/// 3. The `.git-sfs/cache` symlink's target, if the symlink exists — already
-///    absolute per contract-spec §2's write-side contract, but a relative
-///    target is still resolved against the link's own directory for
-///    robustness, matching v1
-///
-/// A missing symlink at step 3 is not itself an error — it falls through to
-/// [`LocalStateError::MissingCacheConfig`], matching v1's "empty value"
-/// case (§7.2).
+/// Resolves the already-bound cache root from `.git-sfs/cache`.
 ///
 /// # Errors
 ///
-/// Returns [`LocalStateError::MissingCacheConfig`] if none of the three
-/// sources resolve, [`LocalStateError::NonUtf8CacheTarget`] if the symlink's
-/// target cannot be read as UTF-8, and [`LocalStateError::Io`] if the
-/// symlink exists but could not be read for any other reason.
-pub fn resolve_cache_root(
-    repo: &Utf8Path,
-    cache_flag: Option<&Utf8Path>,
-    git_sfs_cache_env: Option<&str>,
-) -> Result<Utf8PathBuf, LocalStateError> {
-    if let Some(flag) = cache_flag {
-        return Ok(absolute(flag));
-    }
-    if let Some(env_value) = git_sfs_cache_env
-        && !env_value.is_empty()
-    {
-        return Ok(absolute(Utf8Path::new(env_value)));
-    }
-
-    let link = repo.join(".git-sfs").join("cache");
+/// Returns [`LocalStateError::MissingCacheConfig`] if the symlink is absent,
+/// [`LocalStateError::NonUtf8CacheTarget`] if the symlink's target cannot be
+/// read as UTF-8, and [`LocalStateError::Io`] if the symlink exists but could
+/// not be read for any other reason.
+pub fn resolve_cache_root(repo: &Utf8Path) -> Result<Utf8PathBuf, LocalStateError> {
+    let link = cache_link(repo);
     let target = match std::fs::read_link(&link) {
         Ok(target) => target,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
@@ -157,6 +139,146 @@ pub fn resolve_cache_root(
         let link_dir = link.parent().unwrap_or(repo);
         Ok(clean_utf8(&link_dir.join(target)))
     }
+}
+
+/// Creates `.git-sfs/`, the committed project-metadata directory.
+///
+/// # Errors
+///
+/// Returns [`LocalStateError::Io`] if the directory cannot be created.
+pub fn init_git_sfs_dir(repo: &Utf8Path) -> Result<(), LocalStateError> {
+    let dir = repo.join(".git-sfs");
+    std::fs::create_dir_all(&dir).map_err(|source| LocalStateError::Io { path: dir, source })
+}
+
+/// Creates the standard cache subdirectories under `cache_root`.
+///
+/// # Errors
+///
+/// Returns [`LocalStateError::Io`] if any directory cannot be created.
+pub fn init_cache_dirs(cache_root: &Utf8Path) -> Result<(), LocalStateError> {
+    for path in [
+        cache_root.join("files").join(ALGORITHM),
+        cache_root.join("tmp"),
+        cache_root.join("locks"),
+    ] {
+        std::fs::create_dir_all(&path).map_err(|source| LocalStateError::Io { path, source })?;
+    }
+    Ok(())
+}
+
+/// Chooses the cache root `init`/`setup` should bind.
+///
+/// Explicit `--cache` wins. Without it, existing repos stay where they are:
+/// an existing `.git-sfs/cache` binding is preserved, then the old v1 default
+/// `.git-sfs/.cache` is recognized, and only then does v2 choose its new
+/// private-Git-dir default.
+///
+/// # Errors
+///
+/// Returns [`LocalStateError`] if the existing cache link or Git private
+/// directory cannot be read.
+pub fn choose_cache_root(
+    repo: &Utf8Path,
+    requested: Option<&Utf8Path>,
+) -> Result<Utf8PathBuf, LocalStateError> {
+    if let Some(requested) = requested {
+        return Ok(absolute(requested));
+    }
+    match resolve_cache_root(repo) {
+        Ok(cache_root) => return Ok(cache_root),
+        Err(LocalStateError::MissingCacheConfig) => {}
+        Err(err) => return Err(err),
+    }
+    let old = old_default_cache_root(repo);
+    if old.exists() {
+        return Ok(old);
+    }
+    default_cache_root(repo)
+}
+
+/// Binds `.git-sfs/cache` to `cache_root`, rejecting rebinding.
+///
+/// # Errors
+///
+/// Returns [`LocalStateError::CacheRebind`] if the link already points
+/// elsewhere, or [`LocalStateError::Io`] if the symlink cannot be read or
+/// created.
+pub fn bind_cache(repo: &Utf8Path, cache_root: &Utf8Path) -> Result<(), LocalStateError> {
+    init_git_sfs_dir(repo)?;
+    let link = cache_link(repo);
+    let target = canonical_path(cache_root);
+
+    match std::fs::read_link(&link) {
+        Ok(existing) => {
+            let existing = Utf8PathBuf::from_path_buf(existing)
+                .map_err(|_| LocalStateError::NonUtf8CacheTarget { link: link.clone() })?;
+            let existing = if existing.is_absolute() {
+                existing
+            } else {
+                let link_dir = link.parent().unwrap_or(repo);
+                clean_utf8(&link_dir.join(existing))
+            };
+            let existing = canonical_path(&existing);
+            if existing == target {
+                return Ok(());
+            }
+            return Err(LocalStateError::CacheRebind {
+                link,
+                existing,
+                target,
+            });
+        }
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => return Err(LocalStateError::Io { path: link, source }),
+    }
+
+    std::os::unix::fs::symlink(target.as_std_path(), link.as_std_path())
+        .map_err(|source| LocalStateError::Io { path: link, source })
+}
+
+fn cache_link(repo: &Utf8Path) -> Utf8PathBuf {
+    repo.join(".git-sfs").join("cache")
+}
+
+fn old_default_cache_root(repo: &Utf8Path) -> Utf8PathBuf {
+    repo.join(".git-sfs").join(".cache")
+}
+
+fn default_cache_root(repo: &Utf8Path) -> Result<Utf8PathBuf, LocalStateError> {
+    Ok(private_git_dir(repo)?.join("sfs").join("cache"))
+}
+
+fn private_git_dir(repo: &Utf8Path) -> Result<Utf8PathBuf, LocalStateError> {
+    let git_entry = repo.join(".git");
+    let metadata = std::fs::symlink_metadata(&git_entry).map_err(|source| LocalStateError::Io {
+        path: git_entry.clone(),
+        source,
+    })?;
+    if metadata.is_dir() {
+        return Ok(git_entry);
+    }
+
+    let text = std::fs::read_to_string(&git_entry).map_err(|source| LocalStateError::Io {
+        path: git_entry.clone(),
+        source,
+    })?;
+    let Some(rest) = text.strip_prefix("gitdir:") else {
+        return Err(LocalStateError::InvalidGitDirFile { path: git_entry });
+    };
+    let path = Utf8Path::new(rest.trim());
+    if path.is_absolute() {
+        Ok(path.to_owned())
+    } else {
+        Ok(clean_utf8(&repo.join(path)))
+    }
+}
+
+fn canonical_path(path: &Utf8Path) -> Utf8PathBuf {
+    std::fs::canonicalize(path)
+        .ok()
+        .and_then(|path| Utf8PathBuf::from_path_buf(path).ok())
+        .unwrap_or_else(|| clean_utf8(path))
 }
 
 /// `filepath.Abs`-equivalent: joins a relative path against the current
@@ -221,21 +343,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_cache_root_prefers_the_flag_over_everything_else() {
-        let repo = Utf8PathBuf::from("/repo");
-        let flag = Utf8PathBuf::from("/from-flag");
-        let resolved = resolve_cache_root(&repo, Some(&flag), Some("/from-env")).unwrap();
-        assert_eq!(resolved, flag);
-    }
-
-    #[test]
-    fn resolve_cache_root_falls_back_to_the_env_var() {
-        let repo = Utf8PathBuf::from("/repo");
-        let resolved = resolve_cache_root(&repo, None, Some("/from-env")).unwrap();
-        assert_eq!(resolved, Utf8PathBuf::from("/from-env"));
-    }
-
-    #[test]
     fn resolve_cache_root_falls_back_to_the_bound_symlink() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
@@ -248,7 +355,7 @@ mod tests {
         )
         .unwrap();
 
-        let resolved = resolve_cache_root(&repo, None, None).unwrap();
+        let resolved = resolve_cache_root(&repo).unwrap();
         assert_eq!(resolved, cache_target);
     }
 
@@ -260,7 +367,7 @@ mod tests {
         std::os::unix::fs::symlink("../cache-dir", repo.join(".git-sfs/cache").as_std_path())
             .unwrap();
 
-        let resolved = resolve_cache_root(&repo, None, None).unwrap();
+        let resolved = resolve_cache_root(&repo).unwrap();
         assert_eq!(resolved, repo.join("cache-dir"));
     }
 
@@ -271,22 +378,130 @@ mod tests {
         std::fs::create_dir_all(repo.join(".git-sfs")).unwrap();
 
         assert!(matches!(
-            resolve_cache_root(&repo, None, None),
+            resolve_cache_root(&repo),
             Err(LocalStateError::MissingCacheConfig)
         ));
     }
 
     #[test]
-    fn resolve_cache_root_ignores_an_empty_env_var() {
-        // Matches v1: an unset *or empty* GIT_SFS_CACHE both fall through,
-        // rather than resolving to "".
+    fn choose_cache_root_uses_a_requested_cache() {
+        let repo = Utf8PathBuf::from("/repo");
+        let requested = Utf8PathBuf::from("/cache");
+
+        assert_eq!(
+            choose_cache_root(&repo, Some(&requested)).unwrap(),
+            requested
+        );
+    }
+
+    #[test]
+    fn choose_cache_root_preserves_an_existing_binding() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
         std::fs::create_dir_all(repo.join(".git-sfs")).unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache_target = Utf8PathBuf::from_path_buf(cache_dir.path().to_owned()).unwrap();
+        std::os::unix::fs::symlink(
+            cache_target.as_std_path(),
+            repo.join(".git-sfs/cache").as_std_path(),
+        )
+        .unwrap();
+
+        assert_eq!(choose_cache_root(&repo, None).unwrap(), cache_target);
+    }
+
+    #[test]
+    fn choose_cache_root_recognizes_the_old_v1_default_when_no_link_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        std::fs::create_dir_all(repo.join(".git-sfs/.cache")).unwrap();
+
+        assert_eq!(
+            choose_cache_root(&repo, None).unwrap(),
+            repo.join(".git-sfs/.cache")
+        );
+    }
+
+    #[test]
+    fn choose_cache_root_defaults_under_the_private_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+
+        assert_eq!(
+            choose_cache_root(&repo, None).unwrap(),
+            repo.join(".git/sfs/cache")
+        );
+    }
+
+    #[test]
+    fn choose_cache_root_uses_the_gitdir_pointer_for_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().join("worktree")).unwrap();
+        let git_dir = Utf8PathBuf::from_path_buf(dir.path().join("real-git")).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(repo.join(".git"), "gitdir: ../real-git\n").unwrap();
+
+        assert_eq!(
+            choose_cache_root(&repo, None).unwrap(),
+            git_dir.join("sfs/cache")
+        );
+    }
+
+    #[test]
+    fn init_cache_dirs_creates_the_cache_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_root = Utf8PathBuf::from_path_buf(dir.path().join("cache")).unwrap();
+
+        init_cache_dirs(&cache_root).unwrap();
+
+        assert!(cache_root.join("files/sha256").is_dir());
+        assert!(cache_root.join("tmp").is_dir());
+        assert!(cache_root.join("locks").is_dir());
+    }
+
+    #[test]
+    fn bind_cache_writes_a_canonical_absolute_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().join("repo")).unwrap();
+        let cache = Utf8PathBuf::from_path_buf(dir.path().join("cache")).unwrap();
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        init_cache_dirs(&cache).unwrap();
+
+        bind_cache(&repo, &cache).unwrap();
+
+        let target = std::fs::read_link(repo.join(".git-sfs/cache")).unwrap();
+        assert_eq!(target, std::fs::canonicalize(cache).unwrap());
+    }
+
+    #[test]
+    fn bind_cache_rebinding_to_the_same_target_is_a_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().join("repo")).unwrap();
+        let cache = Utf8PathBuf::from_path_buf(dir.path().join("cache")).unwrap();
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        init_cache_dirs(&cache).unwrap();
+
+        bind_cache(&repo, &cache).unwrap();
+        bind_cache(&repo, &cache).unwrap();
+    }
+
+    #[test]
+    fn bind_cache_refuses_to_repoint_an_existing_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().join("repo")).unwrap();
+        let first = Utf8PathBuf::from_path_buf(dir.path().join("first")).unwrap();
+        let second = Utf8PathBuf::from_path_buf(dir.path().join("second")).unwrap();
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        init_cache_dirs(&first).unwrap();
+        init_cache_dirs(&second).unwrap();
+
+        bind_cache(&repo, &first).unwrap();
 
         assert!(matches!(
-            resolve_cache_root(&repo, None, Some("")),
-            Err(LocalStateError::MissingCacheConfig)
+            bind_cache(&repo, &second),
+            Err(LocalStateError::CacheRebind { .. })
         ));
     }
 }

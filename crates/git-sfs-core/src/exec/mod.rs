@@ -12,10 +12,12 @@
 pub mod add;
 pub mod doctor;
 pub mod import;
+pub mod init;
 pub mod mv;
 pub mod pull;
 pub mod push;
 pub mod remotes;
+pub mod setup;
 pub mod status;
 pub mod verify;
 

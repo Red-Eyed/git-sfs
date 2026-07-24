@@ -63,6 +63,35 @@ pub struct Settings {
     pub min_git_sfs_version: Option<String>,
 }
 
+/// The default `.git-sfs/config.toml` template written by `git-sfs init`.
+///
+/// contract-spec §6.4: the template must parse under this implementation's
+/// own validator and, under §6.5, identically under both parsers.
+pub const DEFAULT_TEMPLATE: &str = r#"# git-sfs project config. Commit this file to Git.
+# Do not put local cache paths, secrets, tokens, or machine-specific paths here.
+
+version = 1
+
+# The default remote is used by git-sfs push and git-sfs pull when no remote is named.
+# "backend" must match a remote name defined in your rclone config.
+[remotes.default]
+backend = "YOUR_RCLONE_REMOTE"   # replace with a remote name from your rclone config
+path = "your/remote/path"        # replace with the path within that remote
+
+[settings]
+# Only sha256 is supported in v1.
+algorithm = "sha256"
+# Optional: cap parallel work for push, pull, verify, add, and import.
+# 0 means auto.
+n_jobs = 0
+# Optional: retries for each rclone call on transient failures. Default 3.
+# retry_max = 3
+# Optional: fail fast if the installed rclone is older than this version.
+# min_rclone_version = "1.67.0"
+# Optional: fail fast if git-sfs itself is older than this version.
+# min_git_sfs_version = "1.6.0"
+"#;
+
 /// Why a config failed to parse or validate.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ConfigError {
@@ -412,39 +441,6 @@ fn find_divergence(legacy: &LegacyConfig, raw: &RawConfig) -> Option<ConfigError
 mod tests {
     use super::*;
 
-    /// contract-spec §6.4: the template `init` writes must parse under the
-    /// implementation's own validator and, under §6.5, identically under
-    /// both parsers — a template that tripped its own ambiguity check would
-    /// make `init` produce a repo no command could open. Copied verbatim from
-    /// `internal/config/config.go`'s `defaultTOML`.
-    const DEFAULT_TEMPLATE: &str = r#"# git-sfs project config. Commit this file to Git.
-# Do not put local cache paths, secrets, tokens, or machine-specific paths here.
-
-version = 1
-
-# The default remote is used by git-sfs push and git-sfs pull when no remote is named.
-# "backend" must match a remote name defined in your rclone config.
-[remotes.default]
-backend = "YOUR_RCLONE_REMOTE"   # replace with a remote name from your rclone config
-path = "your/remote/path"        # replace with the path within that remote
-# Relative paths are resolved from .git-sfs.
-# Do not commit rclone configs that contain secrets or tokens.
-config = "rclone.conf"
-
-[settings]
-# Only sha256 is supported in v1.
-algorithm = "sha256"
-# Optional: cap parallel work for push, pull, verify, add, and import.
-# 0 means auto.
-n_jobs = 0
-# Optional: retries for each rclone call on transient failures. Default 3.
-# retry_max = 3
-# Optional: fail fast if the installed rclone is older than this version.
-# min_rclone_version = "1.67.0"
-# Optional: fail fast if git-sfs itself is older than this version.
-# min_git_sfs_version = "1.6.0"
-"#;
-
     #[test]
     fn the_default_template_parses_and_does_not_trip_its_own_ambiguity_check() {
         let config = parse_and_validate(DEFAULT_TEMPLATE).unwrap();
@@ -453,10 +449,7 @@ n_jobs = 0
         let default = config.remotes.get("default").unwrap();
         assert_eq!(default.backend, "YOUR_RCLONE_REMOTE");
         assert_eq!(default.path.as_deref(), Some("your/remote/path"));
-        assert_eq!(
-            default.rclone_config_path.as_deref(),
-            Some(Utf8PathBuf::from("rclone.conf").as_path())
-        );
+        assert_eq!(default.rclone_config_path, None);
     }
 
     #[test]

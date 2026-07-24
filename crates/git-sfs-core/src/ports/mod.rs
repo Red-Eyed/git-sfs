@@ -24,7 +24,10 @@ pub mod store;
 
 pub use cancellable_io::{Cancellable, is_canceled};
 pub use hashing::{hash_file, hash_reader};
-pub use local_state::{LocalStateError, discover_repo, resolve_cache_root};
+pub use local_state::{
+    LocalStateError, bind_cache, choose_cache_root, discover_repo, init_cache_dirs,
+    init_git_sfs_dir, resolve_cache_root,
+};
 pub use lock::{Lock, LockError, LockName};
 pub use remote::{FakeRemote, RcloneRemote, Remote, RemoteError, detect_rclone_version};
 pub use repo::{FakeRepo, FoundEntry, FsRepo, InvalidReason, Repo, RepoError, ScannedEntry};

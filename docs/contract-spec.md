@@ -610,18 +610,22 @@ Walk upward from the current working directory until a `.git` entry exists.
 worktree) — both are accepted, via `os.Stat` rather than a directory check
 (`localstate.go:16-32`). Stop at filesystem root and error.
 
-### 7.2 Cache resolution precedence
+### 7.2 Cache resolution
 
-Strictly ordered (`localstate.go:35-50`):
+Normal commands resolve exactly one cache source:
 
-1. `--cache` flag, if non-empty
-2. `GIT_SFS_CACHE` environment variable, if non-empty
-3. `.git-sfs/cache` symlink target
-4. Otherwise `ErrMissingCacheConfig` → **exit 1**
+1. `.git-sfs/cache` symlink target
+2. Otherwise `ErrMissingCacheConfig` → **exit 1**
 
-All resolved paths are made absolute. A missing `.git-sfs/cache` symlink is
-**not** an error at resolution time — it yields an empty value that falls
-through to case 4 (`config.go:273-286`).
+`init` and `setup` are the only commands that choose or bind that symlink.
+`--cache PATH` is a binding option for those commands only, not a hidden
+per-command override. `GIT_SFS_CACHE` is not part of the v2 cache model.
+
+For new local state, the default cache root is `<git-dir>/sfs/cache`
+(`.git/sfs/cache` in a normal repository). Existing repos keep their existing
+`.git-sfs/cache` binding. If that symlink is missing but the old v1 default
+`.git-sfs/.cache` exists, `setup` binds to the old cache rather than migrating
+or probing cache contents.
 
 ---
 
@@ -1016,13 +1020,12 @@ regression.
 - `verify` prints `run git-sfs gc to reclaim` (`verify.go:343`) — **`git-sfs gc`
   does not exist.** Human output is free under contract-only parity, so v2 simply
   must not advertise a command it does not ship.
-- **A freshly initialized repo cannot run `verify` at all.** Two defaults
-  combine: `verify`'s `--check-remote` is a negatable bool defaulting to **true**
-  (`cli.go:76`), and the `init` template writes `config = "rclone.conf"`
-  (`config.go:125-151`), which resolves to `.git-sfs/rclone.conf` — a file `init`
-  never creates. So `init` → `setup` → `add` → `verify` exits **2** with
-  `rclone config file not found`, on the default path a new user takes, having
-  configured nothing. `verify --no-check-remote` succeeds.
+- **A freshly initialized repo cannot run `verify` at all in v1.** Two defaults
+  combine: `verify`'s remote check defaults on, and the v1 `init` template
+  writes `config = "rclone.conf"`, which resolves to `.git-sfs/rclone.conf` — a
+  file `init` never creates. v2's template omits that local config path; rclone
+  uses its normal user-level config unless the project explicitly declares
+  otherwise.
 
   A false red in the CI-facing command, and §9.2 already establishes where that
   leads: a check that cries wolf gets `|| true`'d, and then it protects nothing.
@@ -1098,15 +1101,13 @@ retain the `git clean -x` exposure, which is silent and unrecoverable for
 unpushed objects. The population still at risk is precisely the one that will not
 self-select into the fix. Revisit if the flag day slips.
 
-- **Default cache inside the repo.** `.git-sfs/.cache` (`init.go:43`) is
-  gitignored (`init.go:141`), and `git clean -x` removes ignored files — so the
-  routine "clean tree" command **deletes every cached object**, losing anything
-  unpushed. `rm -rf` on a clone does the same. v2 should default the cache
-  outside the working tree, or refuse a cache root that `git clean -x` can reach.
-- **rclone config not gitignored.** The default `config = "rclone.conf"` resolves
-  inside `.git-sfs/`, which `ensureGitignore` does not cover, so `git add
-  .git-sfs` commits credentials. v2 must gitignore the configured path at `init`
-  and have `doctor` fail if it is tracked.
+- **Default cache inside the repo.** v1's `.git-sfs/.cache` default is
+  gitignored, and `git clean -x` removes ignored files. v2 defaults new local
+  cache state to `<git-dir>/sfs/cache`, outside the working tree, while
+  preserving existing `.git-sfs/cache` and old `.git-sfs/.cache` bindings.
+- **rclone config not gitignored.** v2's default template does not write a local
+  rclone config path into committed `.git-sfs/config.toml`; local config belongs
+  under `.git/sfs/` or rclone's own user-level config.
 - **Moves outside `git-sfs mv` dangle symlinks.** Targets are relative to the
   file's directory (`sfspath.go:20-22`), so `git mv` or shell `mv` across depths
   silently invalidates them, undetected until `verify`. Same for branch switches

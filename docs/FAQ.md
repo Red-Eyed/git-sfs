@@ -270,17 +270,15 @@ deletes live data.
 
 ### I ran `git clean -xfd`. What did I just do?
 
-By default the cache lives at `.git-sfs/.cache`, **inside the working tree**
-([init.go:45](../internal/core/init.go#L45)), and `init` adds it to `.gitignore`
-([init.go:141](../internal/core/init.go#L141)). `git clean -x` removes ignored files.
+In git-sfs v1, the default cache lived at `.git-sfs/.cache`, **inside the
+working tree**, and `git clean -x` removes ignored files.
 
-So the standard "give me a clean tree" command **deletes your entire cache**. For anything
-not yet pushed, that is total and unrecoverable. Same for `rm -rf` on a clone you thought
-was disposable.
+So the standard "give me a clean tree" command could delete your entire cache.
+For anything not yet pushed, that is total and unrecoverable.
 
-**Rule:** point the cache outside the repo at `init` time (`--cache /path/outside` or
-`GIT_SFS_CACHE`). The in-tree default is convenient and is the single worst default in the
-tool.
+In v2, new repos default local cache state to `.git/sfs/cache`, reached through
+`.git-sfs/cache`, so `git clean` does not touch it. Existing repos using the old
+layout are still recognized by `setup`.
 
 ### I used `git mv` instead of `git-sfs mv`. Why is the file broken?
 
@@ -441,17 +439,14 @@ landed.
 
 ### Will `git-sfs init` make me commit my rclone credentials?
 
-It sets you up to. The default config ships `config = "rclone.conf"`
-([config.go:137](../internal/config/config.go#L137)), resolved relative to `.git-sfs` — so
-the natural location is `.git-sfs/rclone.conf`, **inside a tracked directory**. `.gitignore`
-covers only `.git-sfs/cache` and `.git-sfs/.cache`
-([init.go:141](../internal/core/init.go#L141)).
+v1 made this easy to do by defaulting to `config = "rclone.conf"` inside the
+tracked `.git-sfs` directory.
 
-A single `git add .git-sfs` commits cloud credentials into shared history, where they must
-be treated as compromised and rotated.
+v2's default template omits `config`, so rclone uses each user's normal
+`~/.config/rclone/rclone.conf`. A single `git add .git-sfs` should commit
+project metadata, not cloud credentials.
 
-**Rule:** point `config` at a path outside the repo (`~/.config/rclone/rclone.conf`), or add
-`.git-sfs/rclone.conf` to `.gitignore` yourself, today.
+**Rule:** keep machine-local credentials outside `.git-sfs`.
 
 ### I typo'd the remote `path`. Does git-sfs catch it?
 

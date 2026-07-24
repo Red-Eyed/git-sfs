@@ -41,10 +41,6 @@ pub struct Cli {
 /// use both.
 #[derive(Debug, Args)]
 pub struct Global {
-    /// cache directory
-    #[arg(long, global = true, value_name = "PATH")]
-    pub cache: Option<Utf8PathBuf>,
-
     /// dataset config path
     #[arg(
         long,
@@ -84,7 +80,7 @@ pub enum Command {
     Init(InitArgs),
 
     /// bind local cache and restore symlinks (run after clone)
-    Setup,
+    Setup(SetupArgs),
 
     /// cache files and replace them with symlinks
     Add(AddArgs),
@@ -138,6 +134,18 @@ pub struct InitArgs {
     /// overwrite an existing config
     #[arg(long)]
     pub force: bool,
+
+    /// bind this cache directory
+    #[arg(long, value_name = "PATH")]
+    pub cache: Option<Utf8PathBuf>,
+}
+
+/// Arguments to `git-sfs setup`.
+#[derive(Debug, Args)]
+pub struct SetupArgs {
+    /// bind this cache directory
+    #[arg(long, value_name = "PATH")]
+    pub cache: Option<Utf8PathBuf>,
 }
 
 /// Arguments to `git-sfs add`.
@@ -385,6 +393,24 @@ mod tests {
         assert_eq!(args.paths, ["a.bin", "b.bin"]);
 
         assert!(Cli::try_parse_from(["git-sfs", "add"]).is_err());
+    }
+
+    #[test]
+    fn cache_binding_belongs_to_init_and_setup_only() {
+        let Some(Command::Init(args)) = parse(&["git-sfs", "init", "--cache", "/cache"]).command
+        else {
+            panic!("expected init");
+        };
+        assert_eq!(args.cache, Some(Utf8PathBuf::from("/cache")));
+
+        let Some(Command::Setup(args)) = parse(&["git-sfs", "setup", "--cache", "/cache"]).command
+        else {
+            panic!("expected setup");
+        };
+        assert_eq!(args.cache, Some(Utf8PathBuf::from("/cache")));
+
+        assert!(Cli::try_parse_from(["git-sfs", "--cache", "/cache", "add", "f"]).is_err());
+        assert!(Cli::try_parse_from(["git-sfs", "add", "--cache", "/cache", "f"]).is_err());
     }
 
     /// `move` is a Rust keyword, so the flag name has to be set by hand and a

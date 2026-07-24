@@ -12,7 +12,6 @@ version = 1
 [remotes.default]
 backend = "remote-name"
 path = "datasets/project"
-config = "rclone.conf"
 
 [settings]
 algorithm = "sha256"
@@ -45,10 +44,10 @@ Forbidden here:
 
 The optional `config` field points to an rclone config file. All remotes
 typically share the same file — rclone.conf can define multiple backends and
-each `[remotes.X]` section just names which backend to use. Relative paths are
-resolved from `.git-sfs`, so `config = "rclone.conf"` means `.git-sfs/rclone.conf`.
-Commit that file only when it contains shareable, non-secret rclone settings.
-Omit `config` to use rclone's default config (`~/.config/rclone/rclone.conf`).
+each `[remotes.X]` section just names which backend to use. Omit `config` to use
+rclone's default config (`~/.config/rclone/rclone.conf`). If `config` is set,
+keep it outside `.git-sfs` unless the file is intentionally shareable and
+contains no secrets.
 
 ## .git-sfs/cache
 
@@ -57,29 +56,32 @@ Omit `config` to use rclone's default config (`~/.config/rclone/rclone.conf`).
 By default, `git-sfs init` creates:
 
 ```text
-.git-sfs/cache -> .git-sfs/.cache
+.git-sfs/cache -> .git/sfs/cache
 ```
 
 To use an external cache, bind it during init or setup:
 
 ```sh
-git-sfs --cache /mnt/shared/git-sfs-cache init
-git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs init --cache /mnt/shared/git-sfs-cache
+git-sfs setup --cache /mnt/shared/git-sfs-cache
 ```
 
-Cache path priority:
+After `init` or `setup`, normal commands use only the repo-facing
+`.git-sfs/cache` symlink. `--cache` is a binding option for `init`/`setup`, not
+a per-command override, and `GIT_SFS_CACHE` is not part of the v2 model.
 
-```text
---cache
-GIT_SFS_CACHE
-.git-sfs/cache
-```
+Existing repos keep working: if `.git-sfs/cache` already exists, setup preserves
+it; if an old `.git-sfs/.cache` directory exists but the symlink is missing,
+setup binds the symlink to that old cache instead of migrating bytes.
 
 ## Ignored Local State
 
-Only local cache state under `.git-sfs/` is ignored by Git:
+Only compatibility/local cache handles under `.git-sfs/` are ignored by Git:
 
 ```gitignore
 .git-sfs/cache
 .git-sfs/.cache
 ```
+
+New local state lives under `.git/sfs/`, which is already outside the working
+tree and is not affected by `git clean`.

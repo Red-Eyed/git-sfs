@@ -5,7 +5,7 @@
 ```sh
 git init my-project
 cd my-project
-git-sfs --cache /mnt/shared/git-sfs-cache init
+git-sfs init
 ```
 
 Edit `.git-sfs/config.toml` and set the remote.
@@ -58,7 +58,7 @@ git-sfs import -L /mnt/incoming/dataset data/dataset
 ```sh
 git clone <repo>
 cd <repo>
-git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs setup
 git-sfs pull
 git-sfs verify
 ```
@@ -79,17 +79,10 @@ git-sfs pull data/train/
 
 Only files referenced by symlinks under that directory are downloaded.
 
-## Use A Temporary Cache
-
-```sh
-GIT_SFS_CACHE=/tmp/git-sfs-cache git-sfs setup
-GIT_SFS_CACHE=/tmp/git-sfs-cache git-sfs pull data/sample.bin
-```
-
 ## Use A Shared Machine Cache
 
 ```sh
-git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs setup --cache /mnt/shared/git-sfs-cache
 ```
 
 Multiple clones can use the same cache path if filesystem permissions allow it.
@@ -98,7 +91,7 @@ Multiple clones can use the same cache path if filesystem permissions allow it.
 
 ```sh
 rm -f .git-sfs/cache
-git-sfs --cache /new/cache/path setup
+git-sfs setup --cache /new/cache/path
 git-sfs pull
 ```
 
@@ -109,13 +102,14 @@ git-sfs setup
 git-sfs verify
 ```
 
-If cached files exist, `.git-sfs/cache` can be rebound without downloading.
+`setup` recreates `.git-sfs/cache` when the binding is missing. If the binding
+already exists, it is preserved.
 
 ## Recover After Deleting .git-sfs
 
 ```sh
 rm -rf .git-sfs/cache
-git-sfs --cache /mnt/shared/git-sfs-cache setup
+git-sfs setup --cache /mnt/shared/git-sfs-cache
 git-sfs verify
 ```
 
@@ -135,11 +129,11 @@ git-sfs setup
 git-sfs verify
 ```
 
-Use a CI cache path through `GIT_SFS_CACHE`:
+Bind the CI cache once, then run normal commands through `.git-sfs/cache`:
 
 ```sh
-GIT_SFS_CACHE="$PWD/.git-sfs-cache" git-sfs setup
-GIT_SFS_CACHE="$PWD/.git-sfs-cache" git-sfs verify
+git-sfs setup --cache "$PWD/.git-sfs-cache"
+git-sfs verify
 ```
 
 ## Publish A Dataset Update
@@ -177,7 +171,7 @@ Define the remote in rclone's config, then reference it by name in
 live entirely in rclone — git-sfs only needs the remote name and the path within
 it.
 
-Example rclone config (`.git-sfs/rclone.conf`):
+Example rclone config (`~/.config/rclone/rclone.conf`):
 
 ```ini
 [myremote]
@@ -192,11 +186,9 @@ Corresponding git-sfs config:
 [remotes.default]
 backend = "myremote"
 path = "datasets/project"
-config = "rclone.conf"
 ```
 
-Relative `config` paths are resolved from `.git-sfs`. Commit the rclone config
-only when it contains no secrets or tokens. Machine-local credentials stay in
+Omit `config` to use rclone's default config. Machine-local credentials stay in
 each user's own rclone config.
 
 ```sh

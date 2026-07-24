@@ -9,10 +9,12 @@ use serde::Serialize;
 use git_sfs_core::exec::add::AddOutcome;
 use git_sfs_core::exec::doctor::{DoctorReport, DoctorStatus};
 use git_sfs_core::exec::import::ImportOutcome;
+use git_sfs_core::exec::init::InitOutcome;
 use git_sfs_core::exec::mv::MovedLink;
 use git_sfs_core::exec::pull::PullOutcome;
 use git_sfs_core::exec::push::PushOutcome;
 use git_sfs_core::exec::remotes::RemoteEntry;
+use git_sfs_core::exec::setup::SetupOutcome;
 use git_sfs_core::exec::verify::{self, VerifyIssue, VerifyReport};
 use git_sfs_core::{Error, Result};
 
@@ -61,6 +63,22 @@ pub(crate) fn import_outcome(outcome: &ImportOutcome, mode: RenderMode) {
     }
     for line in unrepresentable_warnings(&outcome.unrepresentable) {
         eprintln!("{line}");
+    }
+}
+
+pub(crate) fn init_outcome(outcome: &InitOutcome, mode: RenderMode) {
+    if !mode.show_success() {
+        return;
+    }
+    println!("initialized git-sfs repository");
+    println!("config: {}", outcome.config_path);
+    println!("cache: {}", outcome.cache_root);
+}
+
+pub(crate) fn setup_outcome(outcome: &SetupOutcome, mode: RenderMode) {
+    if mode.show_success() {
+        println!("setup complete");
+        println!("cache: {}", outcome.cache_root);
     }
 }
 

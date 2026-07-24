@@ -20,10 +20,12 @@ use git_sfs_core::domain::{
 use git_sfs_core::exec::add;
 use git_sfs_core::exec::doctor::{self, DoctorReport};
 use git_sfs_core::exec::import::{self, ImportOptions};
+use git_sfs_core::exec::init as init_cmd;
 use git_sfs_core::exec::mv;
 use git_sfs_core::exec::pull;
 use git_sfs_core::exec::push;
 use git_sfs_core::exec::remotes;
+use git_sfs_core::exec::setup as setup_cmd;
 use git_sfs_core::exec::status;
 use git_sfs_core::exec::verify::{self, VerifyError};
 use git_sfs_core::ports::{
@@ -33,8 +35,8 @@ use git_sfs_core::ports::{
 use git_sfs_core::{Cancel, Error, Result};
 
 use crate::cli::{
-    AddArgs, Cli, Command, DoctorArgs, ImportArgs, MvArgs, PullArgs, PushArgs, RemotesArgs,
-    SelfCommand, StatusArgs, VerifyArgs,
+    AddArgs, Cli, Command, DoctorArgs, ImportArgs, InitArgs, MvArgs, PullArgs, PushArgs,
+    RemotesArgs, SelfCommand, SetupArgs, StatusArgs, VerifyArgs,
 };
 use crate::progress::ProgressRemote;
 use crate::reporting::{self, RenderMode};
@@ -46,8 +48,8 @@ use crate::reporting::{self, RenderMode};
 pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
     match command {
         Command::Help => print_help(),
-        Command::Init(_) => unimplemented("init"),
-        Command::Setup => unimplemented("setup"),
+        Command::Init(args) => run_init(cli, args),
+        Command::Setup(args) => run_setup(cli, args, cancel),
         Command::Add(args) => run_add(cli, args, cancel),
         Command::Mv(args) => run_mv(cli, args, cancel),
         Command::Import(args) => run_import(cli, args, cancel),
@@ -62,21 +64,38 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
     }
 }
 
+/// `git-sfs init` — create committed project metadata and bind local cache.
+fn run_init(cli: &Cli, args: &InitArgs) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let outcome = init_cmd::init(&repo, &config_path, args.cache.as_deref(), args.force)?;
+    reporting::init_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
+    Ok(())
+}
+
+/// `git-sfs setup` — bind clone-local cache state.
+fn run_setup(cli: &Cli, args: &SetupArgs, cancel: &Cancel) -> Result<()> {
+    let cwd = current_dir_utf8()?;
+    let repo = discover_repo(&cwd)?;
+    let config_path = resolved_config_path(&repo, &cli.global.config);
+    let config = load_config(&config_path)?;
+    check_git_sfs_floor(&config)?;
+
+    let outcome = setup_cmd::setup(&repo, args.cache.as_deref(), cancel)?;
+    reporting::setup_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
+    Ok(())
+}
+
 /// `git-sfs add <path>...` — hashes each regular file under the given paths,
 /// stores it in the cache, and replaces it with a git-sfs symlink.
 ///
-/// Requires a cache already bound via `.git-sfs/cache` (or `--cache`/
-/// `GIT_SFS_CACHE`) — this command does not create or bind one itself; see
-/// `ports::local_state`'s module doc for why that stays a separate, still
-/// open question.
+/// Requires a cache already bound via `.git-sfs/cache`; `init` and `setup`
+/// are the only commands that create or change that binding.
 fn run_add(cli: &Cli, args: &AddArgs, cancel: &Cancel) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
-    let cache_root = resolve_cache_root(
-        &repo,
-        cli.global.cache.as_deref(),
-        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-    )?;
+    let cache_root = resolve_cache_root(&repo)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let store = FsStore::new(cache_root);
@@ -125,11 +144,7 @@ fn run_mv(cli: &Cli, args: &MvArgs, cancel: &Cancel) -> Result<()> {
 fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
-    let cache_root = resolve_cache_root(
-        &repo,
-        cli.global.cache.as_deref(),
-        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-    )?;
+    let cache_root = resolve_cache_root(&repo)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let store = FsStore::new(cache_root);
@@ -168,11 +183,7 @@ fn run_status(cli: &Cli, args: &StatusArgs, cancel: &Cancel) -> Result<()> {
     let config_path = resolved_config_path(&repo, &cli.global.config);
     let config = load_config(&config_path)?;
     check_git_sfs_floor(&config)?;
-    let cache_root = resolve_cache_root(
-        &repo,
-        cli.global.cache.as_deref(),
-        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-    )?;
+    let cache_root = resolve_cache_root(&repo)?;
 
     let store = FsStore::new(cache_root.clone());
     let repo_port = FsRepo::new(repo);
@@ -226,11 +237,7 @@ fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
     let config_path = resolved_config_path(&repo, &cli.global.config);
     let config = load_config(&config_path)?;
     check_git_sfs_floor(&config)?;
-    let cache_root = resolve_cache_root(
-        &repo,
-        cli.global.cache.as_deref(),
-        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-    )?;
+    let cache_root = resolve_cache_root(&repo)?;
 
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
     let remote =
@@ -271,11 +278,7 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
     let config_path = resolved_config_path(&repo, &cli.global.config);
     let config = load_config(&config_path)?;
     check_git_sfs_floor(&config)?;
-    let cache_root = resolve_cache_root(
-        &repo,
-        cli.global.cache.as_deref(),
-        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-    )?;
+    let cache_root = resolve_cache_root(&repo)?;
 
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
     let remote =
@@ -350,12 +353,7 @@ fn run_doctor(cli: &Cli, args: &DoctorArgs, cancel: &Cancel) -> Result<()> {
     check_core_symlinks(&mut report, &repo);
 
     let cache_root = match check_value(&mut report, "cache config", || {
-        let cache_root = resolve_cache_root(
-            &repo,
-            cli.global.cache.as_deref(),
-            std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-        )
-        .map_err(|err| err.to_string())?;
+        let cache_root = resolve_cache_root(&repo).map_err(|err| err.to_string())?;
         Ok((cache_root.to_string(), cache_root))
     }) {
         Some(cache_root) => cache_root,
@@ -657,11 +655,7 @@ fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
     let config_path = resolved_config_path(&repo, &cli.global.config);
     let config = load_config(&config_path)?;
     check_git_sfs_floor(&config)?;
-    let cache_root = resolve_cache_root(
-        &repo,
-        cli.global.cache.as_deref(),
-        std::env::var("GIT_SFS_CACHE").ok().as_deref(),
-    )?;
+    let cache_root = resolve_cache_root(&repo)?;
 
     let store = FsStore::new(cache_root.clone());
     let repo_port = FsRepo::new(repo);

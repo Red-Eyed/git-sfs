@@ -36,6 +36,7 @@ Creates:
 ```text
 .git-sfs/config.toml
 .git-sfs/
+.git/sfs/cache/
 .gitignore entries for .git-sfs/cache and .git-sfs/.cache
 ```
 
@@ -305,7 +306,7 @@ Checks run in order. When a check fails, dependent checks are skipped:
 1. git repository (is the current directory inside a git repo?)
 2. git-sfs config (can `.git-sfs/config.toml` be parsed?)
 3. git-sfs version (satisfies `min_git_sfs_version` if set)
-4. cache config (is a cache path configured via `GIT_SFS_CACHE`, `--cache`, or `git-sfs setup`?)
+4. cache config (is `.git-sfs/cache` bound, usually by `git-sfs setup`?)
 5. cache directory (does it exist and is it writable?)
 6. rclone binary (is `rclone` on `PATH`?)
 7. rclone version (satisfies `min_rclone_version` if set)
@@ -355,4 +356,3 @@ If a binary is already at the latest version it is left untouched. If the downlo
 | `GIT_SFS_RELEASE_BASE_URL` | Override release download base URL |
 | `GIT_SFS_RELEASE_LATEST_URL` | Override latest-release redirect URL |
 | `GIT_SFS_RCLONE_BASE_URL` | Override rclone download base URL |
-

@@ -70,9 +70,9 @@ or refuse to place it somewhere `git clean -x` will reach.
 
 ---
 
-## 1c. The default config steers users into committing credentials
+## 1c. The v1 default config steers users into committing credentials
 
-The default template ships `config = "rclone.conf"`, resolved relative to
+The v1 default template ships `config = "rclone.conf"`, resolved relative to
 `.git-sfs` ([config.go:137](../internal/config/config.go#L137)) — so the natural
 location is `.git-sfs/rclone.conf`, inside the tracked directory.
 
