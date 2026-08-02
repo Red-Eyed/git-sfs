@@ -465,7 +465,13 @@ CLAUSES = [
         "retry-only-transient",
     ),
     Clause("13.4", "FileSizes must not be O(entire remote)", UNCOVERED),
-    Clause("13.4b", "defaults must not place data in harm's way", UNCOVERED),
+    Clause(
+        "13.4b",
+        "defaults must not place data in harm's way",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/add.rs",
+        "default_cache_keeps_unpushed_bytes_out_of_git_clean_reach",
+    ),
     Clause(
         "13.5", "environmental assumptions are checked where they are chosen", UNCOVERED
     ),

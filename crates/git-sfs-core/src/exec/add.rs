@@ -276,6 +276,7 @@ fn add_one(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exec::{init as init_cmd, setup as setup_cmd};
     use crate::ports::{FakeRepo, FakeStore, FsRepo, FsStore};
 
     fn init_repo() -> (tempfile::TempDir, Utf8PathBuf, Utf8PathBuf) {
@@ -425,6 +426,50 @@ mod tests {
         assert_eq!(
             std::fs::read(repo.join("README.md")).unwrap(),
             b"human docs"
+        );
+    }
+
+    #[test]
+    fn default_cache_keeps_unpushed_bytes_out_of_git_clean_reach() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        git(&repo, &["init", "--quiet"]);
+
+        let init_outcome =
+            init_cmd::init(&repo, &repo.join(".git-sfs/config.toml"), None, false).unwrap();
+        assert_eq!(init_outcome.cache_root, repo.join(".git/sfs/cache"));
+        assert!(!repo.join(".git-sfs/.cache").exists());
+
+        std::fs::write(repo.join("data.bin"), b"large research dataset").unwrap();
+        let repo_port = FsRepo::new(repo.clone());
+        let store = FsStore::new(init_outcome.cache_root.clone());
+        let cancel = Cancel::new();
+
+        let add_outcome = add(
+            &repo_port,
+            &store,
+            &repo,
+            &[Utf8PathBuf::from("data.bin")],
+            &cancel,
+        )
+        .unwrap();
+        let hash = add_outcome.added[0].hash;
+        let object_path = store.object_path(hash);
+        assert!(object_path.is_file());
+
+        git(
+            &repo,
+            &["add", ".gitignore", ".git-sfs/config.toml", "data.bin"],
+        );
+        git(&repo, &["clean", "-xfd"]);
+
+        assert!(object_path.is_file());
+
+        let setup_outcome = setup_cmd::setup(&repo, None, &cancel).unwrap();
+        assert_eq!(setup_outcome.cache_root, init_outcome.cache_root);
+        assert_eq!(
+            std::fs::read(repo.join("data.bin")).unwrap(),
+            b"large research dataset"
         );
     }
 
