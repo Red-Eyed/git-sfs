@@ -138,7 +138,7 @@ git-sfs verify
 git-sfs verify data/train-000.tar.zst
 git-sfs verify data/validation/
 git-sfs verify --with-integrity data/validation/
-git-sfs verify --no-check-remote
+git-sfs verify --check-remote
 git-sfs verify -r backup
 git-sfs verify --rehash
 git-sfs verify --rehash --rehash-sample 500
@@ -146,17 +146,19 @@ git-sfs verify --rehash --rehash-sample 500
 
 Returns non-zero on failure.
 
-By default, `git-sfs verify` checks that tracked cache entries are present
-locally and that tracked hashes are present on the configured default remote, so
-another machine can pull and materialize the same symlinks.
+By default, `git-sfs verify` checks only local repository and cache state, so a
+freshly initialized repo and an offline checkout can still run the CI-oriented
+local integrity gate.
 
-`-r remote` checks against a named remote instead of `default`.
+`--check-remote` also checks that tracked hashes are present on the configured
+default remote, so another machine can pull and materialize the same symlinks.
+`-r remote` checks against a named remote and turns on the remote check.
 
 Remote checks use `[settings].n_jobs` when it is set. `0` means auto.
 
-`--with-integrity` additionally recalculates hashes for local cache files and
-remote files. This is slower, but it catches corruption instead of checking only
-presence.
+`--with-integrity` additionally recalculates hashes for local cache files, and
+for remote files when remote checking is enabled. This is slower, but it catches
+corruption instead of checking only presence.
 
 `--rehash` re-hashes every file in the local cache directory (not just
 symlink-tracked files) to detect silent bit rot. It ignores the path argument and

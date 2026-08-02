@@ -452,7 +452,13 @@ CLAUSES = [
         "remote errors must be classified structurally, not by English text",
         UNCOVERED,
     ),
-    Clause("13.3", "a freshly initialized repo must be able to run verify", UNCOVERED),
+    Clause(
+        "13.3",
+        "a freshly initialized repo must be able to run verify",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/verify.rs",
+        "freshly_initialized_repo_verifies_without_a_remote_check",
+    ),
     Clause(
         "13.4",
         "push must not overwrite a good replica with rotted bytes",

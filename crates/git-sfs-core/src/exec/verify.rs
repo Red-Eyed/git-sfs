@@ -507,7 +507,8 @@ mod tests {
     use std::io::Write as _;
 
     use crate::domain::symlink::git_link_target;
-    use crate::ports::{FakeRemote, FakeRepo, FakeStore};
+    use crate::exec::init as init_cmd;
+    use crate::ports::{FakeRemote, FakeRepo, FakeStore, FsRepo, FsStore};
 
     use super::*;
 
@@ -664,6 +665,33 @@ mod tests {
             issue.kind == IssueKind::CorruptRemoteFile && issue.hash == Some(hash)
         }));
         assert!(scratch_path.exists());
+    }
+
+    #[test]
+    fn freshly_initialized_repo_verifies_without_a_remote_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+
+        let init_outcome =
+            init_cmd::init(&repo, &repo.join(".git-sfs/config.toml"), None, false).unwrap();
+        let repo_port = FsRepo::new(repo);
+        let store = FsStore::new(init_outcome.cache_root.clone());
+
+        let report = verify(
+            &repo_port,
+            &store,
+            None,
+            &init_outcome.cache_root.join("tmp"),
+            Utf8Path::new("."),
+            false,
+            &Cancel::new(),
+        )
+        .unwrap();
+
+        assert_eq!(report.tracked_symlinks, 0);
+        assert_eq!(report.orphan_count, 0);
+        assert!(report.issues.is_empty());
     }
 
     #[test]

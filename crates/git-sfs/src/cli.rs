@@ -195,7 +195,7 @@ pub struct VerifyArgs {
     #[arg(short = 'r', long = "remote", value_name = "NAME")]
     pub remote: Option<String>,
 
-    /// check remote files (the default)
+    /// check remote files
     #[arg(long = "check-remote", overrides_with = "no_check_remote")]
     check_remote: bool,
 
@@ -221,7 +221,7 @@ pub struct VerifyArgs {
 }
 
 impl VerifyArgs {
-    /// Whether to check the remote. On unless `--no-check-remote` is given.
+    /// Whether to check the remote. Off unless `--check-remote` or `-r` is given.
     ///
     /// The two flags override each other, so the last one on the command line
     /// wins and `--no-check-remote --check-remote` re-enables the check. The
@@ -229,7 +229,7 @@ impl VerifyArgs {
     /// one flag and forget the other.
     #[must_use]
     pub fn check_remote(&self) -> bool {
-        !self.no_check_remote
+        (self.check_remote || self.remote.is_some()) && !self.no_check_remote
     }
 }
 
@@ -353,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_checking_is_on_unless_switched_off() {
+    fn remote_checking_is_opt_in() {
         fn verify(args: &[&str]) -> VerifyArgs {
             let Some(Command::Verify(args)) = parse(args).command else {
                 panic!("expected verify");
@@ -361,9 +361,13 @@ mod tests {
             args
         }
 
-        assert!(verify(&["git-sfs", "verify"]).check_remote());
+        assert!(!verify(&["git-sfs", "verify"]).check_remote());
         assert!(!verify(&["git-sfs", "verify", "--no-check-remote"]).check_remote());
         assert!(verify(&["git-sfs", "verify", "--check-remote"]).check_remote());
+        assert!(verify(&["git-sfs", "verify", "-r", "backup"]).check_remote());
+        assert!(
+            !verify(&["git-sfs", "verify", "-r", "backup", "--no-check-remote"]).check_remote()
+        );
     }
 
     /// `overrides_with` makes the flags last-wins rather than conflicting, so a
