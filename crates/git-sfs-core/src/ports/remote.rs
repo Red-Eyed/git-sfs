@@ -35,7 +35,7 @@
 //! copy, and exits 0"). Adding the same flag pull already carries closes
 //! this without needing push to read and hash bytes it would otherwise skip.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read as _, Write as _};
 use std::time::Duration;
 
@@ -190,9 +190,10 @@ pub trait Remote {
     /// Same as [`Remote::has_file`].
     fn file_size(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<u64>, RemoteError>;
 
-    /// Sizes of every hash in `hashes` that is present on the remote, in one
-    /// listing call. Hashes absent from the returned map are confirmed
-    /// absent, not merely unlisted.
+    /// Sizes of every hash in `hashes` that is present on the remote. The
+    /// concrete remote may batch these queries, but it must not issue one
+    /// subprocess per object or list the entire remote object store to answer
+    /// a scoped question.
     ///
     /// # Errors
     ///
@@ -470,6 +471,10 @@ impl RcloneRemote {
         format!("{}/files", self.url)
     }
 
+    fn object_prefix_url(&self, prefix: &str) -> String {
+        format!("{}/files/{ALGORITHM}/{prefix}", self.url)
+    }
+
     /// The bare backend prefix, e.g. `"s3:"` from `"s3:bucket/prefix"` —
     /// probed before checking a specific path, mirroring v1's
     /// `backendRoot` (`command.go:82-87`).
@@ -736,24 +741,23 @@ impl Remote for RcloneRemote {
         if hashes.is_empty() {
             return Ok(HashMap::new());
         }
-        let out = self.run_allowing_not_found(
-            &[
-                "lsjson".to_owned(),
-                "--recursive".to_owned(),
-                self.files_url(),
-            ],
-            cancel,
-        )?;
-        let Some(json) = out else {
-            return Ok(HashMap::new());
-        };
-        let entries = parse_lsjson_entries(&json)?;
 
-        let mut wanted: HashMap<String, Sha256> = hashes.iter().map(|h| (h.to_hex(), *h)).collect();
         let mut result = HashMap::with_capacity(hashes.len());
-        for entry in entries {
-            if let Some(hash) = wanted.remove(&entry.name) {
-                result.insert(hash, entry.size);
+        for (prefix, prefix_hashes) in hashes_by_prefix(hashes) {
+            let Some(json) = self.run_allowing_not_found(
+                &["lsjson".to_owned(), self.object_prefix_url(&prefix)],
+                cancel,
+            )?
+            else {
+                continue;
+            };
+            let entries = parse_lsjson_entries(&json)?;
+            let mut wanted: HashMap<String, Sha256> =
+                prefix_hashes.iter().map(|h| (h.to_hex(), *h)).collect();
+            for entry in entries {
+                if let Some(hash) = wanted.remove(&entry.name) {
+                    result.insert(hash, entry.size);
+                }
             }
         }
         Ok(result)
@@ -869,6 +873,14 @@ impl Remote for RcloneRemote {
             Err(err) => Err(err),
         }
     }
+}
+
+fn hashes_by_prefix(hashes: &[Sha256]) -> BTreeMap<String, Vec<Sha256>> {
+    let mut grouped: BTreeMap<String, Vec<Sha256>> = BTreeMap::new();
+    for &hash in hashes {
+        grouped.entry(hash.prefix()).or_default().push(hash);
+    }
+    grouped
 }
 
 /// An in-memory [`Remote`], for tests above this layer that need a remote
@@ -1138,6 +1150,59 @@ exit 0
         write_executable(&dir.join("rclone"), script);
     }
 
+    /// Writes an executable POSIX-sh script at `dir/rclone` that logs its
+    /// full argv and implements just enough `lsjson` to prove which remote
+    /// directory `file_sizes` listed.
+    fn listing_rclone(dir: &std::path::Path) {
+        let script = r#"#!/bin/sh
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+echo "$@" >> "$here/argv.log"
+
+strip_backend() {
+  case "$1" in
+    *:*) printf '%s' "${1#*:}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+target=""
+for arg do
+  target="$arg"
+done
+root=$(strip_backend "$target")
+
+if [ ! -e "$root" ]; then
+  echo "directory not found: $root" >&2
+  exit 3
+fi
+
+if [ -f "$root" ]; then
+  name=$(basename "$root")
+  size=$(wc -c < "$root" | tr -d ' ')
+  printf '[{"Name":"%s","Size":%s}]\n' "$name" "$size"
+  exit 0
+fi
+
+first=1
+printf '['
+for path in "$root"/*; do
+  [ -e "$path" ] || continue
+  [ -f "$path" ] || continue
+  name=$(basename "$path")
+  size=$(wc -c < "$path" | tr -d ' ')
+  if [ "$first" = 1 ]; then
+    first=0
+  else
+    printf ','
+  fi
+  printf '{"Name":"%s","Size":%s}' "$name" "$size"
+done
+printf ']\n'
+exit 0
+"#;
+        write_executable(&dir.join("rclone"), script);
+    }
+
     fn write_executable(path: &std::path::Path, contents: &str) {
         std::fs::write(path, contents).unwrap();
         let mut perms = std::fs::metadata(path).unwrap().permissions();
@@ -1156,6 +1221,10 @@ exit 0
 
     fn a_hash() -> Sha256 {
         Sha256::parse("ab3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a").unwrap()
+    }
+
+    fn c_hash() -> Sha256 {
+        Sha256::parse("cd3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a").unwrap()
     }
 
     #[test]
@@ -1207,6 +1276,57 @@ exit 0
         assert_eq!(
             remote.file_size(a_hash(), &Cancel::new()).unwrap(),
             Some(123)
+        );
+    }
+
+    #[test]
+    fn file_sizes_lists_requested_prefixes_instead_of_the_entire_remote() {
+        let fixture = tempfile::tempdir().unwrap();
+        let remote_root = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        listing_rclone(fixture.path());
+
+        let ab_hash = a_hash();
+        let cd_hash = c_hash();
+        let ab_path =
+            remote_root
+                .path()
+                .join(format!("files/sha256/{}/{}", ab_hash.prefix(), ab_hash));
+        let cd_path =
+            remote_root
+                .path()
+                .join(format!("files/sha256/{}/{}", cd_hash.prefix(), cd_hash));
+        std::fs::create_dir_all(ab_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(cd_path.parent().unwrap()).unwrap();
+        std::fs::write(&ab_path, b"abc").unwrap();
+        std::fs::write(&cd_path, b"longer").unwrap();
+
+        let remote = RcloneRemote::new(
+            format!("local:{}", remote_root.path().display()),
+            Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).unwrap(),
+        )
+        .with_rclone_bin(fixture.path().join("rclone").to_str().unwrap().to_owned());
+
+        let sizes = remote
+            .file_sizes(&[ab_hash, cd_hash], &Cancel::new())
+            .unwrap();
+
+        assert_eq!(sizes.get(&ab_hash), Some(&3));
+        assert_eq!(sizes.get(&cd_hash), Some(&6));
+
+        let log = std::fs::read_to_string(fixture.path().join("argv.log")).unwrap();
+        let remote_root_url = format!("local:{}", remote_root.path().display());
+        assert!(
+            log.contains(&format!("lsjson {remote_root_url}/files/sha256/ab")),
+            "argv: {log}"
+        );
+        assert!(
+            log.contains(&format!("lsjson {remote_root_url}/files/sha256/cd")),
+            "argv: {log}"
+        );
+        assert!(
+            !log.contains(&format!("lsjson --recursive {remote_root_url}/files")),
+            "file_sizes must not list the whole remote object tree, argv: {log}"
         );
     }
 

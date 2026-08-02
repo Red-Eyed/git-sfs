@@ -668,7 +668,13 @@ CLAUSES = [
         "divergences.py",
         "retry-only-transient",
     ),
-    Clause("13.4", "FileSizes must not be O(entire remote)", UNCOVERED),
+    Clause(
+        "13.4",
+        "FileSizes must not be O(entire remote)",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/remote.rs",
+        "file_sizes_lists_requested_prefixes_instead_of_the_entire_remote",
+    ),
     Clause(
         "13.4b",
         "defaults must not place data in harm's way",
