@@ -10,6 +10,7 @@ seed_filesystem_repo() {
     cd "$repo"
     # Start from a normal repo state so later clones exercise the same tracked
     # symlinks users would commit and push through Git.
+    git check-ignore -q .git-sfs/cache || fail ".git-sfs/cache must be ignored local state"
     git add .git-sfs/config.toml .gitignore
     git commit -qm "initialize git-sfs"
     mkdir -p data
@@ -183,6 +184,7 @@ scenario_filesystem_workflows() {
   # The clone binds a cache during setup, then pulls through the repo-local symlink.
   pull_with_configured_cache "$repo_a" "$repo_c" "$temp_cache" "data/train-000.tar.zst"
   [ -f "$(cache_file_for "$temp_cache" "$hash_train")" ] || fail "temporary cache pull failed"
+  [ ! -f "$(cache_file_for "$temp_cache" "$hash_valid")" ] || fail "selected pull must not restore sibling objects"
 
   # A shared cache binding should work the same way for a brand-new clone.
   pull_with_bound_cache "$repo_a" "$repo_d" "$shared_cache" "data/train-000.tar.zst"

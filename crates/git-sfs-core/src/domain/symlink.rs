@@ -284,6 +284,16 @@ mod tests {
     }
 
     #[test]
+    fn rejects_uppercase_hex_in_the_hash_component() {
+        let repo = Utf8Path::new("/repo");
+        let file = Utf8Path::new("/repo/data/train.bin");
+        let upper = H.to_ascii_uppercase();
+        let target = format!("../.git-sfs/cache/files/sha256/{}/{upper}", &upper[..2]);
+        let err = validate_symlink_target(repo, file, &target).unwrap_err();
+        assert!(matches!(err, InvalidSymlinkTarget::InvalidHash { .. }));
+    }
+
+    #[test]
     fn rejects_a_prefix_that_does_not_match_the_hash() {
         // contract-spec 3.2 rule 6: deliberately redundant with the hash, so
         // a stale or hand-edited link fails loudly instead of resolving to

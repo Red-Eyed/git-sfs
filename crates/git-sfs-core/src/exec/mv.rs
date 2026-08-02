@@ -423,6 +423,29 @@ mod tests {
     }
 
     #[test]
+    fn moves_a_symlink_even_when_referenced_cache_object_is_absent() {
+        let (_dir, repo) = init_repo();
+        link_valid(&repo, "a.bin", a_hash());
+        let repo_port = FsRepo::new(repo.clone());
+        let cancel = Cancel::new();
+
+        let moved = mv(
+            &repo_port,
+            &repo,
+            Utf8Path::new("a.bin"),
+            Utf8Path::new("b.bin"),
+            &cancel,
+        )
+        .unwrap();
+
+        assert_eq!(moved[0].new_path, "b.bin");
+        assert!(
+            std::fs::symlink_metadata(repo.join("b.bin")).is_ok(),
+            "mv operates on the symlink, not on the cache object it references"
+        );
+    }
+
+    #[test]
     fn placing_a_file_inside_an_existing_directory_uses_its_basename() {
         let (_dir, repo) = init_repo();
         link_valid(&repo, "a.bin", a_hash());

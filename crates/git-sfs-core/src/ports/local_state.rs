@@ -488,6 +488,19 @@ mod tests {
     }
 
     #[test]
+    fn bind_cache_rebinding_to_an_equivalent_target_is_a_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().join("repo")).unwrap();
+        let cache = Utf8PathBuf::from_path_buf(dir.path().join("cache")).unwrap();
+        let equivalent = cache.join("../cache");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        init_cache_dirs(&cache).unwrap();
+
+        bind_cache(&repo, &cache).unwrap();
+        bind_cache(&repo, &equivalent).unwrap();
+    }
+
+    #[test]
     fn bind_cache_refuses_to_repoint_an_existing_link() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Utf8PathBuf::from_path_buf(dir.path().join("repo")).unwrap();
