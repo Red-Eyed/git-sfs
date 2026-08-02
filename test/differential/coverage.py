@@ -687,7 +687,11 @@ CLAUSES = [
         "default_cache_keeps_unpushed_bytes_out_of_git_clean_reach",
     ),
     Clause(
-        "13.5", "environmental assumptions are checked where they are chosen", UNCOVERED
+        "13.5",
+        "environmental assumptions are checked where they are chosen",
+        ASSERTED,
+        "../../crates/git-sfs/src/dispatch.rs",
+        "doctor_checks_environmental_assumptions_where_they_are_chosen",
     ),
     Clause(
         "13.7",

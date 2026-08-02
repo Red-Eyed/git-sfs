@@ -25,5 +25,8 @@ serde_json.workspace = true
 # CI from phase 1 onward -- see the note in the workspace manifest.
 ureq.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

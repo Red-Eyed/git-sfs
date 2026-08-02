@@ -818,7 +818,34 @@ fn llms_txt() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use git_sfs_core::exec::doctor::DoctorStatus;
+
     use super::*;
+
+    fn check<'a>(report: &'a DoctorReport, label: &str) -> &'a DoctorStatus {
+        report
+            .sections()
+            .iter()
+            .flat_map(|section| section.checks())
+            .find(|check| check.label() == label)
+            .unwrap_or_else(|| panic!("missing doctor check: {label}"))
+            .status()
+    }
+
+    fn git(repo: &camino::Utf8Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap_or_else(|err| panic!("git failed to start: {err}"));
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[test]
     fn embedded_llms_txt_is_the_generated_git_sfs_reference() {
@@ -827,5 +854,43 @@ mod tests {
         assert!(text.starts_with("# git-sfs\n"));
         assert!(text.contains("git-sfs llms-txt"));
         assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn doctor_checks_environmental_assumptions_where_they_are_chosen() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(repo_dir.path().to_owned()).unwrap();
+        git(&repo, &["init", "--quiet"]);
+        git(&repo, &["config", "core.symlinks", "false"]);
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache = Utf8PathBuf::from_path_buf(cache_dir.path().to_owned()).unwrap();
+        let mut report = DoctorReport::new();
+
+        check_core_symlinks(&mut report, &repo);
+        check_cache_directory(&mut report, &cache);
+        check_cache_permissions(&mut report, &cache);
+
+        assert!(matches!(
+            check(&report, "git core.symlinks"),
+            DoctorStatus::Fail { detail } if detail == "core.symlinks is false"
+        ));
+        assert!(matches!(
+            check(&report, "cache directory"),
+            DoctorStatus::Pass { detail } if detail.contains("tmp writable")
+        ));
+        assert!(matches!(
+            check(&report, "cache permissions"),
+            DoctorStatus::Pass { detail } if detail == "read-only mode preserved"
+        ));
+        assert!(
+            cache.join("tmp").is_dir(),
+            "doctor should choose and prepare the cache tmp directory it probes"
+        );
+        assert_eq!(
+            std::fs::read_dir(cache.join("tmp")).unwrap().count(),
+            0,
+            "doctor probe files should be cleaned up"
+        );
     }
 }

@@ -393,6 +393,7 @@ dependencies = [
  "indicatif",
  "serde",
  "serde_json",
+ "tempfile",
  "ureq",
 ]
 
