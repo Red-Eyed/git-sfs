@@ -362,6 +362,10 @@ mod tests {
         Sha256::parse("ab3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a").unwrap()
     }
 
+    fn b_hash() -> Sha256 {
+        Sha256::parse("bc3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789b").unwrap()
+    }
+
     /// Writes a valid git-sfs symlink at `repo/rel_path` for `hash`, the way
     /// `add` would.
     fn link_valid(repo: &Utf8Path, rel_path: &str, hash: Sha256) {
@@ -590,6 +594,37 @@ mod tests {
         .unwrap();
 
         assert_eq!(moved[0].new_path, "dest/data/a.bin");
+    }
+
+    #[test]
+    fn directory_destination_means_move_inside_and_existing_file_is_an_error() {
+        let (_dir, repo) = init_repo();
+        link_valid(&repo, "data/a.bin", a_hash());
+        std::fs::create_dir_all(repo.join("dest")).unwrap();
+        let repo_port = FsRepo::new(repo.clone());
+        let cancel = Cancel::new();
+
+        let moved = mv(
+            &repo_port,
+            &repo,
+            Utf8Path::new("data"),
+            Utf8Path::new("dest"),
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(moved[0].new_path, "dest/data/a.bin");
+
+        link_valid(&repo, "again.bin", b_hash());
+        std::fs::write(repo.join("occupied.bin"), b"already here").unwrap();
+        let failure = mv(
+            &repo_port,
+            &repo,
+            Utf8Path::new("again.bin"),
+            Utf8Path::new("occupied.bin"),
+            &cancel,
+        )
+        .unwrap_err();
+        assert!(matches!(*failure.error, MvError::DestinationExists { .. }));
     }
 
     #[test]

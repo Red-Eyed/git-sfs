@@ -148,7 +148,9 @@ CLAUSES = [
     Clause(
         "3.3",
         "a directory destination means move-inside; an existing file is an error",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/mv.rs",
+        "directory_destination_means_move_inside_and_existing_file_is_an_error",
     ),
     # -- §4 cache layout -----------------------------------------------------
     Clause(
@@ -240,10 +242,24 @@ CLAUSES = [
     Clause(
         "5.1",
         "backend and path compose to backend:path, trailing slashes stripped",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/domain/remote.rs",
+        "matches_the_contract_spec_url_composition_table",
     ),
-    Clause("5.1", "a Windows drive-letter path is preserved verbatim", UNCOVERED),
-    Clause("5.1", "an empty backend yields the path unchanged", UNCOVERED),
+    Clause(
+        "5.1",
+        "a Windows drive-letter path is preserved verbatim",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/domain/remote.rs",
+        '("s3", "D:/data", "s3:D:/data")',
+    ),
+    Clause(
+        "5.1",
+        "an empty backend yields the path unchanged",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/domain/remote.rs",
+        '("", "/abs/path", "/abs/path")',
+    ),
     # -- §5b operation scope -------------------------------------------------
     Clause(
         "5b",
@@ -260,16 +276,30 @@ CLAUSES = [
     Clause(
         "5b.1",
         "push names a working-tree path, not a hash, for a missing object",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/plan/push.rs",
+        "fails_naming_the_first_missing_path_in_sorted_order_when_skip_missing_is_false",
     ),
     Clause(
-        "5b.1", "--skip-missing never uploads an object that fails HasValid", UNCOVERED
+        "5b.1",
+        "--skip-missing never uploads an object that fails HasValid",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/plan/push.rs",
+        "skip_missing_uploads_present_objects_and_reports_every_path_referencing_a_skipped_one",
     ),
-    Clause("5b.1", "--skip-missing reports object and symlink counts", UNCOVERED),
+    Clause(
+        "5b.1",
+        "--skip-missing reports object and symlink counts",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/push.rs",
+        "skip_missing_uploads_present_objects_and_reports_skipped_objects",
+    ),
     Clause(
         "5b.1",
         "the skipped-path listing is capped with an 'and N more' line",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs/src/reporting.rs",
+        "skipped_push_warning_is_capped_and_keeps_the_repair_hint",
     ),
     Clause(
         "5b.2",
@@ -479,7 +509,13 @@ CLAUSES = [
         "scenarios/05-remote-fault.sh",
         "status_object_denied",
     ),
-    Clause("9.1", "status without --remote makes no network calls", UNCOVERED),
+    Clause(
+        "9.1",
+        "status without --remote makes no network calls",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/status.rs",
+        "status_without_remote_makes_no_remote_observations",
+    ),
     Clause("9.1", "a repo whose only finding is orphaned objects exits 0", UNCOVERED),
     Clause(
         "9.1",
@@ -564,11 +600,19 @@ CLAUSES = [
         "scenarios/05-remote-fault.sh",
         "status_object_denied",
     ),
-    Clause("13.3", "the disk-space guard must not fail open", UNCOVERED),
+    Clause(
+        "13.3",
+        "the disk-space guard must not fail open",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/plan/disk_space.rs",
+        "requires_a_ten_percent_margin_over_what_is_needed",
+    ),
     Clause(
         "13.3",
         "remote errors must be classified structurally, not by English text",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/remote.rs",
+        "has_file_returns_an_error_when_the_remote_cannot_be_reached",
     ),
     Clause(
         "13.3",

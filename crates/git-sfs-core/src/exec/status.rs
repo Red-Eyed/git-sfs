@@ -347,6 +347,24 @@ mod tests {
     }
 
     #[test]
+    fn status_without_remote_makes_no_remote_observations() {
+        let repo = FakeRepo::new("/repo");
+        let store = FakeStore::new();
+        let cancel = Cancel::new();
+        let cached_hash = hash_bytes(&[1; 12]);
+        seed_link(&repo, "cached.bin", cached_hash);
+        store_bytes(&store, cached_hash, &[1; 12]);
+
+        let report = status(&repo, &store, None, Utf8Path::new("."), &cancel).unwrap();
+
+        assert!(!report.remote_checked);
+        assert_eq!(report.on_remote, None);
+        assert_eq!(report.unpushed, None);
+        assert_eq!(report.remote_unknown, None);
+        assert!(report.files.iter().all(|file| file.remote.is_none()));
+    }
+
+    #[test]
     fn remote_status_uses_remote_size_when_local_cache_is_missing() {
         let repo = FakeRepo::new("/repo");
         let remote = FakeRemote::new();
