@@ -333,6 +333,11 @@ mod tests {
     }
 
     #[test]
+    fn contention_poll_interval_is_frozen_at_100ms() {
+        assert_eq!(POLL_INTERVAL, Duration::from_millis(100));
+    }
+
+    #[test]
     fn acquiring_auto_breaks_a_lock_whose_owner_is_provably_dead() {
         let cache = tempfile::tempdir().unwrap();
         let dir = locks_dir(&cache);

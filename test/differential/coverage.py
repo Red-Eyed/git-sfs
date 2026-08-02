@@ -405,7 +405,9 @@ CLAUSES = [
     Clause(
         "7.2",
         "cache binding: init/setup --cache, symlink, else error",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/local_state.rs",
+        "cache_binding_uses_requested_cache_then_symlink_else_error",
     ),
     # -- §8 lock protocol ----------------------------------------------------
     Clause(
@@ -443,7 +445,13 @@ CLAUSES = [
         "lock_contention.py",
         "genuinely blocked, not racing through",
     ),
-    Clause("8", "contention polls every 100ms", UNCOVERED),
+    Clause(
+        "8",
+        "contention polls every 100ms",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/lock.rs",
+        "contention_poll_interval_is_frozen_at_100ms",
+    ),
     Clause(
         "8.1",
         "v1 waits forever and panics on a malformed owner file",
@@ -516,7 +524,13 @@ CLAUSES = [
         "../../crates/git-sfs-core/src/exec/status.rs",
         "status_without_remote_makes_no_remote_observations",
     ),
-    Clause("9.1", "a repo whose only finding is orphaned objects exits 0", UNCOVERED),
+    Clause(
+        "9.1",
+        "a repo whose only finding is orphaned objects exits 0",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/status.rs",
+        "status_ignores_orphaned_cache_objects_and_still_succeeds",
+    ),
     Clause(
         "9.1",
         "verify exits 0 after repairing a writable but intact cache object",
@@ -583,8 +597,20 @@ CLAUSES = [
         "cancellation.py",
         "the source path still resolves",
     ),
-    Clause("13.1", "import --move must publish before removing the source", UNCOVERED),
-    Clause("13.1", "mv must be cancelable", UNCOVERED),
+    Clause(
+        "13.1",
+        "import --move must publish before removing the source",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "move_flag_removes_the_source_only_after_the_destination_is_published",
+    ),
+    Clause(
+        "13.1",
+        "mv must be cancelable",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/mv.rs",
+        "directory_mv_observes_cancellation_before_moving_tree",
+    ),
     Clause("13.2", "AtomicCopy must fsync the parent directory", UNCOVERED),
     Clause(
         "13.2",

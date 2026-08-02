@@ -384,6 +384,30 @@ mod tests {
     }
 
     #[test]
+    fn cache_binding_uses_requested_cache_then_symlink_else_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().join("repo")).unwrap();
+        let requested = Utf8PathBuf::from_path_buf(dir.path().join("requested")).unwrap();
+        let bound = Utf8PathBuf::from_path_buf(dir.path().join("bound")).unwrap();
+        std::fs::create_dir_all(repo.join(".git-sfs")).unwrap();
+        std::fs::create_dir_all(&requested).unwrap();
+        std::fs::create_dir_all(&bound).unwrap();
+        std::os::unix::fs::symlink(&bound, repo.join(".git-sfs/cache")).unwrap();
+
+        assert_eq!(
+            choose_cache_root(&repo, Some(&requested)).unwrap(),
+            requested
+        );
+        assert_eq!(choose_cache_root(&repo, None).unwrap(), bound);
+
+        std::fs::remove_file(repo.join(".git-sfs/cache")).unwrap();
+        assert!(matches!(
+            resolve_cache_root(&repo),
+            Err(LocalStateError::MissingCacheConfig)
+        ));
+    }
+
+    #[test]
     fn choose_cache_root_uses_a_requested_cache() {
         let repo = Utf8PathBuf::from("/repo");
         let requested = Utf8PathBuf::from("/cache");

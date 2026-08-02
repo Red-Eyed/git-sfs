@@ -628,6 +628,32 @@ mod tests {
     }
 
     #[test]
+    fn directory_mv_observes_cancellation_before_moving_tree() {
+        let (_dir, repo) = init_repo();
+        link_valid(&repo, "data/a.bin", a_hash());
+        let repo_port = FsRepo::new(repo.clone());
+        let cancel = Cancel::new();
+        cancel.cancel();
+
+        let failure = mv(
+            &repo_port,
+            &repo,
+            Utf8Path::new("data"),
+            Utf8Path::new("moved"),
+            &cancel,
+        )
+        .unwrap_err();
+
+        assert!(failure.moved.is_empty());
+        assert!(matches!(*failure.error, MvError::Repo(_)));
+        assert!(
+            std::fs::symlink_metadata(repo.join("data/a.bin")).is_ok(),
+            "canceled mv must not move the source tree"
+        );
+        assert!(!repo.join("moved").exists());
+    }
+
+    #[test]
     fn a_missing_source_reports_an_io_error_without_touching_anything() {
         let (_dir, repo) = init_repo();
         let repo_port = FsRepo::new(repo.clone());

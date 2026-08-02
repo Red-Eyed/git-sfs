@@ -365,6 +365,25 @@ mod tests {
     }
 
     #[test]
+    fn status_ignores_orphaned_cache_objects_and_still_succeeds() {
+        let repo = FakeRepo::new("/repo");
+        let store = FakeStore::new();
+        let cancel = Cancel::new();
+        let linked_hash = hash_bytes(&[1; 12]);
+        let orphan_hash = hash_bytes(&[2; 12]);
+        seed_link(&repo, "linked.bin", linked_hash);
+        store_bytes(&store, linked_hash, &[1; 12]);
+        store_bytes(&store, orphan_hash, &[2; 12]);
+
+        let report = status(&repo, &store, None, Utf8Path::new("."), &cancel).unwrap();
+
+        assert_eq!(report.tracked, 1);
+        assert_eq!(report.cached, 1);
+        assert_eq!(report.unique_files, 1);
+        assert_eq!(report.total_size, 12);
+    }
+
+    #[test]
     fn remote_status_uses_remote_size_when_local_cache_is_missing() {
         let repo = FakeRepo::new("/repo");
         let remote = FakeRemote::new();
