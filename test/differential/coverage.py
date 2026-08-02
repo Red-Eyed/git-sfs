@@ -469,7 +469,13 @@ CLAUSES = [
     Clause(
         "13.5", "environmental assumptions are checked where they are chosen", UNCOVERED
     ),
-    Clause("13.7", "add must refuse a candidate already tracked by Git", UNCOVERED),
+    Clause(
+        "13.7",
+        "add must refuse a candidate already tracked by Git",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/add.rs",
+        "refuses_to_convert_a_file_already_tracked_by_git",
+    ),
     # -- §7c downgrade -------------------------------------------------------
     Clause(
         "7c",

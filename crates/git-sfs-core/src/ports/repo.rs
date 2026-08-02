@@ -23,7 +23,7 @@
 //! error, not a silently partial result. A single candidate symlink failing
 //! validation does not abort — matching v1's per-entry `return nil`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -87,7 +87,12 @@ impl ScannedEntry {
 #[derive(Debug)]
 pub enum FoundEntry {
     /// A regular file at this repo-relative path.
-    File(Utf8PathBuf),
+    File {
+        /// The repo-relative path.
+        path: Utf8PathBuf,
+        /// Whether Git already tracks this path in the index.
+        git_tracked: bool,
+    },
     /// A candidate whose own filename is not valid UTF-8 — skipped rather
     /// than returned, for the same reason and with the same "report, don't
     /// silently drop" treatment as [`ScannedEntry::Unrepresentable`].
@@ -104,7 +109,7 @@ impl FoundEntry {
     #[must_use]
     pub fn path(&self) -> Option<&Utf8Path> {
         match self {
-            Self::File(path) => Some(path),
+            Self::File { path, .. } => Some(path),
             Self::Unrepresentable { .. } => None,
         }
     }
@@ -139,6 +144,14 @@ pub enum RepoError {
     /// exist, or a directory within it could not be read.
     #[error(transparent)]
     Walk(#[from] walkdir::Error),
+    /// Git could not answer an index query.
+    #[error("git ls-files failed in {repo}: {detail}")]
+    Git {
+        /// The repository root.
+        repo: Utf8PathBuf,
+        /// The command failure details.
+        detail: String,
+    },
     /// The caller asked to stop.
     #[error("canceled")]
     Canceled,
@@ -147,7 +160,7 @@ pub enum RepoError {
 impl From<RepoError> for Error {
     fn from(err: RepoError) -> Self {
         match err {
-            RepoError::Walk(_) => Error::Unavailable(err.to_string()),
+            RepoError::Walk(_) | RepoError::Git { .. } => Error::Unavailable(err.to_string()),
             RepoError::Canceled => Error::Canceled,
         }
     }
@@ -179,7 +192,8 @@ pub trait Repo {
     ///
     /// # Errors
     ///
-    /// Same as [`Repo::scan`].
+    /// Same as [`Repo::scan`], plus [`RepoError::Git`] if Git cannot answer
+    /// whether candidate files are already tracked.
     fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<FoundEntry>, RepoError>;
 }
 
@@ -281,6 +295,7 @@ impl Repo for FsRepo {
 
     fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<FoundEntry>, RepoError> {
         let root = resolve_scope(&self.repo, scope);
+        let tracked = git_tracked_files(&self.repo, &root)?;
         let mut entries = Vec::new();
         for item in filtered_walk(self.repo.clone(), &root) {
             if cancel.is_canceled() {
@@ -293,7 +308,10 @@ impl Repo for FsRepo {
             entries.push(match Utf8Path::from_path(item.path()) {
                 Some(abs) => {
                     let path = abs.strip_prefix(&self.repo).unwrap_or(abs).to_owned();
-                    FoundEntry::File(path)
+                    FoundEntry::File {
+                        git_tracked: tracked.contains(&path),
+                        path,
+                    }
                 }
                 None => FoundEntry::Unrepresentable {
                     description: lossy_relative(&self.repo, item.path()),
@@ -303,6 +321,48 @@ impl Repo for FsRepo {
         entries.sort_by(|a, b| a.path().cmp(&b.path()));
         Ok(entries)
     }
+}
+
+fn git_tracked_files(repo: &Utf8Path, root: &Utf8Path) -> Result<BTreeSet<Utf8PathBuf>, RepoError> {
+    let Ok(scope) = root.strip_prefix(repo) else {
+        return Ok(BTreeSet::new());
+    };
+    let pathspec = if scope.as_str().is_empty() {
+        Utf8Path::new(".")
+    } else {
+        scope
+    };
+
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo.as_std_path())
+        .args(["ls-files", "-z", "--"])
+        .arg(pathspec.as_std_path())
+        .output()
+        .map_err(|err| RepoError::Git {
+            repo: repo.to_owned(),
+            detail: format!("run git: {err}"),
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(RepoError::Git {
+            repo: repo.to_owned(),
+            detail: if stderr.is_empty() {
+                format!("exit status {}", output.status)
+            } else {
+                stderr
+            },
+        });
+    }
+    let stdout = String::from_utf8(output.stdout).map_err(|err| RepoError::Git {
+        repo: repo.to_owned(),
+        detail: format!("git output was not valid UTF-8: {err}"),
+    })?;
+    Ok(stdout
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(Utf8PathBuf::from)
+        .collect())
 }
 
 /// A [`walkdir`] iterator over `root`, pruning subtrees [`should_skip`]
@@ -363,7 +423,8 @@ fn lossy_relative(repo: &Utf8Path, absolute: &std::path::Path) -> String {
 pub struct FakeRepo {
     repo: Utf8PathBuf,
     links: Mutex<BTreeMap<Utf8PathBuf, String>>,
-    files: Mutex<std::collections::BTreeSet<Utf8PathBuf>>,
+    files: Mutex<BTreeSet<Utf8PathBuf>>,
+    tracked_files: Mutex<BTreeSet<Utf8PathBuf>>,
 }
 
 impl FakeRepo {
@@ -374,6 +435,7 @@ impl FakeRepo {
             repo: repo.into(),
             links: Mutex::default(),
             files: Mutex::default(),
+            tracked_files: Mutex::default(),
         }
     }
 
@@ -396,6 +458,14 @@ impl FakeRepo {
     /// to avoid the filesystem entirely.
     pub fn seed_file(&self, path: impl Into<Utf8PathBuf>) {
         self.files
+            .lock()
+            .expect("fake repo mutex poisoned")
+            .insert(path.into());
+    }
+
+    /// Marks a seeded regular file as already tracked by Git.
+    pub fn seed_git_tracked_file(&self, path: impl Into<Utf8PathBuf>) {
+        self.tracked_files
             .lock()
             .expect("fake repo mutex poisoned")
             .insert(path.into());
@@ -452,6 +522,7 @@ impl Repo for FakeRepo {
         let scope_rel = fake_scope_rel(&self.repo, scope);
 
         let files = self.files.lock().expect("fake repo mutex poisoned");
+        let tracked_files = self.tracked_files.lock().expect("fake repo mutex poisoned");
         let mut entries = Vec::new();
         for path in files.iter() {
             if cancel.is_canceled() {
@@ -460,7 +531,10 @@ impl Repo for FakeRepo {
             if !in_scope(&scope_rel, path) || should_skip(path) {
                 continue;
             }
-            entries.push(FoundEntry::File(path.clone()));
+            entries.push(FoundEntry::File {
+                git_tracked: tracked_files.contains(path),
+                path: path.clone(),
+            });
         }
         // BTreeSet iteration is already sorted.
         Ok(entries)
@@ -474,7 +548,17 @@ mod tests {
     fn init_repo() -> tempfile::TempDir {
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git-sfs/cache/files/sha256/ab")).unwrap();
-        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["init", "--quiet"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         repo
     }
 
@@ -715,6 +799,38 @@ mod tests {
     }
 
     #[test]
+    fn find_files_marks_files_already_tracked_by_git() {
+        let dir = init_repo();
+        let repo = utf8(&dir);
+        std::fs::write(repo.join("README.md"), b"tracked").unwrap();
+        std::fs::write(repo.join("data.bin"), b"untracked").unwrap();
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.as_std_path())
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let entries = FsRepo::new(repo)
+            .find_files(Utf8Path::new("."), &Cancel::new())
+            .unwrap();
+
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            FoundEntry::File { path, git_tracked: true } if path == "README.md"
+        )));
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            FoundEntry::File { path, git_tracked: false } if path == "data.bin"
+        )));
+    }
+
+    #[test]
     fn find_files_excludes_git_and_git_sfs_and_respects_scope() {
         let dir = init_repo();
         let repo = utf8(&dir);
@@ -739,11 +855,19 @@ mod tests {
         fake.seed_file("keep/a.bin");
         fake.seed_file("elsewhere/b.bin");
         fake.seed_file(".git-sfs/rogue.bin");
+        fake.seed_git_tracked_file("keep/a.bin");
 
         let entries = fake
             .find_files(Utf8Path::new("keep"), &Cancel::new())
             .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path(), Some(Utf8Path::new("keep/a.bin")));
+        assert!(matches!(
+            entries[0],
+            FoundEntry::File {
+                git_tracked: true,
+                ..
+            }
+        ));
     }
 }

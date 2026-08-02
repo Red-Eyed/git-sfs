@@ -65,6 +65,13 @@ pub enum AddError {
     /// Walking one of the given paths failed.
     #[error(transparent)]
     Repo(#[from] RepoError),
+    /// `path` is already tracked by Git and must not be converted into a
+    /// git-sfs symlink implicitly.
+    #[error("{path}: already tracked by Git; refusing to convert it to a git-sfs symlink")]
+    AlreadyTracked {
+        /// The file being processed.
+        path: Utf8PathBuf,
+    },
     /// Hashing or storing `path` failed.
     #[error("{path}: {source}")]
     Store {
@@ -120,6 +127,7 @@ impl From<AddError> for Error {
             // cancellation outranks every other classification (see the
             // Error::Canceled doc).
             AddError::Repo(RepoError::Canceled) | AddError::Canceled => Error::Canceled,
+            AddError::AlreadyTracked { .. } => Error::Usage(err.to_string()),
             AddError::Repo(_) | AddError::Store { .. } | AddError::Io { .. } => {
                 Error::Unavailable(err.to_string())
             }
@@ -186,8 +194,11 @@ pub fn add(
             .map_err(|err| AddFailure::new(AddOutcome::default(), AddError::Repo(err)))?;
         for entry in found {
             match entry {
-                FoundEntry::File(rel_path) => {
-                    files.insert(rel_path);
+                FoundEntry::File { path, git_tracked } => {
+                    if git_tracked {
+                        return Err(AddFailure::new(outcome, AddError::AlreadyTracked { path }));
+                    }
+                    files.insert(path);
                 }
                 FoundEntry::Unrepresentable { description } => {
                     outcome.unrepresentable.push(description);
@@ -265,12 +276,12 @@ fn add_one(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::{FakeStore, FsRepo, FsStore};
+    use crate::ports::{FakeRepo, FakeStore, FsRepo, FsStore};
 
     fn init_repo() -> (tempfile::TempDir, Utf8PathBuf, Utf8PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
-        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        git(&repo, &["init", "--quiet"]);
 
         let cache = repo.join(".git-sfs/cache-real");
         std::fs::create_dir_all(&cache).unwrap();
@@ -281,6 +292,21 @@ mod tests {
         .unwrap();
 
         (dir, repo, cache)
+    }
+
+    fn git(repo: &Utf8Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.as_std_path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -339,6 +365,67 @@ mod tests {
         // finds no regular files at all -- nothing to do, not an error.
         let outcome = add(&repo_port, &store, &repo, &paths, &cancel).unwrap();
         assert!(outcome.added.is_empty());
+    }
+
+    #[test]
+    fn refuses_a_fake_repo_candidate_already_tracked_by_git_before_storing() {
+        let (_dir, repo, cache) = init_repo();
+        std::fs::write(repo.join("README.md"), b"human docs").unwrap();
+        let repo_port = FakeRepo::new(repo.clone());
+        repo_port.seed_file("README.md");
+        repo_port.seed_git_tracked_file("README.md");
+        let store = FsStore::new(cache);
+        let cancel = Cancel::new();
+
+        let failure = add(
+            &repo_port,
+            &store,
+            &repo,
+            &[Utf8PathBuf::from("README.md")],
+            &cancel,
+        )
+        .unwrap_err();
+
+        assert!(failure.outcome.added.is_empty());
+        assert!(matches!(
+            *failure.error,
+            AddError::AlreadyTracked { ref path } if path == "README.md"
+        ));
+        assert_eq!(
+            std::fs::read(repo.join("README.md")).unwrap(),
+            b"human docs"
+        );
+    }
+
+    #[test]
+    fn refuses_to_convert_a_file_already_tracked_by_git() {
+        let (_dir, repo, cache) = init_repo();
+        std::fs::write(repo.join("README.md"), b"human docs").unwrap();
+        git(&repo, &["add", "README.md"]);
+        let repo_port = FsRepo::new(repo.clone());
+        let store = FsStore::new(cache);
+        let cancel = Cancel::new();
+
+        let failure = add(
+            &repo_port,
+            &store,
+            &repo,
+            &[Utf8PathBuf::from(".")],
+            &cancel,
+        )
+        .unwrap_err();
+
+        assert!(failure.outcome.added.is_empty());
+        assert!(matches!(
+            *failure.error,
+            AddError::AlreadyTracked { ref path } if path == "README.md"
+        ));
+        let metadata = std::fs::symlink_metadata(repo.join("README.md")).unwrap();
+        assert!(metadata.file_type().is_file());
+        assert_eq!(
+            std::fs::read(repo.join("README.md")).unwrap(),
+            b"human docs"
+        );
     }
 
     #[test]
