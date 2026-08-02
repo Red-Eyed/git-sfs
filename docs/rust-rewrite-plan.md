@@ -958,6 +958,10 @@ fake test.
       permission-bit preservation). Rclone work is intentionally minimal:
       detect the rclone version once, then run backend/path checks only for
       the requested remote set.
+- [x] `llms-txt` — binary-side only, with the generated root `llms.txt`
+      embedded into `crates/git-sfs/src/dispatch.rs` and printed directly to
+      stdout. `build.rs` watches the generated file so `just gen-llms-txt`
+      invalidates Cargo's cached binary input.
 
 ### Phase 5 — reporting
 

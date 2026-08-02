@@ -60,7 +60,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Pull(args) => run_pull(cli, args, cancel),
         Command::Doctor(args) => run_doctor(cli, args, cancel),
         Command::SelfCmd(SelfCommand::Update) => unimplemented("self update"),
-        Command::LlmsTxt => unimplemented("llms-txt"),
+        Command::LlmsTxt => print_llms_txt(),
     }
 }
 
@@ -802,4 +802,30 @@ pub fn print_help() -> Result<()> {
 
 fn unimplemented(command: &'static str) -> Result<()> {
     Err(Error::NotImplemented { command })
+}
+
+const LLMS_TXT: &str = include_str!("../../../llms.txt");
+
+fn print_llms_txt() -> Result<()> {
+    std::io::stdout()
+        .write_all(llms_txt().as_bytes())
+        .map_err(|err| Error::Unavailable(format!("could not write llms.txt: {err}")))
+}
+
+fn llms_txt() -> &'static str {
+    LLMS_TXT
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_llms_txt_is_the_generated_git_sfs_reference() {
+        let text = llms_txt();
+
+        assert!(text.starts_with("# git-sfs\n"));
+        assert!(text.contains("git-sfs llms-txt"));
+        assert!(text.ends_with('\n'));
+    }
 }
