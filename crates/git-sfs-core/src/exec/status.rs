@@ -65,12 +65,22 @@ pub enum RemoteState {
     /// The remote confirmed the object is present.
     Present,
     /// The remote confirmed the object is absent.
-    Absent,
+    Absent {
+        /// Why the object is known to be absent.
+        reason: RemoteAbsenceReason,
+    },
     /// The remote lookup failed, so presence is unknown.
     Unknown {
         /// The cause rendered for display.
         cause: String,
     },
+}
+
+/// Why a remote object is known to be absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteAbsenceReason {
+    /// The object was not present in the remote listing.
+    NotListed,
 }
 
 /// Why `status` could not produce a report.
@@ -192,7 +202,9 @@ impl RemoteLookup {
         match self {
             Self::Unchecked => None,
             Self::Known(sizes) if sizes.contains_key(&hash) => Some(RemoteState::Present),
-            Self::Known(_) => Some(RemoteState::Absent),
+            Self::Known(_) => Some(RemoteState::Absent {
+                reason: RemoteAbsenceReason::NotListed,
+            }),
             Self::Unknown(cause) => Some(RemoteState::Unknown {
                 cause: cause.clone(),
             }),
@@ -240,7 +252,7 @@ fn build_report(
         }
         match state.remote {
             Some(RemoteState::Present) => on_remote += 1,
-            Some(RemoteState::Absent) => unpushed += 1,
+            Some(RemoteState::Absent { .. }) => unpushed += 1,
             Some(RemoteState::Unknown { .. }) => remote_unknown += 1,
             None => {}
         }

@@ -381,7 +381,13 @@ CLAUSES = [
         "9.2", "verify --check-remote must reject a truncated remote object", UNCOVERED
     ),
     # -- §10 JSON ------------------------------------------------------------
-    Clause("10.2", "`remotes --json` shape is frozen", UNCOVERED),
+    Clause(
+        "10.2",
+        "`remotes --json` shape is frozen",
+        ASSERTED,
+        "../../crates/git-sfs/src/reporting.rs",
+        "remotes_json_shape_matches_the_contract",
+    ),
     Clause("10.2", "`remotes` must not contact a backend", UNCOVERED),
     # -- §11 release artifacts -----------------------------------------------
     Clause(
@@ -463,9 +469,7 @@ CLAUSES = [
     Clause(
         "13.5", "environmental assumptions are checked where they are chosen", UNCOVERED
     ),
-    Clause(
-        "13.7", "add must refuse a candidate already tracked by Git", UNCOVERED
-    ),
+    Clause("13.7", "add must refuse a candidate already tracked by Git", UNCOVERED),
     # -- §7c downgrade -------------------------------------------------------
     Clause(
         "7c",

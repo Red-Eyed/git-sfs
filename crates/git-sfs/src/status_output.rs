@@ -3,7 +3,9 @@
 //! The report itself belongs to core; the shape users see on stdout belongs
 //! here in the binary crate.
 
-use git_sfs_core::exec::status::{self, RemoteState, StatusFile, StatusReport};
+use git_sfs_core::exec::status::{
+    self, RemoteAbsenceReason, RemoteState, StatusFile, StatusReport,
+};
 use git_sfs_core::{Error, Result};
 use serde::Serialize;
 
@@ -57,7 +59,7 @@ fn format_status_line(file: &StatusFile, remote_checked: bool, verbose: bool) ->
 fn remote_word(remote: Option<&RemoteState>) -> String {
     match remote {
         Some(RemoteState::Present) => "present".to_owned(),
-        Some(RemoteState::Absent) => "missing".to_owned(),
+        Some(RemoteState::Absent { .. }) => "missing".to_owned(),
         Some(RemoteState::Unknown { cause }) => format!("unknown ({cause})"),
         None => "unchecked".to_owned(),
     }
@@ -65,7 +67,15 @@ fn remote_word(remote: Option<&RemoteState>) -> String {
 
 /// Prints a JSON status report.
 pub fn print_json(report: &StatusReport) -> Result<()> {
-    let payload = StatusJson {
+    let payload = status_json(report);
+    serde_json::to_writer_pretty(std::io::stdout(), &payload)
+        .map_err(|err| Error::Unavailable(format!("could not write status JSON: {err}")))?;
+    println!();
+    Ok(())
+}
+
+fn status_json(report: &StatusReport) -> StatusJson<'_> {
+    StatusJson {
         tracked: report.tracked,
         unique_files: report.unique_files,
         cached: report.cached,
@@ -86,11 +96,7 @@ pub fn print_json(report: &StatusReport) -> Result<()> {
                 remote: file.remote.as_ref().map(remote_json),
             })
             .collect(),
-    };
-    serde_json::to_writer_pretty(std::io::stdout(), &payload)
-        .map_err(|err| Error::Unavailable(format!("could not write status JSON: {err}")))?;
-    println!();
-    Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -124,15 +130,29 @@ struct StatusFileJson<'a> {
 #[serde(tag = "state", rename_all = "snake_case")]
 enum RemoteStateJson<'a> {
     Present,
-    Absent,
+    Absent { reason: RemoteAbsenceReasonJson },
     Unknown { cause: &'a str },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RemoteAbsenceReasonJson {
+    NotListed,
 }
 
 fn remote_json(remote: &RemoteState) -> RemoteStateJson<'_> {
     match remote {
         RemoteState::Present => RemoteStateJson::Present,
-        RemoteState::Absent => RemoteStateJson::Absent,
+        RemoteState::Absent { reason } => RemoteStateJson::Absent {
+            reason: remote_absence_reason_json(*reason),
+        },
         RemoteState::Unknown { cause } => RemoteStateJson::Unknown { cause },
+    }
+}
+
+fn remote_absence_reason_json(reason: RemoteAbsenceReason) -> RemoteAbsenceReasonJson {
+    match reason {
+        RemoteAbsenceReason::NotListed => RemoteAbsenceReasonJson::NotListed,
     }
 }
 
@@ -151,5 +171,133 @@ fn humanize_bytes(n: u64) -> String {
         format!("{n} B")
     } else {
         format!("{value:.1} {unit}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use git_sfs_core::domain::Sha256;
+    use serde_json::json;
+
+    use super::*;
+
+    fn hash() -> Sha256 {
+        Sha256::parse("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            .expect("valid hash")
+    }
+
+    #[test]
+    fn status_json_carries_all_three_remote_states() {
+        let hash = hash();
+        let report = StatusReport {
+            tracked: 3,
+            unique_files: 3,
+            cached: 1,
+            missing_local: 2,
+            total_size: 11,
+            remote_checked: true,
+            on_remote: Some(1),
+            unpushed: Some(1),
+            remote_unknown: Some(1),
+            files: vec![
+                StatusFile {
+                    path: "present.bin".into(),
+                    hash,
+                    size: 11,
+                    cached: true,
+                    remote: Some(RemoteState::Present),
+                },
+                StatusFile {
+                    path: "absent.bin".into(),
+                    hash,
+                    size: status::SIZE_UNKNOWN,
+                    cached: false,
+                    remote: Some(RemoteState::Absent {
+                        reason: RemoteAbsenceReason::NotListed,
+                    }),
+                },
+                StatusFile {
+                    path: "unknown.bin".into(),
+                    hash,
+                    size: status::SIZE_UNKNOWN,
+                    cached: false,
+                    remote: Some(RemoteState::Unknown {
+                        cause: "remote unavailable".to_owned(),
+                    }),
+                },
+            ],
+        };
+
+        assert_eq!(
+            serde_json::to_value(status_json(&report)).unwrap(),
+            json!({
+                "tracked": 3,
+                "unique_files": 3,
+                "cached": 1,
+                "missing_local": 2,
+                "total_size": 11,
+                "remote_checked": true,
+                "on_remote": 1,
+                "unpushed": 1,
+                "remote_unknown": 1,
+                "files": [
+                    {
+                        "path": "present.bin",
+                        "hash": hash.to_string(),
+                        "size": 11,
+                        "cached": true,
+                        "remote": { "state": "present" }
+                    },
+                    {
+                        "path": "absent.bin",
+                        "hash": hash.to_string(),
+                        "size": -1,
+                        "cached": false,
+                        "remote": {
+                            "state": "absent",
+                            "reason": "not_listed"
+                        }
+                    },
+                    {
+                        "path": "unknown.bin",
+                        "hash": hash.to_string(),
+                        "size": -1,
+                        "cached": false,
+                        "remote": {
+                            "state": "unknown",
+                            "cause": "remote unavailable"
+                        }
+                    }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn status_json_omits_remote_fields_when_unchecked() {
+        let report = StatusReport {
+            tracked: 1,
+            unique_files: 1,
+            cached: 1,
+            missing_local: 0,
+            total_size: 11,
+            remote_checked: false,
+            on_remote: None,
+            unpushed: None,
+            remote_unknown: None,
+            files: vec![StatusFile {
+                path: "local.bin".into(),
+                hash: hash(),
+                size: 11,
+                cached: true,
+                remote: None,
+            }],
+        };
+        let payload = serde_json::to_value(status_json(&report)).unwrap();
+
+        assert!(payload.get("on_remote").is_none());
+        assert!(payload.get("unpushed").is_none());
+        assert!(payload.get("remote_unknown").is_none());
+        assert!(payload["files"][0].get("remote").is_none());
     }
 }

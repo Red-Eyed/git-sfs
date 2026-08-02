@@ -978,8 +978,12 @@ fake test.
       deliberately stops at wrapper-visible facts; a richer core event stream
       should only be added if later UX needs per-file or per-byte details that
       cannot be observed at the binary edge.
-- [ ] JSON output review. `status --json` and `remotes --json` exist; any
-      further JSON shape work belongs here, not in command execution.
+- [x] JSON output review. `status --json` now carries the three remote states
+      explicitly at the JSON boundary — present, absent with a reason, and
+      unknown with a cause — instead of losing information when a checked
+      remote object is not listed. `remotes --json` has a focused shape test
+      for contract-spec §10.2. No command execution code learned about JSON;
+      rendering stays in the binary crate.
 
 ### Phase 6 — release
 
@@ -988,6 +992,16 @@ users actually install. This phase produces the release artifacts that
 `self update` can later consume: zigbuild, musl targets, `ureq`+rustls, archive
 naming per spec §11, checksum generation, and release workflow wiring. **The
 risk phase** — mistakes here are user-visible and hard to reverse.
+
+- [x] Rust archive builder and release workflow wiring. `scripts/build-rust-release.sh`
+      maps the Rust target triples to the frozen Go-shaped artifact names,
+      injects `GIT_SFS_VERSION`, packages a single `git-sfs` executable per
+      archive, writes installer-compatible `SHA256SUMS`, and rejects Linux
+      binaries that are not statically linked. The release workflow now builds
+      the Rust archives via `cargo-zigbuild`; the local smoke path verifies the
+      host archive shape and version injection, while the full four-target
+      matrix is left for CI because this workstation does not have Zig or
+      `cargo-zigbuild` installed.
 
 ### Phase 7 — self update
 

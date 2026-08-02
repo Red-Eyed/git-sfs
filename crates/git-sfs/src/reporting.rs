@@ -149,11 +149,15 @@ pub(crate) fn remotes_text(entries: &[RemoteEntry]) {
 }
 
 pub(crate) fn remotes_json(entries: &[RemoteEntry]) -> Result<()> {
-    let payload = RemotesJson { remotes: entries };
+    let payload = remotes_json_payload(entries);
     serde_json::to_writer_pretty(std::io::stdout(), &payload)
         .map_err(|err| Error::Unavailable(format!("could not write remotes JSON: {err}")))?;
     println!();
     Ok(())
+}
+
+fn remotes_json_payload(entries: &[RemoteEntry]) -> RemotesJson<'_> {
+    RemotesJson { remotes: entries }
 }
 
 fn add_success_lines(outcome: &AddOutcome) -> Vec<String> {
@@ -293,7 +297,9 @@ mod tests {
     use git_sfs_core::domain::hash::Sha256;
     use git_sfs_core::exec::add::AddedFile;
     use git_sfs_core::exec::push::PushOutcome;
+    use git_sfs_core::exec::remotes::RemoteEntry;
     use git_sfs_core::plan::SkippedObject;
+    use serde_json::json;
 
     use super::*;
 
@@ -351,6 +357,46 @@ mod tests {
         assert_eq!(
             lines.last().map(String::as_str),
             Some("  run: git-sfs pull <path> to restore them")
+        );
+    }
+
+    #[test]
+    fn remotes_json_shape_matches_the_contract() {
+        let entries = vec![
+            RemoteEntry {
+                name: "default".to_owned(),
+                backend: "myremote".to_owned(),
+                path: Some("datasets/project".to_owned()),
+                config: Some("rclone.conf".to_owned()),
+                default: true,
+            },
+            RemoteEntry {
+                name: "archive".to_owned(),
+                backend: "archive".to_owned(),
+                path: None,
+                config: None,
+                default: false,
+            },
+        ];
+
+        assert_eq!(
+            serde_json::to_value(remotes_json_payload(&entries)).unwrap(),
+            json!({
+                "remotes": [
+                    {
+                        "name": "default",
+                        "backend": "myremote",
+                        "path": "datasets/project",
+                        "config": "rclone.conf",
+                        "default": true
+                    },
+                    {
+                        "name": "archive",
+                        "backend": "archive",
+                        "default": false
+                    }
+                ]
+            })
         );
     }
 }

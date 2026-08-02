@@ -29,5 +29,15 @@ rust-build:
     {{cargo}} build --workspace --release
 
 [group('rust')]
+[doc('build Rust release archives into dist/')]
+rust-release-snapshot:
+    sh scripts/build-rust-release.sh snapshot dist
+
+[group('rust')]
+[doc('build the host Rust release archive into dist/')]
+rust-release-native:
+    sh scripts/build-rust-release.sh snapshot dist native
+
+[group('rust')]
 [doc('everything the Rust workspace must pass')]
 rust-check: rust-fmt rust-clippy rust-test rust-build
