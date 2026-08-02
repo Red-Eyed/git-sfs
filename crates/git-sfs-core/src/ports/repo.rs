@@ -264,6 +264,9 @@ impl FsRepo {
 impl Repo for FsRepo {
     fn scan(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<ScannedEntry>, RepoError> {
         let root = resolve_scope(&self.repo, scope);
+        if is_symlink_scope(&self.repo, &root)? {
+            return Ok(vec![scan_symlink(&self.repo, &root)]);
+        }
         let mut entries = Vec::new();
         for item in filtered_walk(self.repo.clone(), &root) {
             if cancel.is_canceled() {
@@ -274,16 +277,7 @@ impl Repo for FsRepo {
                 continue;
             }
             entries.push(match Utf8Path::from_path(item.path()) {
-                Some(abs) => {
-                    let path = abs.strip_prefix(&self.repo).unwrap_or(abs).to_owned();
-                    match read_symlink_target(abs) {
-                        Ok(target) => match read_and_validate(&self.repo, abs, &target) {
-                            Ok(hash) => ScannedEntry::Tracked { path, hash },
-                            Err(reason) => ScannedEntry::Invalid { path, reason },
-                        },
-                        Err(reason) => ScannedEntry::Invalid { path, reason },
-                    }
-                }
+                Some(abs) => scan_symlink(&self.repo, abs),
                 None => ScannedEntry::Unrepresentable {
                     description: lossy_relative(&self.repo, item.path()),
                 },
@@ -320,6 +314,29 @@ impl Repo for FsRepo {
         }
         entries.sort_by(|a, b| a.path().cmp(&b.path()));
         Ok(entries)
+    }
+}
+
+fn is_symlink_scope(repo: &Utf8Path, root: &Utf8Path) -> Result<bool, RepoError> {
+    let relative = root.strip_prefix(repo).unwrap_or(root);
+    if should_skip(relative) {
+        return Ok(false);
+    }
+    match std::fs::symlink_metadata(root.as_std_path()) {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Ok(false),
+    }
+}
+
+fn scan_symlink(repo: &Utf8Path, abs: &Utf8Path) -> ScannedEntry {
+    let path = abs.strip_prefix(repo).unwrap_or(abs).to_owned();
+    match read_symlink_target(abs) {
+        Ok(target) => match read_and_validate(repo, abs, &target) {
+            Ok(hash) => ScannedEntry::Tracked { path, hash },
+            Err(reason) => ScannedEntry::Invalid { path, reason },
+        },
+        Err(reason) => ScannedEntry::Invalid { path, reason },
     }
 }
 
@@ -591,6 +608,26 @@ mod tests {
 
         let entries = FsRepo::new(repo)
             .scan(Utf8Path::new("."), &Cancel::new())
+            .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            ScannedEntry::Tracked { path, hash } => {
+                assert_eq!(path, "data/train.bin");
+                assert_eq!(*hash, a_hash());
+            }
+            other => panic!("expected Tracked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scan_classifies_a_dangling_symlink_scope() {
+        let dir = init_repo();
+        let repo = utf8(&dir);
+        link_valid(&repo, "data/train.bin", a_hash());
+
+        let entries = FsRepo::new(repo)
+            .scan(Utf8Path::new("data/train.bin"), &Cancel::new())
             .unwrap();
 
         assert_eq!(entries.len(), 1);

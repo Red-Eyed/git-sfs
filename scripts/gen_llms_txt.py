@@ -57,8 +57,10 @@ def read_doc(name: str) -> str:
 
 def bump_headings(text: str, by: int = 1) -> str:
     """Increase all markdown heading levels by `by` (e.g. ## → ###)."""
+
     def _bump(m: re.Match) -> str:
         return "#" * by + m.group(0)
+
     return re.sub(r"^(#+) ", _bump, text, flags=re.MULTILINE)
 
 
@@ -76,7 +78,9 @@ def build() -> str:
     # Strip leading preamble from corporate-environments table, keep only the table.
     corp_env_raw = extract_section(commands_doc, "Corporate environments", level=3)
     corp_env_lines = corp_env_raw.splitlines()
-    table_start = next((i for i, l in enumerate(corp_env_lines) if l.startswith("|")), 0)
+    table_start = next(
+        (i for i, line in enumerate(corp_env_lines) if line.startswith("|")), 0
+    )
     env_table = "\n".join(corp_env_lines[table_start:])
 
     commands_table = """\
@@ -98,7 +102,6 @@ def build() -> str:
 
     sections = [
         "# git-sfs",
-
         (
             "> CLI for storing large file bytes outside Git while Git tracks symlinks.\n"
             "> Primary use case: ML datasets, model checkpoints, and any large files\n"
@@ -108,7 +111,6 @@ def build() -> str:
             "> Git commits normal symlinks; bytes live in a local content-addressed\n"
             "> cache and sync to any rclone remote."
         ),
-
         "## Agent tips",
         (
             "- Run `git-sfs llms-txt` to print this document from the installed binary.\n"
@@ -118,51 +120,38 @@ def build() -> str:
             "- Large file bytes are never in Git. They live in the local cache and on rclone remotes.\n"
             "- After `git clone`, always run `git-sfs setup` then `git-sfs pull` to materialize files."
         ),
-
         "## Quick start",
         quick_start,
-
         "## Commands",
         commands_table,
-
         "## Global flags",
         (
             "```\n"
-            "--cache PATH    override cache directory (env: GIT_SFS_CACHE)\n"
             "-j, --jobs N    max parallel workers; 0 = auto (overrides config n_jobs)\n"
             "--verbose       debug output to stderr\n"
             "--quiet         silence progress output\n"
             "--version       print release version\n"
             "```"
         ),
-
         "## Cache path resolution",
         (
             "```\n"
-            "1. --cache flag\n"
-            "2. GIT_SFS_CACHE environment variable\n"
-            "3. .git-sfs/cache symlink (written by git-sfs setup)\n"
+            "1. init/setup --cache binding\n"
+            "2. .git-sfs/cache symlink (written by git-sfs setup)\n"
             "```"
         ),
-
         "## Environment variables",
         env_table,
-
         "## Concepts",
         bump_headings(concepts, by=1),
-
         "## Configuration reference",
         bump_headings(config_doc, by=1),
-
         "## Remotes",
         bump_headings(remotes_doc, by=1),
-
         "## Workflows",
         bump_headings(workflows_doc, by=1),
-
         "## Command reference",
         bump_headings(commands_doc, by=1),
-
         "## Safety",
         bump_headings(safety_doc, by=1),
     ]

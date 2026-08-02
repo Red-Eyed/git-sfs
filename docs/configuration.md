@@ -68,7 +68,8 @@ git-sfs setup --cache /mnt/shared/git-sfs-cache
 
 After `init` or `setup`, normal commands use only the repo-facing
 `.git-sfs/cache` symlink. `--cache` is a binding option for `init`/`setup`, not
-a per-command override, and `GIT_SFS_CACHE` is not part of the v2 model.
+a per-command override; environment variable cache overrides are not part of the
+v2 model.
 
 Existing repos keep working: if `.git-sfs/cache` already exists, setup preserves
 it; if an old `.git-sfs/.cache` directory exists but the symlink is missing,

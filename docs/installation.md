@@ -37,31 +37,31 @@ go build -o ~/.local/bin/git-sfs ./cmd/git-sfs
 By default installs to `$HOME/.local/bin`. Override:
 
 ```sh
-GIT_SFS_INSTALL_DIR=/usr/local/bin curl -LsSf .../install.sh | sh
+curl -LsSf .../install.sh | sh -s -- --install-dir /usr/local/bin
 ```
 
 The installer also installs the latest stable `rclone` if not already on `PATH`. To skip:
 
 ```sh
-GIT_SFS_INSTALL_RCLONE=0 curl -LsSf .../install.sh | sh
+curl -LsSf .../install.sh | sh -s -- --no-install-rclone
 ```
 
 Install a specific version:
 
 ```sh
-GIT_SFS_VERSION=v1.6.0 curl -LsSf .../install.sh | sh
+curl -LsSf .../install.sh | sh -s -- --version v1.6.0
 ```
 
 Corporate CA bundle:
 
 ```sh
-SSL_CERT_FILE=/path/to/corporate-ca.pem curl -LsSf .../install.sh | SSL_CERT_FILE=/path/to/corporate-ca.pem sh
+curl -LsSf .../install.sh | sh -s -- --ca-bundle /path/to/corporate-ca.pem
 ```
 
 Skip TLS verification entirely (last resort):
 
 ```sh
-curl -kLsSf .../install.sh | GIT_SFS_INSECURE_TLS=1 sh
+curl -kLsSf .../install.sh | sh -s -- --insecure-tls
 ```
 
 ## Updating

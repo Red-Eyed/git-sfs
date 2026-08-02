@@ -10,7 +10,7 @@ repository = "https://github.com/Red-Eyed/git-sfs"
 # Cargo's version is internal bookkeeping. The user-visible version is the
 # release tag in `v2.0.0` form, which is not valid semver and so cannot live
 # here -- see `crates/git-sfs/src/version.rs` and contract-spec 6.6.
-version = "2.0.1"
+version = "2.0.2"
 
 [workspace.dependencies]
 git-sfs-core = { path = "crates/git-sfs-core" }

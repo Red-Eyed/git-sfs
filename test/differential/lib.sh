@@ -57,7 +57,7 @@ setup_repo() {
   git -C "$REPO" config user.name git-sfs
   (
     cd "$REPO"
-    GIT_SFS_CACHE="$CACHE" git_sfs init >/dev/null
+    git_sfs init --cache "$CACHE" >/dev/null
     git_sfs setup >/dev/null
   )
 }

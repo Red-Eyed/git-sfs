@@ -1,21 +1,77 @@
 set -eu
 
-repo="${GIT_SFS_REPO:-Red-Eyed/git-sfs}"
-version="${GIT_SFS_VERSION:-latest}"
-install_dir="${GIT_SFS_INSTALL_DIR:-$HOME/.local/bin}"
-install_rclone="${GIT_SFS_INSTALL_RCLONE:-1}"
-insecure_tls="${GIT_SFS_INSECURE_TLS:-0}"
-ca_bundle="${GIT_SFS_SSL_CERT_FILE:-${SSL_CERT_FILE:-${CURL_CA_BUNDLE:-}}}"
-release_base_url="${GIT_SFS_RELEASE_BASE_URL:-https://github.com/$repo/releases/download}"
-release_latest_url="${GIT_SFS_RELEASE_LATEST_URL:-https://github.com/$repo/releases/latest}"
-rclone_base_url="${GIT_SFS_RCLONE_BASE_URL:-https://downloads.rclone.org}"
+repo="Red-Eyed/git-sfs"
+version="latest"
+install_dir="$HOME/.local/bin"
+install_rclone="1"
+insecure_tls="0"
+ca_bundle=""
+release_base_url=""
+release_latest_url=""
+rclone_base_url="https://downloads.rclone.org"
 curl_flags="-LsSf"
+
+usage() {
+  cat <<'EOF'
+usage: install.sh [options]
+
+Options:
+  --version VERSION             git-sfs release tag to install (default: latest)
+  --install-dir PATH            install directory (default: $HOME/.local/bin)
+  --repo OWNER/REPO             GitHub repository (default: Red-Eyed/git-sfs)
+  --release-base-url URL        release download base URL
+  --release-latest-url URL      latest-release redirect URL
+  --rclone-base-url URL         rclone download base URL
+  --no-install-rclone           install only git-sfs
+  --ca-bundle PATH              TLS CA bundle for downloads
+  --insecure-tls                disable TLS certificate verification
+  -h, --help                    show this help
+EOF
+}
+
+need_value() {
+  if [ "$#" -lt 2 ]; then
+    echo "$1 requires a value" >&2
+    usage >&2
+    exit 2
+  fi
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version) need_value "$@"; version="$2"; shift 2 ;;
+    --version=*) version="${1#*=}"; shift ;;
+    --install-dir) need_value "$@"; install_dir="$2"; shift 2 ;;
+    --install-dir=*) install_dir="${1#*=}"; shift ;;
+    --repo) need_value "$@"; repo="$2"; shift 2 ;;
+    --repo=*) repo="${1#*=}"; shift ;;
+    --release-base-url) need_value "$@"; release_base_url="$2"; shift 2 ;;
+    --release-base-url=*) release_base_url="${1#*=}"; shift ;;
+    --release-latest-url) need_value "$@"; release_latest_url="$2"; shift 2 ;;
+    --release-latest-url=*) release_latest_url="${1#*=}"; shift ;;
+    --rclone-base-url) need_value "$@"; rclone_base_url="$2"; shift 2 ;;
+    --rclone-base-url=*) rclone_base_url="${1#*=}"; shift ;;
+    --no-install-rclone) install_rclone="0"; shift ;;
+    --ca-bundle) need_value "$@"; ca_bundle="$2"; shift 2 ;;
+    --ca-bundle=*) ca_bundle="${1#*=}"; shift ;;
+    --insecure-tls) insecure_tls="1"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$release_base_url" ]; then
+  release_base_url="https://github.com/$repo/releases/download"
+fi
+if [ -z "$release_latest_url" ]; then
+  release_latest_url="https://github.com/$repo/releases/latest"
+fi
 
 if [ -n "$ca_bundle" ]; then
   echo "using TLS CA bundle from $ca_bundle"
 elif [ "$insecure_tls" = "1" ]; then
   curl_flags="-kLsSf"
-  echo "warning: GIT_SFS_INSECURE_TLS=1 disables TLS certificate verification for downloads" >&2
+  echo "warning: --insecure-tls disables TLS certificate verification for downloads" >&2
 fi
 
 download() {
@@ -86,7 +142,7 @@ echo "git-sfs $git_sfs_version installed to $install_dir/git-sfs"
 
 if [ "$install_rclone" != "0" ]; then
   if ! command -v unzip >/dev/null 2>&1; then
-    echo "rclone installation requires unzip; install unzip or rerun with GIT_SFS_INSTALL_RCLONE=0" >&2
+    echo "rclone installation requires unzip; install unzip or rerun with --no-install-rclone" >&2
     exit 1
   fi
   download "$rclone_base_url/version.txt" -o "$tmp/rclone-version.txt"

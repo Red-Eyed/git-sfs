@@ -51,7 +51,7 @@ clone_and_pull_repo() {
   git_setup_user "$dst_repo"
   (
     cd "$dst_repo"
-    git_sfs --cache "$cache" setup >/dev/null
+    git_sfs setup --cache "$cache" >/dev/null
     git_sfs pull >/dev/null
     git_sfs verify >/dev/null
   )
@@ -95,7 +95,7 @@ restore_selected_directory() {
   [ -f "$(cache_file_for "$cache" "$hash_b")" ] || fail "selected directory file was not restored"
 }
 
-pull_with_env_cache() {
+pull_with_configured_cache() {
   local src_repo="$1"
   local dst_repo="$2"
   local cache="$3"
@@ -104,12 +104,12 @@ pull_with_env_cache() {
   git clone -q "$src_repo" "$dst_repo"
   (
     cd "$dst_repo"
-    GIT_SFS_CACHE="$cache" git_sfs setup >/dev/null
-    GIT_SFS_CACHE="$cache" git_sfs pull "$path" >/dev/null
+    git_sfs setup --cache "$cache" >/dev/null
+    git_sfs pull "$path" >/dev/null
   )
 }
 
-pull_with_flag_cache() {
+pull_with_bound_cache() {
   local src_repo="$1"
   local dst_repo="$2"
   local cache="$3"
@@ -118,7 +118,7 @@ pull_with_flag_cache() {
   git clone -q "$src_repo" "$dst_repo"
   (
     cd "$dst_repo"
-    git_sfs --cache "$cache" setup >/dev/null
+    git_sfs setup --cache "$cache" >/dev/null
     git_sfs pull "$path" >/dev/null
   )
 }
@@ -131,7 +131,7 @@ rebind_repo_cache() {
   (
     cd "$repo"
     rm -f .git-sfs/cache
-    git_sfs --cache "$cache" setup >/dev/null
+    git_sfs setup --cache "$cache" >/dev/null
     if [ "$pull_path" != "__skip_pull__" ]; then
       git_sfs pull "$pull_path" >/dev/null
     fi
@@ -180,13 +180,12 @@ scenario_filesystem_workflows() {
   # Pulling a directory should repopulate only the files needed under that path.
   restore_selected_directory "$repo_b" "$cache_b" "$hash_valid" "$hash_metrics" "data/validation/"
 
-  # The cache may come from the environment instead of the repo-local symlink.
-  pull_with_env_cache "$repo_a" "$repo_c" "$temp_cache" "data/train-000.tar.zst"
+  # The clone binds a cache during setup, then pulls through the repo-local symlink.
+  pull_with_configured_cache "$repo_a" "$repo_c" "$temp_cache" "data/train-000.tar.zst"
   [ -f "$(cache_file_for "$temp_cache" "$hash_train")" ] || fail "temporary cache pull failed"
 
-  # The explicit flag path is the other supported override and should work the
-  # same way for a brand-new clone.
-  pull_with_flag_cache "$repo_a" "$repo_d" "$shared_cache" "data/train-000.tar.zst"
+  # A shared cache binding should work the same way for a brand-new clone.
+  pull_with_bound_cache "$repo_a" "$repo_d" "$shared_cache" "data/train-000.tar.zst"
   [ -f "$(cache_file_for "$shared_cache" "$hash_train")" ] || fail "shared cache pull failed"
 
   # Re-pointing an existing repo at a new cache should be safe and should not
@@ -297,7 +296,7 @@ scenario_rclone_workflow() {
   git clone -q "$repo" "$clone"
   (
     cd "$clone"
-    git_sfs --cache "$clone_cache" setup >/dev/null
+    git_sfs setup --cache "$clone_cache" >/dev/null
     git_sfs pull data/ >/dev/null
     git_sfs verify >/dev/null
     git_sfs verify >/dev/null

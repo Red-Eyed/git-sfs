@@ -619,7 +619,8 @@ Normal commands resolve exactly one cache source:
 
 `init` and `setup` are the only commands that choose or bind that symlink.
 `--cache PATH` is a binding option for those commands only, not a hidden
-per-command override. `GIT_SFS_CACHE` is not part of the v2 cache model.
+per-command override. Environment variable cache overrides are not part of the
+v2 cache model.
 
 For new local state, the default cache root is `<git-dir>/sfs/cache`
 (`.git/sfs/cache` in a normal repository). Existing repos keep their existing

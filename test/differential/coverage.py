@@ -256,7 +256,7 @@ CLAUSES = [
     Clause("7.1", "`.git` as a file (worktree, submodule) is accepted", UNCOVERED),
     Clause(
         "7.2",
-        "cache precedence: --cache, GIT_SFS_CACHE, symlink, else error",
+        "cache binding: init/setup --cache, symlink, else error",
         UNCOVERED,
     ),
     # -- §8 lock protocol ----------------------------------------------------

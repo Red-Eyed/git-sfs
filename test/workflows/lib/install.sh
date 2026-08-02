@@ -61,12 +61,12 @@ install_from_fixture() {
   note "install latest release from local fixture"
   # Point the installer at local file:// endpoints so the test remains offline
   # while still covering the same contract as a real release install.
-  env \
-    GIT_SFS_VERSION=latest \
-    GIT_SFS_INSTALL_DIR="$INSTALL_DIR" \
-    GIT_SFS_RELEASE_BASE_URL="file://$FIXTURE_ROOT/releases/download" \
-    GIT_SFS_RELEASE_LATEST_URL="file://$FIXTURE_ROOT/releases/latest/$VERSION" \
-    GIT_SFS_INSTALL_RCLONE=0 \
-    sh "$ROOT/scripts/install.sh" >/dev/null
+  sh "$ROOT/scripts/install.sh" \
+    --version latest \
+    --install-dir "$INSTALL_DIR" \
+    --release-base-url "file://$FIXTURE_ROOT/releases/download" \
+    --release-latest-url "file://$FIXTURE_ROOT/releases/latest/$VERSION" \
+    --no-install-rclone \
+    >/dev/null
   assert_eq "$(git_sfs --version | tr -d '\n')" "$VERSION" "installed git-sfs version"
 }

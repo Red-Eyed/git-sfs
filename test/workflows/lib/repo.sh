@@ -51,7 +51,7 @@ init_repo() {
     cd "$repo"
     # `init` establishes tracked repo state, while `setup` materializes the
     # repo-local cache symlink that stays out of Git history.
-    GIT_SFS_CACHE="$cache" git_sfs init >/dev/null
+    git_sfs init --cache "$cache" >/dev/null
     git_sfs setup >/dev/null
   )
 }
