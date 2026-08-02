@@ -608,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn default_remote_check_flags_size_mismatch_as_corrupt_remote() {
+    fn verify_check_remote_rejects_a_truncated_remote_object() {
         let repo = FakeRepo::new("/repo");
         let store = FakeStore::new();
         let remote = FakeRemote::new();
@@ -630,7 +630,10 @@ mod tests {
         .unwrap_err();
 
         assert!(err.report().unwrap().issues.iter().any(|issue| {
-            issue.kind == IssueKind::CorruptRemoteFile && issue.hash == Some(hash)
+            issue.kind == IssueKind::CorruptRemoteFile
+                && issue.path.as_deref() == Some(Utf8Path::new("data.bin"))
+                && issue.hash == Some(hash)
+                && issue.detail.as_deref() == Some("remote size 4 does not match local size 20")
         }));
     }
 

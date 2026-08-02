@@ -378,7 +378,11 @@ CLAUSES = [
         "writable-object-is-reprotected",
     ),
     Clause(
-        "9.2", "verify --check-remote must reject a truncated remote object", UNCOVERED
+        "9.2",
+        "verify --check-remote must reject a truncated remote object",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/verify.rs",
+        "verify_check_remote_rejects_a_truncated_remote_object",
     ),
     # -- §10 JSON ------------------------------------------------------------
     Clause(
