@@ -151,4 +151,37 @@ algorithm = "sha256"
         assert_eq!(entries[0].name, "default");
         assert_eq!(entries[1].name, "zed");
     }
+
+    #[test]
+    fn lists_remote_configuration_without_contacting_the_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = Utf8PathBuf::from_path_buf(dir.path().join("config.toml")).unwrap();
+        std::fs::write(
+            &path,
+            r#"version = 1
+
+[remotes.default]
+backend = "backend-that-should-not-exist"
+path = "datasets/project"
+config = "missing-rclone.conf"
+
+[settings]
+algorithm = "sha256"
+"#,
+        )
+        .unwrap();
+
+        let entries = remotes(&path).unwrap();
+
+        assert_eq!(
+            entries,
+            vec![RemoteEntry {
+                name: "default".to_owned(),
+                backend: "backend-that-should-not-exist".to_owned(),
+                path: Some("datasets/project".to_owned()),
+                config: Some("missing-rclone.conf".to_owned()),
+                default: true,
+            }]
+        );
+    }
 }

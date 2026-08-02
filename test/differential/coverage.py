@@ -392,7 +392,13 @@ CLAUSES = [
         "../../crates/git-sfs/src/reporting.rs",
         "remotes_json_shape_matches_the_contract",
     ),
-    Clause("10.2", "`remotes` must not contact a backend", UNCOVERED),
+    Clause(
+        "10.2",
+        "`remotes` must not contact a backend",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/remotes.rs",
+        "lists_remote_configuration_without_contacting_the_backend",
+    ),
     # -- §11 release artifacts -----------------------------------------------
     Clause(
         "11",
