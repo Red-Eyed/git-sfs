@@ -588,46 +588,9 @@ impl Store for FsStore {
         // the rename/create below.
         let tmp_path = staging.join(format!(".{}.adopt", hash.to_hex()));
 
-        match std::fs::rename(source, &tmp_path) {
-            Ok(()) => {
-                // Same filesystem: a rename cannot alter content, and
-                // `source` was already verified above, so the bytes now at
-                // `tmp_path` are known-good without re-reading them.
-            }
-            Err(err) if err.kind() == io::ErrorKind::CrossesDevices => {
-                // Cross-filesystem: the copy itself can corrupt data in a
-                // way a rename cannot, so the copy is independently
-                // verified and `source` is removed only once that passes.
-                copy_with_cancel(source, &tmp_path, cancel)?;
-                let copied = hash_file(&tmp_path, cancel)?;
-                if copied != hash {
-                    // `source` is still intact; only the staging copy is
-                    // corrupt, so cleanup here is a courtesy, not a
-                    // correctness requirement -- a leftover is inert and
-                    // gets overwritten by the next adopt of this hash.
-                    #[allow(
-                        clippy::let_underscore_must_use,
-                        reason = "best-effort cleanup of a corrupt staging file; source is already confirmed intact above"
-                    )]
-                    let _ = std::fs::remove_file(&tmp_path);
-                    return Err(StoreError::HashMismatch {
-                        path: tmp_path,
-                        want: hash,
-                        got: copied,
-                    });
-                }
-                std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
-                    path: source.to_owned(),
-                    source: source_err,
-                })?;
-            }
-            Err(source_err) => {
-                return Err(StoreError::Io {
-                    path: source.to_owned(),
-                    source: source_err,
-                });
-            }
-        }
+        stage_adopt_source(source, &tmp_path, hash, cancel, |src, dst| {
+            std::fs::rename(src, dst)
+        })?;
 
         let mut perms = std::fs::metadata(&tmp_path)
             .map_err(|source_err| StoreError::Io {
@@ -687,6 +650,63 @@ fn same_file(a: &Utf8Path, b: &Utf8Path) -> Result<bool, StoreError> {
         source,
     })?;
     Ok(am.dev() == bm.dev() && am.ino() == bm.ino())
+}
+
+fn stage_adopt_source(
+    source: &Utf8Path,
+    tmp_path: &Utf8Path,
+    hash: Sha256,
+    cancel: &Cancel,
+    rename: impl FnOnce(&Utf8Path, &Utf8Path) -> io::Result<()>,
+) -> Result<(), StoreError> {
+    match rename(source, tmp_path) {
+        Ok(()) => {
+            // Same filesystem: a rename cannot alter content, and `source`
+            // was already verified above, so the bytes now at `tmp_path` are
+            // known-good without re-reading them.
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::CrossesDevices => {
+            copy_adopt_source_across_devices(source, tmp_path, hash, cancel)
+        }
+        Err(source_err) => Err(StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        }),
+    }
+}
+
+fn copy_adopt_source_across_devices(
+    source: &Utf8Path,
+    tmp_path: &Utf8Path,
+    hash: Sha256,
+    cancel: &Cancel,
+) -> Result<(), StoreError> {
+    // Cross-filesystem: the copy itself can corrupt data in a way a rename
+    // cannot, so the copy is independently verified and `source` is removed
+    // only once that passes.
+    copy_with_cancel(source, tmp_path, cancel)?;
+    let copied = hash_file(tmp_path, cancel)?;
+    if copied != hash {
+        // `source` is still intact; only the staging copy is corrupt, so
+        // cleanup here is a courtesy, not a correctness requirement -- a
+        // leftover is inert and gets overwritten by the next adopt of this
+        // hash.
+        #[allow(
+            clippy::let_underscore_must_use,
+            reason = "best-effort cleanup of a corrupt staging file; source is already confirmed intact above"
+        )]
+        let _ = std::fs::remove_file(tmp_path);
+        return Err(StoreError::HashMismatch {
+            path: tmp_path.to_owned(),
+            want: hash,
+            got: copied,
+        });
+    }
+    std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
+        path: source.to_owned(),
+        source: source_err,
+    })
 }
 
 /// Streams `source`'s bytes to a freshly created file at `dst`, checking
@@ -1220,6 +1240,54 @@ mod tests {
         let large_dst = Utf8PathBuf::from_path_buf(dir.path().join("large_dst.bin")).unwrap();
         let err = copy_with_cancel(&large_source, &large_dst, &cancel).unwrap_err();
         assert!(matches!(err, StoreError::Canceled));
+    }
+
+    #[test]
+    fn adopt_cross_device_fallback_removes_source_only_after_verified_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"moved across a simulated device boundary";
+        let source = write_temp_file(&dir, "source.bin", content);
+        let tmp_path = Utf8PathBuf::from_path_buf(dir.path().join("staged.adopt")).unwrap();
+        let cancel = Cancel::new();
+
+        stage_adopt_source(
+            &source,
+            &tmp_path,
+            hash_of(content),
+            &cancel,
+            |_src, _dst| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::CrossesDevices,
+                    "simulated EXDEV",
+                ))
+            },
+        )
+        .unwrap();
+
+        assert!(
+            !source.exists(),
+            "verified cross-device adopt consumes source"
+        );
+        assert_eq!(std::fs::read(&tmp_path).unwrap(), content);
+
+        let source = write_temp_file(&dir, "bad-source.bin", content);
+        let bad_tmp_path = Utf8PathBuf::from_path_buf(dir.path().join("bad-staged.adopt")).unwrap();
+        let wrong_hash = hash_of(b"not the bytes that will be copied");
+
+        let err = stage_adopt_source(&source, &bad_tmp_path, wrong_hash, &cancel, |_src, _dst| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::CrossesDevices,
+                "simulated EXDEV",
+            ))
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, StoreError::HashMismatch { .. }));
+        assert!(source.exists(), "failed fallback must leave source intact");
+        assert!(
+            !bad_tmp_path.exists(),
+            "failed fallback should clean the bad staging copy"
+        );
     }
 
     #[test]

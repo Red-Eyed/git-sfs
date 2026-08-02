@@ -202,7 +202,9 @@ CLAUSES = [
     Clause(
         "4.2",
         "import --move falls back to copy+remove across filesystems",
-        UNCOVERED,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/store.rs",
+        "adopt_cross_device_fallback_removes_source_only_after_verified_copy",
     ),
     Clause("4.3", "tmp/ is purged by pull only, before it takes its lock", UNCOVERED),
     Clause(
