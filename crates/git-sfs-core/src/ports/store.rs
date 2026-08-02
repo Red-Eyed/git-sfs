@@ -459,68 +459,8 @@ impl Store for FsStore {
                 .map_err(|err| classify_copy_error(err, source))?;
         }
 
-        // contract-spec §4.2: the final mode is set before publishing. v1
-        // derives it from the *source* file's mode (write bits stripped, but
-        // e.g. an executable bit survives), not a fixed constant, and that is
-        // preserved here.
-        let mut perms = tmp
-            .as_file()
-            .metadata()
-            .map_err(|source| StoreError::Io {
-                path: dst.clone(),
-                source,
-            })?
-            .permissions();
-        perms.set_mode(source_mode & !0o222);
-        tmp.as_file()
-            .set_permissions(perms)
-            .map_err(|source| StoreError::Io {
-                path: dst.clone(),
-                source,
-            })?;
-        tmp.as_file().sync_all().map_err(|source| StoreError::Io {
-            path: dst.clone(),
-            source,
-        })?;
-
-        // Verified *before* publishing, unlike v1 (contract-spec §4.2:
-        // v1 renames first, hash-verifies the published file, then removes it
-        // on mismatch). Checking while the bytes are still hidden in `tmp/`
-        // means a corrupt object is never even briefly visible at its final,
-        // trusted path -- strictly stronger than the invariant v1's sequence
-        // protects, not a divergence from it.
-        tmp.as_file_mut()
-            .seek(SeekFrom::Start(0))
-            .map_err(|source| StoreError::Io {
-                path: dst.clone(),
-                source,
-            })?;
-        let got =
-            hash_reader(tmp.as_file(), cancel).map_err(|err| classify_copy_error(err, &dst))?;
-        if got != hash {
-            // `tmp`'s Drop removes the staging file; nothing to roll back.
-            return Err(StoreError::HashMismatch {
-                path: dst,
-                want: hash,
-                got,
-            });
-        }
-
-        let persisted = tmp.persist(&dst).map_err(|e| StoreError::Io {
-            path: dst.clone(),
-            source: e.error,
-        })?;
-        drop(persisted);
-
-        // contract-spec §13.2: v1 fsyncs the file but never the parent
-        // directory, so the rename can be lost on power loss even though the
-        // data was durable. "Atomic" is not "durable"; this is the fix.
-        if let Some(parent) = dst.parent() {
-            fsync_dir(parent).map_err(|source| StoreError::Io {
-                path: parent.to_owned(),
-                source,
-            })?;
-        }
+        prepare_store_temp(&mut tmp, &dst, source_mode, hash, cancel)?;
+        persist_store_temp(tmp, &dst, fsync_dir)?;
 
         Ok(CacheEntry { hash })
     }
@@ -650,6 +590,84 @@ fn same_file(a: &Utf8Path, b: &Utf8Path) -> Result<bool, StoreError> {
         source,
     })?;
     Ok(am.dev() == bm.dev() && am.ino() == bm.ino())
+}
+
+fn prepare_store_temp(
+    tmp: &mut tempfile::NamedTempFile,
+    dst: &Utf8Path,
+    source_mode: u32,
+    hash: Sha256,
+    cancel: &Cancel,
+) -> Result<(), StoreError> {
+    // contract-spec §4.2: the final mode is set before publishing. v1 derives
+    // it from the *source* file's mode (write bits stripped, but e.g. an
+    // executable bit survives), not a fixed constant, and that is preserved
+    // here.
+    let mut perms = tmp
+        .as_file()
+        .metadata()
+        .map_err(|source| StoreError::Io {
+            path: dst.to_owned(),
+            source,
+        })?
+        .permissions();
+    perms.set_mode(source_mode & !0o222);
+    tmp.as_file()
+        .set_permissions(perms)
+        .map_err(|source| StoreError::Io {
+            path: dst.to_owned(),
+            source,
+        })?;
+    tmp.as_file().sync_all().map_err(|source| StoreError::Io {
+        path: dst.to_owned(),
+        source,
+    })?;
+
+    // Verified *before* publishing, unlike v1 (contract-spec §4.2: v1
+    // renames first, hash-verifies the published file, then removes it on
+    // mismatch). Checking while the bytes are still hidden in `tmp/` means a
+    // corrupt object is never even briefly visible at its final, trusted path
+    // -- strictly stronger than the invariant v1's sequence protects, not a
+    // divergence from it.
+    tmp.as_file_mut()
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| StoreError::Io {
+            path: dst.to_owned(),
+            source,
+        })?;
+    let got = hash_reader(tmp.as_file(), cancel).map_err(|err| classify_copy_error(err, dst))?;
+    if got != hash {
+        // `tmp`'s Drop removes the staging file; nothing to roll back.
+        return Err(StoreError::HashMismatch {
+            path: dst.to_owned(),
+            want: hash,
+            got,
+        });
+    }
+    Ok(())
+}
+
+fn persist_store_temp(
+    tmp: tempfile::NamedTempFile,
+    dst: &Utf8Path,
+    fsync_parent: impl FnOnce(&Utf8Path) -> io::Result<()>,
+) -> Result<(), StoreError> {
+    let persisted = tmp.persist(dst).map_err(|e| StoreError::Io {
+        path: dst.to_owned(),
+        source: e.error,
+    })?;
+    drop(persisted);
+
+    // contract-spec §13.2: v1 fsyncs the file but never the parent directory,
+    // so the rename can be lost on power loss even though the data was
+    // durable. "Atomic" is not "durable"; this is the fix.
+    if let Some(parent) = dst.parent() {
+        fsync_parent(parent).map_err(|source| StoreError::Io {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    Ok(())
 }
 
 fn stage_adopt_source(
@@ -969,6 +987,52 @@ mod tests {
         assert!(matches!(err, StoreError::HashMismatch { .. }));
         // Nothing is published on mismatch.
         assert!(store.verified(wrong_hash, &cancel).unwrap().is_none());
+    }
+
+    #[test]
+    fn store_temp_gets_final_mode_before_publish() {
+        let cache = tempfile::tempdir().unwrap();
+        let staging = Utf8PathBuf::from_path_buf(cache.path().join("tmp")).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        let dst = Utf8PathBuf::from_path_buf(cache.path().join("files/sha256/ab/object")).unwrap();
+        let content = b"mode is final before rename";
+        let hash = hash_of(content);
+        let mut tmp = tempfile::Builder::new().tempfile_in(&staging).unwrap();
+        tmp.as_file_mut().write_all(content).unwrap();
+
+        prepare_store_temp(&mut tmp, &dst, 0o755, hash, &Cancel::new()).unwrap();
+
+        let mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o555, "temp file must have final mode before rename");
+        assert!(
+            !dst.exists(),
+            "prepared temp file must not be published yet"
+        );
+    }
+
+    #[test]
+    fn persist_store_temp_fsyncs_parent_directory_after_rename() {
+        let cache = tempfile::tempdir().unwrap();
+        let staging = Utf8PathBuf::from_path_buf(cache.path().join("tmp")).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        let dst = Utf8PathBuf::from_path_buf(cache.path().join("files/sha256/ab/object")).unwrap();
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        let mut tmp = tempfile::Builder::new().tempfile_in(&staging).unwrap();
+        tmp.as_file_mut().write_all(b"durable rename").unwrap();
+        let mut synced = Vec::new();
+
+        persist_store_temp(tmp, &dst, |parent| {
+            synced.push(parent.to_owned());
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(dst.is_file(), "temp file must be renamed into place");
+        assert_eq!(
+            synced,
+            vec![dst.parent().unwrap().to_owned()],
+            "parent directory must be fsynced after publishing"
+        );
     }
 
     #[test]

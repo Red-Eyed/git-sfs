@@ -196,9 +196,19 @@ CLAUSES = [
         "pull against a protected rotted object",
     ),
     Clause(
-        "4.2", "the final mode is set on the temp file before the rename", UNCOVERED
+        "4.2",
+        "the final mode is set on the temp file before the rename",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/store.rs",
+        "store_temp_gets_final_mode_before_publish",
     ),
-    Clause("4.2", "a post-rename hash mismatch removes the published file", UNCOVERED),
+    Clause(
+        "4.2",
+        "a post-rename hash mismatch removes the published file",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/store.rs",
+        "Nothing is published on mismatch.",
+    ),
     Clause(
         "4.2",
         "import --move falls back to copy+remove across filesystems",
@@ -615,7 +625,13 @@ CLAUSES = [
         "../../crates/git-sfs-core/src/exec/mv.rs",
         "directory_mv_observes_cancellation_before_moving_tree",
     ),
-    Clause("13.2", "AtomicCopy must fsync the parent directory", UNCOVERED),
+    Clause(
+        "13.2",
+        "AtomicCopy must fsync the parent directory",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/store.rs",
+        "persist_store_temp_fsyncs_parent_directory_after_rename",
+    ),
     Clause(
         "13.2",
         "temp files must not accumulate inside the object store",
