@@ -264,7 +264,9 @@ CLAUSES = [
     Clause(
         "5b",
         "a path argument scopes status, verify, push and pull to a subtree",
-        UNCOVERED,
+        ASSERTED,
+        "../../test/workflows/lib/scenarios.sh",
+        "path-scoped push leaked a sibling object",
     ),
     Clause(
         "5b",

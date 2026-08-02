@@ -149,6 +149,55 @@ assert_cache_populated() {
   done
 }
 
+assert_path_arguments_scope_remote_commands() {
+  local repo="$1"
+  local cache="$2"
+  local remote="$3"
+  local hash_train="$4"
+  local hash_valid="$5"
+  local hash_metrics="$6"
+  local train_cache valid_cache metrics_cache
+  local train_remote valid_remote metrics_remote
+
+  train_cache="$(cache_file_for "$cache" "$hash_train")"
+  valid_cache="$(cache_file_for "$cache" "$hash_valid")"
+  metrics_cache="$(cache_file_for "$cache" "$hash_metrics")"
+  train_remote="$remote/files/sha256/${hash_train:0:2}/$hash_train"
+  valid_remote="$remote/files/sha256/${hash_valid:0:2}/$hash_valid"
+  metrics_remote="$remote/files/sha256/${hash_metrics:0:2}/$hash_metrics"
+
+  (
+    cd "$repo"
+    local status_json
+    status_json="$(git_sfs status --json data/validation)"
+    assert_contains "$status_json" "data/validation/one.bin" "path-scoped status includes selected subtree"
+    case "$status_json" in
+      *"data/train-000.tar.zst"*) fail "path-scoped status leaked a sibling object" ;;
+    esac
+
+    rm -f "$train_cache"
+    git_sfs verify data/validation >/dev/null
+    if git_sfs verify . >/dev/null 2>&1; then
+      fail "path-scoped verify should ignore only the missing sibling object"
+    fi
+    git_sfs pull data/train-000.tar.zst >/dev/null
+
+    rm -f "$train_remote" "$valid_remote" "$metrics_remote"
+    git_sfs push data/validation >/dev/null
+    [ -f "$valid_remote" ] || fail "path-scoped push did not upload selected object"
+    [ -f "$metrics_remote" ] || fail "path-scoped push did not upload selected subtree object"
+    [ ! -f "$train_remote" ] || fail "path-scoped push leaked a sibling object"
+    git_sfs push data/train-000.tar.zst >/dev/null
+
+    rm -f "$train_cache" "$valid_cache" "$metrics_cache"
+    git_sfs pull data/validation >/dev/null
+    [ -f "$valid_cache" ] || fail "path-scoped pull did not restore selected object"
+    [ -f "$metrics_cache" ] || fail "path-scoped pull did not restore selected subtree object"
+    [ ! -f "$train_cache" ] || fail "path-scoped pull leaked a sibling object"
+    git_sfs pull data/train-000.tar.zst >/dev/null
+  )
+}
+
 
 scenario_filesystem_workflows() {
   note "exercise documented filesystem workflows"
@@ -199,6 +248,11 @@ scenario_filesystem_workflows() {
   # A missing object in the replacement cache should still be recoverable from
   # the remote without disturbing the rest of the cache.
   restore_selected_file "$repo_b" "$shared_cache" "$hash_train" "data/train-000.tar.zst"
+
+  # Every remote-aware command with a path argument must stay scoped to that
+  # subtree instead of observing, uploading, verifying, or restoring siblings.
+  assert_path_arguments_scope_remote_commands \
+    "$repo_b" "$shared_cache" "$remote" "$hash_train" "$hash_valid" "$hash_metrics"
 
   # Default verify is presence-only: if the files still exist in cache and on
   # remote, it should pass without recalculating hashes. Integrity mode should
