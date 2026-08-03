@@ -198,6 +198,49 @@ assert_path_arguments_scope_remote_commands() {
   )
 }
 
+assert_tmp_cleanup_is_pull_scoped_before_lock() {
+  local repo="$1"
+  local cache="$2"
+  local stale="$cache/tmp/stale-before-pull"
+  local lock_path="$cache/locks/pull.lock"
+  local pull_pid
+
+  mkdir -p "$cache/tmp" "$cache/locks"
+  printf "abandoned scratch\n" > "$stale"
+  touch -t 200001010000 "$stale"
+
+  (
+    cd "$repo"
+    git_sfs status data/validation >/dev/null
+    [ -f "$stale" ] || fail "status must not purge tmp"
+    git_sfs verify data/validation >/dev/null
+    [ -f "$stale" ] || fail "verify must not purge tmp"
+    git_sfs push data/validation >/dev/null
+    [ -f "$stale" ] || fail "push must not purge tmp"
+  )
+
+  mkdir -p "$lock_path"
+  printf 'pid: %s\n' "$$" > "$lock_path/owner"
+  (
+    cd "$repo"
+    git_sfs pull data/train-000.tar.zst >/dev/null
+  ) &
+  pull_pid="$!"
+
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ ! -e "$stale" ] && break
+    sleep 0.1
+  done
+  if [ -e "$stale" ]; then
+    rm -rf "$lock_path"
+    wait "$pull_pid" || true
+    fail "pull must purge stale tmp before waiting on pull.lock"
+  fi
+
+  rm -rf "$lock_path"
+  wait "$pull_pid"
+}
+
 
 scenario_filesystem_workflows() {
   note "exercise documented filesystem workflows"
@@ -253,6 +296,11 @@ scenario_filesystem_workflows() {
   # subtree instead of observing, uploading, verifying, or restoring siblings.
   assert_path_arguments_scope_remote_commands \
     "$repo_b" "$shared_cache" "$remote" "$hash_train" "$hash_valid" "$hash_metrics"
+
+  # Pull is the only command that cleans stale tmp entries, and it does so
+  # before waiting on pull.lock. The cleanup is selective rather than v1's
+  # blind RemoveAll(tmp/), so live staging from other commands is not targeted.
+  assert_tmp_cleanup_is_pull_scoped_before_lock "$repo_b" "$shared_cache"
 
   # Default verify is presence-only: if the files still exist in cache and on
   # remote, it should pass without recalculating hashes. Integrity mode should

@@ -216,11 +216,19 @@ CLAUSES = [
         "../../crates/git-sfs-core/src/ports/store.rs",
         "adopt_cross_device_fallback_removes_source_only_after_verified_copy",
     ),
-    Clause("4.3", "tmp/ is purged by pull only, before it takes its lock", UNCOVERED),
+    Clause(
+        "4.3",
+        "tmp/ is purged by pull only, before it takes its lock",
+        ASSERTED,
+        "../../test/workflows/lib/scenarios.sh",
+        "pull must purge stale tmp before waiting on pull.lock",
+    ),
     Clause(
         "4.3",
         "purging tmp/ must not destroy another process's in-flight staging",
-        V2_ONLY,
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/store.rs",
+        "newer file should not be purged",
     ),
     Clause(
         "4",

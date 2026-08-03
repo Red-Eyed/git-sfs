@@ -16,6 +16,7 @@
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::time::SystemTime;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use thiserror::Error;
@@ -50,6 +51,93 @@ pub struct CacheEntry {
     // `path` is derived solely from `hash` and the store root, so it is not
     // stored -- keeping the type to exactly the fields that can vary would
     // otherwise invite two copies of the same information to drift apart.
+}
+
+/// Removes stale top-level files from `<cache_root>/tmp`, returning how many
+/// entries were removed.
+///
+/// This is deliberately selective: `tmp/` is where live writes stage, so v2
+/// must not reproduce v1's blind `RemoveAll(tmp/)` while add/import/push/pull
+/// can run under different locks. Directories are left alone because their
+/// own mtime does not prove every child is stale.
+///
+/// # Errors
+///
+/// Returns [`StoreError::Io`] if the tmp directory cannot be created, listed,
+/// chmod'd, or if a stale file cannot be removed.
+pub fn purge_stale_tmp_files(
+    cache_root: &Utf8Path,
+    older_than: SystemTime,
+) -> Result<usize, StoreError> {
+    let tmp = tmp_dir(cache_root);
+    std::fs::create_dir_all(&tmp).map_err(|source| StoreError::Io {
+        path: tmp.clone(),
+        source,
+    })?;
+    set_dir_mode(&tmp, 0o755)?;
+
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(&tmp).map_err(|source| StoreError::Io {
+        path: tmp.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StoreError::Io {
+            path: tmp.clone(),
+            source,
+        })?;
+        let Ok(path) = Utf8PathBuf::from_path_buf(entry.path()) else {
+            continue;
+        };
+        if remove_if_stale_tmp_file(&path, older_than)? {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn remove_if_stale_tmp_file(path: &Utf8Path, older_than: SystemTime) -> Result<bool, StoreError> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => {
+            return Err(StoreError::Io {
+                path: path.to_owned(),
+                source,
+            });
+        }
+    };
+    let file_type = metadata.file_type();
+    if !(file_type.is_file() || file_type.is_symlink()) {
+        return Ok(false);
+    }
+    let Ok(modified) = metadata.modified() else {
+        return Ok(false);
+    };
+    if modified > older_than {
+        return Ok(false);
+    }
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(StoreError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn set_dir_mode(path: &Utf8Path, mode: u32) -> Result<(), StoreError> {
+    let mut perms = std::fs::metadata(path)
+        .map_err(|source| StoreError::Io {
+            path: path.to_owned(),
+            source,
+        })?
+        .permissions();
+    perms.set_mode(mode);
+    std::fs::set_permissions(path, perms).map_err(|source| StoreError::Io {
+        path: path.to_owned(),
+        source,
+    })
 }
 
 impl CacheEntry {
@@ -971,6 +1059,33 @@ mod tests {
         // that is where staging happened rather than system temp.
         assert_eq!(staged, 0);
         assert!(cache.path().join("tmp").is_dir());
+    }
+
+    #[test]
+    fn purging_stale_tmp_files_is_selective_and_recreates_tmp() {
+        let cache = tempfile::tempdir().unwrap();
+        let cache_root = Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap();
+        let tmp = tmp_dir(&cache_root);
+        let stale = tmp.join("stale");
+        let fresh = tmp.join("fresh");
+        let nested = tmp.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(&stale, b"old scratch").unwrap();
+        let stale_time = std::fs::metadata(&stale).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(&fresh, b"new scratch").unwrap();
+
+        let removed = purge_stale_tmp_files(&cache_root, stale_time).unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!stale.exists(), "stale file should be purged");
+        assert!(fresh.exists(), "newer file should not be purged");
+        assert!(
+            nested.exists(),
+            "directories are not safe to purge by mtime"
+        );
+        let mode = std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
     }
 
     #[test]

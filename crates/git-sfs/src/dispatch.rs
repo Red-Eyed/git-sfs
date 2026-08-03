@@ -12,6 +12,7 @@
 use camino::Utf8PathBuf;
 use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt as _;
+use std::time::{Duration, SystemTime};
 
 use git_sfs_core::domain::{
     Config, DEFAULT_REMOTE_NAME, RemoteConfig, check_git_sfs_version, check_rclone_version,
@@ -30,7 +31,7 @@ use git_sfs_core::exec::status;
 use git_sfs_core::exec::verify::{self, VerifyError};
 use git_sfs_core::ports::{
     FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, detect_rclone_version, discover_repo,
-    resolve_cache_root,
+    purge_stale_tmp_files, resolve_cache_root,
 };
 use git_sfs_core::{Cancel, Error, Result};
 
@@ -40,6 +41,8 @@ use crate::cli::{
 };
 use crate::progress::ProgressRemote;
 use crate::reporting::{self, RenderMode};
+
+const PULL_TMP_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Runs the requested command.
 ///
@@ -279,6 +282,7 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
     let config = load_config(&config_path)?;
     check_git_sfs_floor(&config)?;
     let cache_root = resolve_cache_root(&repo)?;
+    purge_pull_tmp(&cache_root)?;
 
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
     let remote =
@@ -300,6 +304,14 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
         cancel,
     )?;
     reporting::pull_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
+    Ok(())
+}
+
+fn purge_pull_tmp(cache_root: &camino::Utf8Path) -> Result<()> {
+    let cutoff = SystemTime::now()
+        .checked_sub(PULL_TMP_STALE_AFTER)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    purge_stale_tmp_files(cache_root, cutoff)?;
     Ok(())
 }
 
