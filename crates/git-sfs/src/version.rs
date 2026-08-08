@@ -3,7 +3,7 @@
 /// The version `--version` prints.
 ///
 /// contract-spec 11 requires this to stay parseable as the release tag, in
-/// `v1.21.0` form, because the workflow suite asserts on it and installed v1
+/// `vX.Y.Z` form, because the workflow suite asserts on it and installed
 /// binaries resolve release archives by it. That form is not valid semver
 /// (contract-spec 6.6), so it cannot be derived from Cargo's `version` field
 /// and is injected by the release build instead.

@@ -11,6 +11,7 @@ mod dispatch;
 mod exit;
 mod progress;
 mod reporting;
+mod self_update;
 mod status_output;
 mod version;
 

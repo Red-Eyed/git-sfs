@@ -334,11 +334,11 @@ Both binaries are updated in the directory where the running `git-sfs` executabl
 Output while running:
 
 ```
-checking git-sfs version... (1s)
-downloading git-sfs v1.19.0  [##########----------]  18.3 MiB/36.1 MiB
-git-sfs v1.18.0 → v1.19.0
-checking rclone version... (1s)
-rclone v1.68.2 already up to date
+checking git-sfs version...
+downloading git-sfs vX.Y.Z...
+git-sfs dev -> vX.Y.Z
+checking rclone version...
+rclone vA.B.C already up to date
 ```
 
 If a binary is already at the latest version it is left untouched. If the download or install step fails the error is reported explicitly with the URL and reason.

@@ -62,7 +62,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Push(args) => run_push(cli, args, cancel),
         Command::Pull(args) => run_pull(cli, args, cancel),
         Command::Doctor(args) => run_doctor(cli, args, cancel),
-        Command::SelfCmd(SelfCommand::Update) => unimplemented("self update"),
+        Command::SelfCmd(SelfCommand::Update) => crate::self_update::run(cli.global.quiet),
         Command::LlmsTxt => print_llms_txt(),
     }
 }
@@ -810,10 +810,6 @@ fn resolved_config_path(repo: &camino::Utf8Path, config: &camino::Utf8Path) -> U
 pub fn print_help() -> Result<()> {
     crate::cli::print_help()
         .map_err(|err| Error::Unavailable(format!("could not write help: {err}")))
-}
-
-fn unimplemented(command: &'static str) -> Result<()> {
-    Err(Error::NotImplemented { command })
 }
 
 const LLMS_TXT: &str = include_str!("../../../llms.txt");

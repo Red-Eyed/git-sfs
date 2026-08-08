@@ -8,9 +8,9 @@ rust-version = "1.90"
 license = "MIT"
 repository = "https://github.com/Red-Eyed/git-sfs"
 # Cargo's version is internal bookkeeping. The user-visible version is the
-# release tag in `v2.0.0` form, which is not valid semver and so cannot live
+# release tag in `vX.Y.Z` form, which is not valid semver and so cannot live
 # here -- see `crates/git-sfs/src/version.rs` and contract-spec 6.6.
-version = "2.0.9"
+version = "2.0.0"
 
 [workspace.dependencies]
 git-sfs-core = { path = "crates/git-sfs-core" }
@@ -20,6 +20,7 @@ clap = { version = "4.6", features = ["derive"] }
 ctrlc = { version = "3.5", features = ["termination"] }
 hex = "0.4"
 indicatif = "0.18"
+flate2 = "1.1"
 # `signal` is for Lock's PID-liveness check (contract-spec 8.1). `fs` is for
 # pull's cache-volume free-space guard before batched rclone downloads.
 nix = { version = "0.31", default-features = false, features = ["signal", "fs"] }
@@ -30,6 +31,7 @@ serde = { version = "1.0", features = ["derive"] }
 # rclone's `lsjson` output -- the only JSON git-sfs's Rust side parses today.
 serde_json = "1.0"
 sha2 = "0.11"
+tar = { version = "0.4", default-features = false }
 tempfile = "3.27"
 thiserror = "2.0"
 toml = "1.1"
@@ -45,6 +47,7 @@ ureq = { version = "3.3", default-features = false, features = ["rustls", "gzip"
 # follow_links = false) and the deterministic ordering rust-rewrite-plan
 # §4.1 names this crate for.
 walkdir = "2.5"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

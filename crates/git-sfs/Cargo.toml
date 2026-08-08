@@ -17,16 +17,16 @@ git-sfs-core.workspace = true
 camino.workspace = true
 clap.workspace = true
 ctrlc.workspace = true
+flate2.workspace = true
+hex.workspace = true
 indicatif.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# Unused until `self update` lands in phase 6. Declared now so that the TLS
-# backend is resolved, locked, and proven statically linkable against musl by
-# CI from phase 1 onward -- see the note in the workspace manifest.
-ureq.workspace = true
-
-[dev-dependencies]
+sha2.workspace = true
+tar.workspace = true
 tempfile.workspace = true
+ureq.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true
