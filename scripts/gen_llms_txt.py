@@ -6,7 +6,6 @@ external links so an agent can work entirely from the embedded document.
 
 Writes to:
   llms.txt               -- repo root (web/GitHub discovery)
-  internal/cli/llms.txt  -- embedded in the git-sfs binary (go:embed)
 
 Run via: just gen-llms-txt
 """
@@ -19,7 +18,6 @@ DOCS_DIR = REPO_ROOT / "docs"
 
 OUTPUTS = [
     REPO_ROOT / "llms.txt",
-    REPO_ROOT / "internal" / "cli" / "llms.txt",
 ]
 
 

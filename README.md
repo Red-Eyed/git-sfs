@@ -38,7 +38,7 @@ See [docs/installation.md](docs/installation.md) for proxy, CA bundle, and sourc
 Build from source:
 
 ```sh
-go build ./cmd/git-sfs
+cargo install --path crates/git-sfs --locked
 ```
 
 ## Quick start

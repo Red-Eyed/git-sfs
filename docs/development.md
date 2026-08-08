@@ -1,15 +1,13 @@
 # Development
 
-git-sfs is mid-rewrite from Go to Rust (see
-[../docs/rust-rewrite-plan.md](rust-rewrite-plan.md)). `internal/` and `cmd/`
-are the Go original; `crates/` is the Rust rewrite growing in alongside it.
-Both are built and tested from the same `just check`.
+git-sfs is a Rust workspace. The binary crate lives in `crates/git-sfs`; the
+reusable command/core logic lives in `crates/git-sfs-core`.
 
 Use `just` for common commands:
 
 ```sh
-just --list          # grouped by go / rust / conformance / repo
-just check           # everything CI runs, both toolchains
+just --list          # grouped by rust / conformance / repo
+just check           # everything CI runs
 ```
 
 Recipes are split by lifetime rather than by size:
@@ -17,48 +15,23 @@ Recipes are split by lifetime rather than by size:
 | File | Contents |
 |---|---|
 | `Justfile` | variables, `check`, repo chores |
-| `just/go.just` | Go toolchain — retired at the Rust cutover |
-| `just/rust.just` | Rust toolchain — the target implementation |
-| `just/conformance.just` | the harness that decides whether a replacement is acceptable |
+| `just/rust.just` | Rust toolchain recipes |
+| `just/conformance.just` | workflow and contract conformance harnesses |
 
-The conformance recipes all accept `--binary NAME=PATH` and default to the Go
-binary, so the same commands drive a second implementation by pointing them
-elsewhere — e.g. `./target/release/git-sfs` once a command is ported. See
+The conformance scripts all accept `--binary NAME=PATH`; the `just` recipes
+default to `./target/release/git-sfs`, the same artifact release builds use. See
 [../test/differential/README.md](../test/differential/README.md).
 
 ## Rust
 
 ```sh
-just rust-check      # fmt --check, clippy -D warnings, test, release build
-just rust-build      # ./target/release/git-sfs
+just check           # fmt --check, clippy -D warnings, test, release build, conformance
+just build           # ./target/release/git-sfs
 ```
 
 Or drive `cargo` directly from the workspace root — `cargo build --workspace`,
 `cargo test --workspace`, `cargo clippy --workspace --all-targets`. `cargo fmt`
 rewrites files in place; re-read anything it touches before further edits.
-
-## Local Go Paths
-
-The `Justfile` defaults to the `go` binary on `PATH`.
-
-Override when needed:
-
-```sh
-GO=/path/to/go just check
-```
-
-It also defaults to writable caches:
-
-```text
-<repo>/.cache/go-build
-<repo>/.cache/go-mod
-```
-
-Override when needed:
-
-```sh
-GO=go GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" just check
-```
 
 ## Tests
 
@@ -74,10 +47,10 @@ Run workflow suite:
 just workflows
 ```
 
-Run coverage:
+Run contract coverage:
 
 ```sh
-just coverage
+just spec-coverage
 ```
 
 Run benchmarks:

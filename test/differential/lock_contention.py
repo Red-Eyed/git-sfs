@@ -199,6 +199,7 @@ def test_cross_binary_contention(
     print(f"\n[{holder.name} holds, {waiter.name} waits] cross-binary contention")
     context = contexts[holder.name]
     cache = context["cache"]
+    reset_remote_uploads(context)
 
     # The waiter runs against the holder's cache and repo, which is the actual
     # migration scenario -- one user, one dataset, two binaries.
@@ -236,6 +237,19 @@ def test_cross_binary_contention(
         for process in (holding,):
             if process.poll() is None:
                 process.kill()
+
+
+def reset_remote_uploads(context: dict) -> None:
+    """Force the contention probe to exercise a real upload.
+
+    Earlier checks in this same workspace may already have pushed the object.
+    The current implementation correctly skips same-size remote objects, which
+    would make this probe measure a no-op push instead of lock contention.
+    """
+
+    remote = context["remote"]
+    for name in ("files", "tmp"):
+        shutil.rmtree(remote / name, ignore_errors=True)
 
 
 def observe_malformed_owner(binary: Binary, context: dict, r: Results):

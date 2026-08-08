@@ -1,12 +1,26 @@
-# The Rust toolchain — the target implementation (rust-rewrite-plan.md). It
-# grows into git-sfs proper as phases land; go.just disappears out from under
-# it at the phase 7 cutover, and this file absorbs its recipe names then.
-#
-# Kept separate from go.just today because the two build different binaries
-# under different toolchains, and `check`'s dependency list needs to name both
-# independently until the cutover collapses them into one.
+# The Rust toolchain recipes used by local development and CI.
 
 cargo := env_var_or_default("CARGO", "cargo")
+
+[group('repo')]
+[doc('format check')]
+fmt: rust-fmt
+
+[group('repo')]
+[doc('unit tests')]
+test: rust-test
+
+[group('repo')]
+[doc('build ./target/release/git-sfs')]
+build: rust-build
+
+[group('repo')]
+[doc('build release archives into dist/')]
+release-snapshot: rust-release-snapshot
+
+[group('repo')]
+[doc('build the host release archive into dist/')]
+release-native: rust-release-native
 
 [group('rust')]
 [doc('rustfmt check for the Rust workspace')]
@@ -29,12 +43,12 @@ rust-build:
     {{cargo}} build --workspace --release
 
 [group('rust')]
-[doc('build Rust release archives into dist/')]
+[doc('build release archives into dist/')]
 rust-release-snapshot:
     sh scripts/build-rust-release.sh snapshot dist
 
 [group('rust')]
-[doc('build the host Rust release archive into dist/')]
+[doc('build the host release archive into dist/')]
 rust-release-native:
     sh scripts/build-rust-release.sh snapshot dist native
 

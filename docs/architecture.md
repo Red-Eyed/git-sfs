@@ -1,99 +1,94 @@
 # Architecture
 
-This document is for contributors. For the user-facing model see [Concepts](concepts.md).
+This document is for contributors. For the user-facing model see
+[Concepts](concepts.md).
 
-## Package Layout
+## Workspace Layout
 
 ```text
-cmd/git-sfs/       entry point — parses args, calls cli.Run, exits on error
-internal/
-  cli/             kong-based arg parsing and command routing; no business logic
-  core/            command implementations (App struct)
-  config/          TOML parser (no third-party lib); strict unknown-field rejection
-  cache/           content-addressed local store; atomic writes; read-only protection
-  hash/            SHA-256 streaming; hex encoding; path prefix helpers
-  fsutil/          atomic copy/rename; symlink creation; read-only chmod
-  sfspath/         symlink target format: construction, parsing, validation
-  materialize/     .git-sfs/cache hard-link management (cache ↔ repo binding)
-  localstate/      repo root detection; cache symlink resolution and binding
-  lock/            directory-based process lock with 100ms poll
-  progress/        byte-weighted local-hashing bar: live redraw on a TTY, periodic lines in logs; transfers use rclone --progress
-  remote/          Remote interface; rclone backend
-  errs/            sentinel errors
-  version/         version string embedded at build time
+crates/git-sfs/       CLI shell: argv, terminal output, signals, exit codes
+crates/git-sfs-core/  reusable command logic and side-effect ports
+scripts/              installer, release packaging, docs generation
+test/workflows/       end-to-end workflows through the installer path
+test/differential/    contract and compatibility harnesses
 ```
 
-The dependency direction is: `cli` → `core` → everything else. No package outside `core` imports `core`.
+`git-sfs-core` cannot print and cannot exit. It depends on small domain values
+and ports; the binary crate owns rendering, progress, signal handling, and exit
+code mapping.
+
+## Core Modules
+
+```text
+domain/    validated values: hashes, symlink targets, remote URLs, config
+exec/      command implementations: add, import, mv, pull, push, verify, ...
+plan/      pure planning for byte movement and disk-space decisions
+ports/     filesystem, Git tree scanning, cache store, locks, rclone remote
+cancel.rs  shared cancellation flag polled by byte-moving loops
+error.rs   typed error categories surfaced to the CLI
+```
+
+The dependency direction is:
+
+```text
+git-sfs CLI -> git-sfs-core::exec -> domain + plan + ports
+```
 
 ## Core Data Flow
 
 ### add
 
 ```text
-filepath.WalkDir(paths)
-  │  collect regular files
+repo.scan(paths)
+  │  collect regular files Git does not already track
   ▼
-parallel worker pool
-  ├─ hash.File(path)          stream SHA-256, no full load into memory
-  └─ cache.Store(path, hash)  atomic copy: temp file → rename
-
-sequential (per file)
-  ├─ materialize.Link         bind .git-sfs/cache/<hash> → cache/<hash>
-  ├─ os.Remove(original)
-  └─ os.Symlink(target, path) relative symlink committed to Git
+per file
+  ├─ hash stream          SHA-256, no full load into memory
+  ├─ store.store_file     temp file -> verify -> readonly -> rename
+  └─ publish symlink      relative target committed to Git
 ```
 
 ### push
 
 ```text
-collectGitSFSSymlinks(repo)   WalkDir; parse hash from each symlink in one pass
-uniqueHashesFromTracked       deduplicate by hash
-cache.HasValid(hash)          fail early if any cache file is missing
-
-remote.CopyToRemote           single rclone copy --ignore-existing --files-from <list>
-                              rclone's internal --transfers handles parallelism
+repo.scan(scope)          collect git-sfs symlinks
+plan::push                deduplicate by hash; reject missing cache objects
+remote.file_sizes         batch-list requested remote paths
+remote.copy_to_remote     rclone copy --files-from to remote staging path
+remote.copy_to_remote     verify staged sizes, then rclone move --files-from
 ```
+
+Push stages under the configured remote itself, not a system temp directory.
+The staging path includes a repository-specific and process-specific component
+so overlapping pushes do not share one global temp path. Final remote objects
+are published only after the batch transfer and basic size verification pass.
 
 ### pull
 
 ```text
-collectGitSFSSymlinks(repo, path)
-uniqueHashesFromTracked
-checkDiskSpace                parallel lsjson per missing hash; fail if < 110% free
-
-remote.CopyFromRemote         single rclone copy --ignore-existing --files-from <list>
-                              corrupt/partial local files are removed first so
-                              --ignore-existing does not skip re-downloads
-
-sequential (per hash)
-  ├─ cache.Protect            make cache file read-only; fails on hash mismatch
-  └─ materialize.Link         bind .git-sfs/cache/<hash> → cache/<hash>
+repo.scan(scope)          collect git-sfs symlinks
+plan::pull                deduplicate by hash; skip verified local objects
+disk-space check          require enough free bytes for missing objects
+remote.copy_from_remote   rclone copy --files-from into cache-local staging
+store.adopt               hash-verify, set readonly mode, atomically publish
 ```
 
-## Worker Pool
-
-Verify and the pull disk-space check use `runIndexed` in `core/run.go` for parallel remote queries:
-
-```text
-jobs chan int  (unbuffered)
-│
-├─ enqueuer goroutine  sends indices; stops on ctx cancel
-└─ N worker goroutines consume indices; first error cancels context via sync.Once
-```
-
-Worker count is capped at `min(configured_jobs, GOMAXPROCS, 4)` unless overridden with `-j`.
+Pull downloads into `<cache>/tmp`, verifies bytes by hash, and only then makes
+objects visible in `<cache>/files/sha256/...`.
 
 ## Symlink Format
 
-Git-tracked symlinks use a relative target that threads through the repo-local `.git-sfs/cache` indirection:
+Git-tracked symlinks use a relative target that threads through the repo-local
+`.git-sfs/cache` indirection:
 
 ```text
-<file> → ../../.git-sfs/cache/files/sha256/<prefix>/<hash>
-                              │
-                              └─ symlink → <machine-local cache root>/files/sha256/<prefix>/<hash>
+<file> -> ../../.git-sfs/cache/files/sha256/<prefix>/<hash>
+                              |
+                              +-> symlink to machine-local cache root
 ```
 
-This keeps absolute machine-local paths out of Git. `sfspath.ParseGitSymlink` enforces the format: relative target, correct prefix match, valid hex hash.
+This keeps absolute machine-local paths out of Git. `domain::symlink` enforces
+the format: relative target, correct prefix match, valid lowercase SHA-256 hash.
 
 ## Cache Layout
 
@@ -104,26 +99,25 @@ This keeps absolute machine-local paths out of Git. `sfspath.ParseGitSymlink` en
   locks/                                                directory-based locks
 ```
 
-Files are written via temp-file + rename (`fsutil.AtomicCopy`). After a pull or protect call, `os.Chmod` removes write bits so cache files are not accidentally modified.
+Cache objects are immutable once published. A writable legacy object is treated
+as unverified: commands hash-check it before trusting it, then restore the
+read-only mode.
 
 ## Remote Interface
 
-```go
-type Remote interface {
-    RequireExists(ctx, hash)                          error  // lsjson root — fail if path missing
-    HasFile(ctx, hash)                                bool   // lsjson — cheap existence check
-    CheckFile(ctx, hash)                              bool   // download + hash verify — integrity only
-    FileSize(ctx, hash)                               int64  // lsjson size — used for disk-space guard
-    CopyToRemote(ctx, cacheFilesDir, relPaths)        error  // single rclone copy upload
-    CopyFromRemote(ctx, cacheFilesDir, relPaths)      error  // single rclone copy download
-}
-```
+`ports::remote` is the boundary around rclone. The high-level commands depend on
+operations such as batch size listing, batch copy, and remote integrity checks;
+rclone-specific argv construction stays inside the adapter.
 
-One backend: `rcloneRemote`. Push and pull each issue one rclone subprocess for the entire batch using `--files-from`. Verify and disk-space checks issue one `lsjson` subprocess per file in parallel. There is no persistent rclone process.
+Push and pull use batched `rclone copy --files-from` / `rclone move
+--files-from` calls. Remote metadata checks list only requested prefixes where
+possible. Per-object subprocesses are avoided unless the operation is inherently
+object-specific, such as verifying remote bytes by downloading and hashing one
+object.
 
 ## What Deliberately Does Not Exist
 
-- No manifest file or database — the Git tree is the file list.
-- No background service — every operation is a one-shot CLI invocation.
-- No custom protocol — remotes use rclone.
-- No distributed lock — the directory lock is single-machine only.
+- No manifest file or database: the Git tree is the file list.
+- No background service: every operation is a one-shot CLI invocation.
+- No custom protocol: remotes use rclone.
+- No distributed lock: the directory lock is single-machine only.

@@ -17,17 +17,17 @@ curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/latest/download/install.
 Or download a specific version:
 
 ```sh
-curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/download/v1.6.0/install.sh | sh
+curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/download/vX.Y.Z/install.sh | sh
 ```
 
 ## Build from source
 
-Requires only `git` access to `github.com` and a Go toolchain:
+Requires only `git` access to `github.com` and a Rust toolchain:
 
 ```sh
 git clone https://github.com/Red-Eyed/git-sfs
 cd git-sfs
-go build -o ~/.local/bin/git-sfs ./cmd/git-sfs
+cargo install --path crates/git-sfs --locked
 ```
 
 ---
@@ -49,7 +49,7 @@ curl -LsSf .../install.sh | sh -s -- --no-install-rclone
 Install a specific version:
 
 ```sh
-curl -LsSf .../install.sh | sh -s -- --version v1.6.0
+curl -LsSf .../install.sh | sh -s -- --version vX.Y.Z
 ```
 
 Corporate CA bundle:

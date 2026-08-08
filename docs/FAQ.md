@@ -327,32 +327,24 @@ repo silently means something different.
 
 Depends on which of three things happened, and they have three different answers.
 
-**Plain Ctrl-C (or a graceful shutdown signal), one press.** This is the safe case.
-`main` turns SIGINT *and* SIGTERM into context cancellation
-([main.go:45](../cmd/git-sfs/main.go#L45)), so a single Ctrl-C, and a normal "your
-process has 30 seconds" shutdown signal from systemd/CI/a container orchestrator, both
-unwind cleanly: the in-flight `rclone` subprocess is killed
-([command.go:347](../internal/remote/command.go#L347)), the call returns
-`context.Canceled`, and the deferred lock release still runs
-([push.go:46](../internal/core/push.go#L46),
-[pull.go:37](../internal/core/pull.go#L37)) because that's ordinary Go code unwinding,
-not a hard kill. The command prints `canceled` and exits `130`
-([main.go:47-54](../cmd/git-sfs/main.go#L47-L54)). **Rule: just re-run the same
-command.** Push re-diffs by cache presence and `--checksum`
-([push.go:58](../internal/core/push.go#L58),
-[command.go:248](../internal/remote/command.go#L248)); pull re-diffs by `HasValid` and
-`--ignore-existing` ([pull.go:69](../internal/core/pull.go#L69)) — already-transferred
-files are skipped, not redone.
+**Plain Ctrl-C (or a graceful shutdown signal), one press.** This is the safe
+case. The CLI turns SIGINT and SIGTERM into a shared cancellation flag, so a
+single Ctrl-C, and a normal "your process has 30 seconds" shutdown signal from
+systemd/CI/a container orchestrator, both unwind cleanly. In-flight subprocesses
+are killed, temp files remain unpublished, locks are released on the normal
+unwind path, and the command exits `130`. **Rule: just re-run the same command.**
+Push and pull re-diff the desired objects, so already-published complete files
+are skipped.
 
 **A hard kill (`kill -9`, OOM killer, power loss, host crash, a second impatient
-Ctrl-C).** This is where recovery stops being automatic. None of the Go code above runs
-— no deferred lock release — so the `push.lock` or `pull.lock` directory is left behind,
-and it has no staleness check, no PID-liveness check, and no timeout
-([lock.go:29-53](../internal/lock/lock.go#L29-L53), covered above under *Locks*). The
-next invocation of that same command, on that machine, waits on the lock **forever**.
-Recovery is the same manual step as the OOM-killed-push case above: `rm -rf` the
-specific `<cache>/locks/<name>.lock` directory, then re-run. This is the only step that
-isn't automatic — everything else below still holds.
+Ctrl-C).** This is where recovery may need one manual step. A process that is
+not allowed to unwind can leave `push.lock` or `pull.lock` behind. On the next
+run, git-sfs checks whether the recorded owner is still alive and breaks stale
+locks automatically when it can prove the owner is dead. If the owner cannot be
+read or liveness cannot be determined, remove the specific
+`<cache>/locks/<name>.lock` directory, then re-run. The data path remains
+retry-safe: incomplete cache and remote writes are staged outside their final
+paths.
 
 **What happens to the data itself in a hard kill, independent of the lock:**
 

@@ -938,25 +938,23 @@ not a constraint on v2.
 
 ## 11. Release artifacts
 
-Frozen (`build-release.sh`, `scripts/install.sh`, `internal/cli/self.go`):
+Frozen (`scripts/build-rust-release.sh`, `scripts/install.sh`, self-update):
 
 ```
 git-sfs-<version>-<os>-<arch>.tar.gz    containing a single executable: git-sfs
 SHA256SUMS                              sha256sum format, one line per archive
 ```
 
-- `<os>` ∈ `linux`, `darwin`; `<arch>` ∈ `amd64`, `arm64` — **Go's naming, not
-  Rust's target triples.** `x86_64-unknown-linux-musl` must be published as
-  `linux-amd64`.
+- `<os>` ∈ `linux`, `darwin`; `<arch>` ∈ `amd64`, `arm64`. Rust target triples
+  are build details; release assets keep the stable `linux-amd64` style names.
 - Binaries must be **statically linked** on Linux; the installer assumes a
   downloaded tarball runs anywhere.
 - SHA-256 of every downloaded artifact is verified before install.
 
-**Installed v1.21.0 binaries will self-update into the first v2 release.** They
-resolve these exact names and verify against this exact `SHA256SUMS` format. Any
-deviation breaks self-update permanently for every existing user — they would
-have to reinstall by hand, and there is no way to push a correction to a binary
-that can no longer update itself.
+Installed binaries resolve these exact names and verify against this exact
+`SHA256SUMS` format. Any deviation breaks self-update permanently for existing
+users; they would have to reinstall by hand, and there is no way to push a
+correction to a binary that can no longer update itself.
 
 `--version` output must remain parseable as the tag (`v1.21.0` form); the
 workflow suite asserts on it (`test/workflows/lib/install.sh:39`).

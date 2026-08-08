@@ -23,8 +23,8 @@ case "$HOST_OS" in
 esac
 
 cleanup() {
-  # Go writes module cache files read-only, so plain rm -rf fails on the temp
-  # GOMODCACHE. Restore write permission first so teardown always succeeds.
+  # Some build artifacts are read-only. Restore write permission first so
+  # teardown always succeeds.
   chmod -R u+w "$WORK" 2>/dev/null || true
   rm -rf "$WORK"
 }
@@ -38,17 +38,9 @@ assert_repo_root_clean() {
 }
 
 mkdir -p "$INSTALL_DIR" "$TEST_BIN_DIR" "$FIXTURE_ROOT" "$REMOTE_ROOT"
-export GOCACHE="${GOCACHE:-$WORK/gocache}"
-export GOMODCACHE="${GOMODCACHE:-$WORK/gomodcache}"
 export GIT_TERMINAL_PROMPT=0
 
-# Go is only needed to build the binary from this tree. Running against a
-# prebuilt GIT_SFS_BIN must not require a toolchain to be installed at all.
-GO_BIN_DIR=""
-if _go_path="$(command -v go 2>/dev/null)"; then
-  GO_BIN_DIR="$(dirname "$_go_path")"
-fi
-export PATH="$TEST_BIN_DIR:$INSTALL_DIR${GO_BIN_DIR:+:$GO_BIN_DIR}:$PATH"
+export PATH="$TEST_BIN_DIR:$INSTALL_DIR:$PATH"
 
 . "$ROOT/test/workflows/lib/test_lib.sh"
 . "$ROOT/test/workflows/lib/install.sh"

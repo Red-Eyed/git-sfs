@@ -8,9 +8,8 @@ _sha256() {
   fi
 }
 
-# Resolves the binary the suite exercises. GIT_SFS_BIN lets any implementation
-# be put under test; without it the Go tree is built exactly as before. This is
-# the only place that knows how a git-sfs binary comes into existence.
+# Resolves the binary the suite exercises. GIT_SFS_BIN lets a prebuilt artifact
+# be put under test; without it the Rust binary is built from this tree.
 resolve_source_binary() {
   local built="$WORK/source-bin/git-sfs"
 
@@ -20,13 +19,16 @@ resolve_source_binary() {
     return
   fi
 
-  command -v go >/dev/null 2>&1 || \
-    fail "go toolchain not found; set GIT_SFS_BIN to test a prebuilt binary"
+  command -v "${CARGO:-cargo}" >/dev/null 2>&1 || \
+    fail "cargo not found; set GIT_SFS_BIN to test a prebuilt binary"
 
   mkdir -p "$(dirname "$built")"
-  env GOOS="$HOST_OS" GOARCH="$HOST_ARCH" CGO_ENABLED=0 \
-    go build -trimpath -ldflags="-s -w -X git-sfs/internal/version.Version=$BUILD_VERSION" \
-    -o "$built" "$ROOT/cmd/git-sfs"
+  (
+    cd "$ROOT"
+    env GIT_SFS_VERSION="$BUILD_VERSION" "${CARGO:-cargo}" build --release -p git-sfs
+  )
+  cp "$ROOT/target/release/git-sfs" "$built"
+  chmod +x "$built"
   printf '%s\n' "$built"
 }
 
