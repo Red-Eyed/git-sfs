@@ -16,8 +16,8 @@ commands when a remote backend is involved.
 process many files (`add`, `import`, `setup`, `verify`, `pull`). It overrides
 `[settings].n_jobs` from the config; `0` (the default) means auto.
 
-`--quiet` silences normal output, including rclone's transfer progress during
-`push`/`pull`.
+`--quiet` silences normal output, including elapsed status spinners and
+rclone's transfer progress during `push`/`pull`.
 
 `--version` prints the `git-sfs` release version from the build tag.
 

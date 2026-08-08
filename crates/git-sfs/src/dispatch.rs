@@ -33,7 +33,7 @@ use crate::cli::{
     AddArgs, Cli, Command, DoctorArgs, ImportArgs, InitArgs, MvArgs, PullArgs, PushArgs,
     RemotesArgs, SelfCommand, SetupArgs, StatusArgs, VerifyArgs,
 };
-use crate::progress::ProgressRemote;
+use crate::progress::{ProgressRemote, ProgressRepo, ProgressStore, with_spinner};
 use crate::reporting::{self, RenderMode};
 
 const PULL_TMP_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
@@ -63,7 +63,9 @@ fn run_init(cli: &Cli, args: &InitArgs) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
     let config_path = resolved_config_path(&repo, &cli.global.config);
-    let outcome = init_cmd::init(&repo, &config_path, args.cache.as_deref(), args.force)?;
+    let outcome = with_spinner(!cli.global.quiet, "initializing git-sfs", || {
+        init_cmd::init(&repo, &config_path, args.cache.as_deref(), args.force)
+    })?;
     reporting::init_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
     Ok(())
 }
@@ -76,7 +78,9 @@ fn run_setup(cli: &Cli, args: &SetupArgs, cancel: &Cancel) -> Result<()> {
     let config = load_config(&config_path)?;
     check_git_sfs_floor(&config)?;
 
-    let outcome = setup_cmd::setup(&repo, args.cache.as_deref(), cancel)?;
+    let outcome = with_spinner(!cli.global.quiet, "setting up cache", || {
+        setup_cmd::setup(&repo, args.cache.as_deref(), cancel)
+    })?;
     reporting::setup_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
     Ok(())
 }
@@ -94,10 +98,14 @@ fn run_add(cli: &Cli, args: &AddArgs, cancel: &Cancel) -> Result<()> {
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let store = FsStore::new(cache_root);
     let repo_port = FsRepo::new(repo.clone());
-    let _lock = Lock::acquire(&locks_dir, LockName::Add, cancel)?;
+    let _lock = with_spinner(!cli.global.quiet, "waiting for add lock", || {
+        Lock::acquire(&locks_dir, LockName::Add, cancel)
+    })?;
     let mode = RenderMode::from_quiet(cli.global.quiet);
 
-    match add::add(&repo_port, &store, &repo, &args.paths, cancel) {
+    match with_spinner(!cli.global.quiet, "adding files", || {
+        add::add(&repo_port, &store, &repo, &args.paths, cancel)
+    }) {
         Ok(outcome) => {
             reporting::add_outcome(&outcome, mode);
             Ok(())
@@ -119,7 +127,9 @@ fn run_mv(cli: &Cli, args: &MvArgs, cancel: &Cancel) -> Result<()> {
     let repo_port = FsRepo::new(repo.clone());
     let mode = RenderMode::from_quiet(cli.global.quiet);
 
-    match mv::mv(&repo_port, &repo, &args.source, &args.dest, cancel) {
+    match with_spinner(!cli.global.quiet, "moving links", || {
+        mv::mv(&repo_port, &repo, &args.source, &args.dest, cancel)
+    }) {
         Ok(moved) => {
             reporting::moved_links(&moved, mode);
             Ok(())
@@ -142,22 +152,26 @@ fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let store = FsStore::new(cache_root);
-    let _lock = Lock::acquire(&locks_dir, LockName::Import, cancel)?;
+    let _lock = with_spinner(!cli.global.quiet, "waiting for import lock", || {
+        Lock::acquire(&locks_dir, LockName::Import, cancel)
+    })?;
     let mode = RenderMode::from_quiet(cli.global.quiet);
 
     let options = ImportOptions {
         move_source: args.move_source,
         follow_symlinks: args.follow_symlinks,
     };
-    match import::import(
-        &store,
-        &repo,
-        &cwd,
-        &args.source,
-        &args.dest,
-        options,
-        cancel,
-    ) {
+    match with_spinner(!cli.global.quiet, "importing files", || {
+        import::import(
+            &store,
+            &repo,
+            &cwd,
+            &args.source,
+            &args.dest,
+            options,
+            cancel,
+        )
+    }) {
         Ok(outcome) => {
             reporting::import_outcome(&outcome, mode);
             Ok(())
@@ -179,8 +193,8 @@ fn run_status(cli: &Cli, args: &StatusArgs, cancel: &Cancel) -> Result<()> {
     check_git_sfs_floor(&config)?;
     let cache_root = resolve_cache_root(&repo)?;
 
-    let store = FsStore::new(cache_root.clone());
-    let repo_port = FsRepo::new(repo);
+    let store = ProgressStore::new(FsStore::new(cache_root.clone()), !cli.global.quiet);
+    let repo_port = ProgressRepo::new(FsRepo::new(repo), !cli.global.quiet);
     let remote = match args.remote.as_deref() {
         Some(name) => Some(build_progress_remote(
             cli,
@@ -239,9 +253,11 @@ fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
     remote.require_exists(cancel)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
-    let _lock = Lock::acquire(&locks_dir, LockName::Push, cancel)?;
-    let store = FsStore::new(cache_root.clone());
-    let repo_port = FsRepo::new(repo);
+    let _lock = with_spinner(!cli.global.quiet, "waiting for push lock", || {
+        Lock::acquire(&locks_dir, LockName::Push, cancel)
+    })?;
+    let store = ProgressStore::new(FsStore::new(cache_root.clone()), !cli.global.quiet);
+    let repo_port = ProgressRepo::new(FsRepo::new(repo), !cli.global.quiet);
     let cache_files_dir = cache_root.join("files");
     let mode = RenderMode::from_quiet(cli.global.quiet);
 
@@ -281,9 +297,11 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
     remote.require_exists(cancel)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
-    let _lock = Lock::acquire(&locks_dir, LockName::Pull, cancel)?;
-    let store = FsStore::new(cache_root.clone());
-    let repo_port = FsRepo::new(repo);
+    let _lock = with_spinner(!cli.global.quiet, "waiting for pull lock", || {
+        Lock::acquire(&locks_dir, LockName::Pull, cancel)
+    })?;
+    let store = ProgressStore::new(FsStore::new(cache_root.clone()), !cli.global.quiet);
+    let repo_port = ProgressRepo::new(FsRepo::new(repo), !cli.global.quiet);
     let cache_files_dir = cache_root.join("files");
 
     let outcome = pull::pull(
@@ -660,8 +678,8 @@ fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
     check_git_sfs_floor(&config)?;
     let cache_root = resolve_cache_root(&repo)?;
 
-    let store = FsStore::new(cache_root.clone());
-    let repo_port = FsRepo::new(repo);
+    let store = ProgressStore::new(FsStore::new(cache_root.clone()), !cli.global.quiet);
+    let repo_port = ProgressRepo::new(FsRepo::new(repo), !cli.global.quiet);
     let remote = if args.check_remote() {
         let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
         let remote =

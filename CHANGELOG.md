@@ -11,6 +11,8 @@
   one process per object.
 - Show rclone's live transfer progress, speed, and ETA during `push` and
   `pull`.
+- Show elapsed status spinners for long-running local work instead of leaving
+  the terminal blank.
 
 ### Backwards Incompatible Changes
 
@@ -71,6 +73,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
   objects into the cache.
 - Show rclone's own transfer progress for `push` and `pull`, and silence it
   with `--quiet`.
+- Show elapsed status spinners while scanning, hashing, verifying, importing,
+  moving, setup, and self-update phases are running.
 - Skip downloading or hashing already-verified cache objects during ordinary
   pulls; writable cache objects are treated as unverified, hash-checked, and
   protected again.

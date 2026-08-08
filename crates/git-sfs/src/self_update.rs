@@ -15,6 +15,7 @@ use git_sfs_core::{Error, Result};
 use sha2::{Digest as _, Sha256};
 use ureq::ResponseExt as _;
 
+use crate::progress::with_spinner;
 use crate::version;
 
 const DEFAULT_REPO: &str = "Red-Eyed/git-sfs";
@@ -171,8 +172,9 @@ fn update_git_sfs(
     exe: &Path,
     quiet: bool,
 ) -> Result<()> {
-    note(quiet, "checking git-sfs version");
-    let latest = latest_git_sfs_version(fetcher, &env.release_latest_url)?;
+    let latest = with_spinner(!quiet, "checking git-sfs version", || {
+        latest_git_sfs_version(fetcher, &env.release_latest_url)
+    })?;
     let current = version::VERSION;
     if current == latest {
         println!("git-sfs {current} already up to date");
@@ -183,20 +185,25 @@ fn update_git_sfs(
     let sums_url = format!("{}/{latest}/SHA256SUMS", env.release_base_url);
     let asset_url = format!("{}/{latest}/{asset}", env.release_base_url);
 
-    let sums = fetcher
-        .get_bytes(&sums_url)
-        .map_err(|err| unavailable("git-sfs", &sums_url, err))?;
+    let sums = with_spinner(!quiet, "downloading git-sfs checksums", || {
+        fetcher
+            .get_bytes(&sums_url)
+            .map_err(|err| unavailable("git-sfs", &sums_url, err))
+    })?;
     let expected =
         parse_sha256_sums(&sums, &asset).map_err(|err| unavailable_msg("git-sfs", err))?;
-    note(quiet, &format!("downloading git-sfs {latest}"));
-    let archive = fetcher
-        .get_bytes(&asset_url)
-        .map_err(|err| unavailable("git-sfs", &asset_url, err))?;
-    verify_sha256(&archive, &expected).map_err(|err| unavailable_msg("git-sfs", err))?;
-    let binary =
-        extract_tar_gz(&archive, "git-sfs").map_err(|err| unavailable_msg("git-sfs", err))?;
-    atomic_replace(exe, &binary)
-        .map_err(|err| unavailable("git-sfs", &exe.display().to_string(), err))?;
+    let archive = with_spinner(!quiet, format!("downloading git-sfs {latest}"), || {
+        fetcher
+            .get_bytes(&asset_url)
+            .map_err(|err| unavailable("git-sfs", &asset_url, err))
+    })?;
+    with_spinner(!quiet, "installing git-sfs", || {
+        verify_sha256(&archive, &expected).map_err(|err| unavailable_msg("git-sfs", err))?;
+        let binary =
+            extract_tar_gz(&archive, "git-sfs").map_err(|err| unavailable_msg("git-sfs", err))?;
+        atomic_replace(exe, &binary)
+            .map_err(|err| unavailable("git-sfs", &exe.display().to_string(), err))
+    })?;
     println!("git-sfs {current} -> {latest}");
     Ok(())
 }
@@ -207,8 +214,9 @@ fn update_rclone(
     rclone_path: &Path,
     quiet: bool,
 ) -> Result<()> {
-    note(quiet, "checking rclone version");
-    let latest = latest_rclone_version(fetcher, &env.rclone_base_url)?;
+    let latest = with_spinner(!quiet, "checking rclone version", || {
+        latest_rclone_version(fetcher, &env.rclone_base_url)
+    })?;
     let current = current_rclone_version(rclone_path);
     if current.as_deref() == Some(latest.as_str()) {
         println!("rclone {latest} already up to date");
@@ -219,19 +227,25 @@ fn update_rclone(
     let asset_url = format!("{}/{latest}/{asset}", env.rclone_base_url);
     let hash_url = format!("{asset_url}.sha256");
 
-    let hash_file = fetcher
-        .get_bytes(&hash_url)
-        .map_err(|err| unavailable("rclone", &hash_url, err))?;
+    let hash_file = with_spinner(!quiet, "downloading rclone checksum", || {
+        fetcher
+            .get_bytes(&hash_url)
+            .map_err(|err| unavailable("rclone", &hash_url, err))
+    })?;
     let expected = first_field(&hash_file)
         .ok_or_else(|| Error::Unavailable(format!("rclone: empty checksum file at {hash_url}")))?;
-    note(quiet, &format!("downloading rclone {latest}"));
-    let archive = fetcher
-        .get_bytes(&asset_url)
-        .map_err(|err| unavailable("rclone", &asset_url, err))?;
-    verify_sha256(&archive, &expected).map_err(|err| unavailable_msg("rclone", err))?;
-    let binary = extract_zip(&archive, "rclone").map_err(|err| unavailable_msg("rclone", err))?;
-    atomic_replace(rclone_path, &binary)
-        .map_err(|err| unavailable("rclone", &rclone_path.display().to_string(), err))?;
+    let archive = with_spinner(!quiet, format!("downloading rclone {latest}"), || {
+        fetcher
+            .get_bytes(&asset_url)
+            .map_err(|err| unavailable("rclone", &asset_url, err))
+    })?;
+    with_spinner(!quiet, "installing rclone", || {
+        verify_sha256(&archive, &expected).map_err(|err| unavailable_msg("rclone", err))?;
+        let binary =
+            extract_zip(&archive, "rclone").map_err(|err| unavailable_msg("rclone", err))?;
+        atomic_replace(rclone_path, &binary)
+            .map_err(|err| unavailable("rclone", &rclone_path.display().to_string(), err))
+    })?;
 
     match current {
         Some(current) => println!("rclone {current} -> {latest}"),
@@ -246,12 +260,6 @@ fn unavailable(component: &str, where_: &str, err: UpdateError) -> Error {
 
 fn unavailable_msg(component: &str, err: UpdateError) -> Error {
     Error::Unavailable(format!("{component}: {err}"))
-}
-
-fn note(quiet: bool, message: &str) {
-    if !quiet {
-        eprintln!("{message}...");
-    }
 }
 
 fn latest_git_sfs_version(fetcher: &impl Fetcher, latest_url: &str) -> Result<String> {

@@ -12,13 +12,125 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use git_sfs_core::Cancel;
 use git_sfs_core::domain::Sha256;
-use git_sfs_core::ports::{Remote, RemoteError};
+use git_sfs_core::ports::{
+    CacheEntry, FoundEntry, Remote, RemoteError, Repo, RepoError, ScannedEntry, Store, StoreError,
+};
 
 const TICK: Duration = Duration::from_millis(120);
 
 type RemoteResult<T> = std::result::Result<T, RemoteError>;
+type RepoResult<T> = std::result::Result<T, RepoError>;
+type StoreResult<T> = std::result::Result<T, StoreError>;
 
-/// A `Remote` decorator that displays coarse progress for rclone operations.
+pub(crate) fn with_spinner<T, E>(
+    enabled: bool,
+    message: impl Into<String>,
+    work: impl FnOnce() -> std::result::Result<T, E>,
+) -> std::result::Result<T, E> {
+    let bar = spinner(enabled, message);
+    let result = work();
+    bar.finish_and_clear();
+    result
+}
+
+pub(crate) struct ProgressRepo<R> {
+    inner: R,
+    enabled: bool,
+}
+
+impl<R> ProgressRepo<R> {
+    pub(crate) fn new(inner: R, enabled: bool) -> Self {
+        Self { inner, enabled }
+    }
+}
+
+impl<R: Repo> Repo for ProgressRepo<R> {
+    fn scan(&self, scope: &Utf8Path, cancel: &Cancel) -> RepoResult<Vec<ScannedEntry>> {
+        with_spinner(self.enabled, format!("scanning {scope}"), || {
+            self.inner.scan(scope, cancel)
+        })
+    }
+
+    fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> RepoResult<Vec<FoundEntry>> {
+        with_spinner(self.enabled, format!("finding files in {scope}"), || {
+            self.inner.find_files(scope, cancel)
+        })
+    }
+}
+
+pub(crate) struct ProgressStore<S> {
+    inner: S,
+    enabled: bool,
+}
+
+impl<S> ProgressStore<S> {
+    pub(crate) fn new(inner: S, enabled: bool) -> Self {
+        Self { inner, enabled }
+    }
+}
+
+impl<S: Store> Store for ProgressStore<S> {
+    fn object_path(&self, hash: Sha256) -> Utf8PathBuf {
+        self.inner.object_path(hash)
+    }
+
+    fn verified(&self, hash: Sha256, cancel: &Cancel) -> StoreResult<Option<CacheEntry>> {
+        with_spinner(
+            self.enabled,
+            format!("checking cache object {}", hash.short()),
+            || self.inner.verified(hash, cancel),
+        )
+    }
+
+    fn rehash_object(&self, hash: Sha256, cancel: &Cancel) -> StoreResult<Option<CacheEntry>> {
+        with_spinner(
+            self.enabled,
+            format!("verifying cache object {}", hash.short()),
+            || self.inner.rehash_object(hash, cancel),
+        )
+    }
+
+    fn object_size(&self, hash: Sha256) -> StoreResult<Option<u64>> {
+        with_spinner(
+            self.enabled,
+            format!("checking cache object {}", hash.short()),
+            || self.inner.object_size(hash),
+        )
+    }
+
+    fn object_hashes(&self) -> StoreResult<Vec<Sha256>> {
+        with_spinner(self.enabled, "listing cache objects", || {
+            self.inner.object_hashes()
+        })
+    }
+
+    fn available_bytes(&self) -> StoreResult<u64> {
+        with_spinner(self.enabled, "checking cache free space", || {
+            self.inner.available_bytes()
+        })
+    }
+
+    fn store(&self, source: &Utf8Path, hash: Sha256, cancel: &Cancel) -> StoreResult<CacheEntry> {
+        with_spinner(self.enabled, format!("storing {source}"), || {
+            self.inner.store(source, hash, cancel)
+        })
+    }
+
+    fn adopt(&self, source: &Utf8Path, hash: Sha256, cancel: &Cancel) -> StoreResult<CacheEntry> {
+        with_spinner(self.enabled, format!("adopting {source}"), || {
+            self.inner.adopt(source, hash, cancel)
+        })
+    }
+
+    fn remove_object(&self, hash: Sha256) -> StoreResult<()> {
+        with_spinner(
+            self.enabled,
+            format!("removing cache object {}", hash.short()),
+            || self.inner.remove_object(hash),
+        )
+    }
+}
+
 pub(crate) struct ProgressRemote<R> {
     inner: R,
     enabled: bool,
@@ -34,10 +146,7 @@ impl<R> ProgressRemote<R> {
         message: impl Into<String>,
         work: impl FnOnce(&R) -> RemoteResult<T>,
     ) -> RemoteResult<T> {
-        let bar = spinner(self.enabled, message);
-        let result = work(&self.inner);
-        bar.finish_and_clear();
-        result
+        with_spinner(self.enabled, message, || work(&self.inner))
     }
 }
 
@@ -109,7 +218,7 @@ fn spinner(enabled: bool, message: impl Into<String>) -> ProgressBar {
         ProgressBar::hidden()
     };
     bar.set_style(
-        ProgressStyle::with_template("{spinner} {msg}")
+        ProgressStyle::with_template("{spinner} {msg} ({elapsed_precise})")
             .expect("static progress style template is valid"),
     );
     bar.set_message(message.into());
@@ -121,7 +230,14 @@ fn spinner(enabled: bool, message: impl Into<String>) -> ProgressBar {
 mod tests {
     use std::sync::Mutex;
 
+    use git_sfs_core::ports::{FakeRepo, FakeStore};
+
     use super::*;
+
+    fn hash_bytes(bytes: &[u8]) -> Sha256 {
+        use sha2::{Digest as _, Sha256 as Sha256Hasher};
+        Sha256::from_digest(Sha256Hasher::digest(bytes).into())
+    }
 
     #[derive(Default)]
     struct RecordingRemote {
@@ -239,5 +355,38 @@ mod tests {
                 "verify_file"
             ]
         );
+    }
+
+    #[test]
+    fn delegates_repo_operations_without_changing_results() {
+        let repo = FakeRepo::new(Utf8PathBuf::from("/repo"));
+        repo.seed_file("data/a.bin");
+        let repo = ProgressRepo::new(repo, false);
+        let cancel = Cancel::new();
+
+        assert!(repo.scan(Utf8Path::new("."), &cancel).unwrap().is_empty());
+        let found = repo.find_files(Utf8Path::new("."), &cancel).unwrap();
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].path(), Some(Utf8Path::new("data/a.bin")));
+    }
+
+    #[test]
+    fn delegates_store_operations_without_changing_results() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = Utf8PathBuf::from_path_buf(source_dir.path().join("data.bin")).unwrap();
+        let bytes = b"dataset bytes";
+        std::fs::write(&source, bytes).unwrap();
+        let hash = hash_bytes(bytes);
+        let store = ProgressStore::new(FakeStore::new(), false);
+        let cancel = Cancel::new();
+
+        assert!(store.verified(hash, &cancel).unwrap().is_none());
+        assert_eq!(store.store(&source, hash, &cancel).unwrap().hash(), hash);
+        assert!(store.verified(hash, &cancel).unwrap().is_some());
+        assert_eq!(store.object_size(hash).unwrap(), Some(bytes.len() as u64));
+        assert_eq!(store.object_hashes().unwrap(), vec![hash]);
+        store.remove_object(hash).unwrap();
+        assert!(store.verified(hash, &cancel).unwrap().is_none());
     }
 }
