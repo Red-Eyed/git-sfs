@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/Red-Eyed/git-sfs"
 # Cargo's version is internal bookkeeping. The user-visible version is the
 # release tag in `vX.Y.Z` form, which is not valid semver and so cannot live
-# here -- see `crates/git-sfs/src/version.rs` and contract-spec 6.6.
+# here.
 version = "2.0.0"
 
 [workspace.dependencies]
@@ -21,8 +21,8 @@ ctrlc = { version = "3.5", features = ["termination"] }
 hex = "0.4"
 indicatif = "0.18"
 flate2 = "1.1"
-# `signal` is for Lock's PID-liveness check (contract-spec 8.1). `fs` is for
-# pull's cache-volume free-space guard before batched rclone downloads.
+# `signal` is for Lock's PID-liveness check. `fs` is for pull's cache-volume
+# free-space guard before batched rclone downloads.
 nix = { version = "0.31", default-features = false, features = ["signal", "fs"] }
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
@@ -36,16 +36,13 @@ tempfile = "3.27"
 thiserror = "2.0"
 toml = "1.1"
 
-# rust-rewrite-plan 8: a client that pulls native-tls/OpenSSL cannot be linked
-# statically against musl, and contract-spec 11 requires a static Linux binary.
-# ureq 3 already defaults to rustls, but the default is not a guarantee -- some
-# other crate enabling the `native-tls` feature would silently re-introduce the
-# problem, and it would surface only in the release phase. Pinning it here makes
-# the choice explicit and the CI musl job proves it holds.
+# A client that pulls native-tls/OpenSSL cannot be linked statically against
+# musl. ureq 3 already defaults to rustls, but the default is not a guarantee:
+# another crate enabling `native-tls` would silently re-introduce the problem.
+# Pinning rustls here keeps release artifacts portable.
 ureq = { version = "3.3", default-features = false, features = ["rustls", "gzip"] }
 # Repo tree walking (ports::repo) -- symlink-loop handling (default
-# follow_links = false) and the deterministic ordering rust-rewrite-plan
-# §4.1 names this crate for.
+# follow_links = false) and deterministic ordering.
 walkdir = "2.5"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
@@ -53,10 +50,9 @@ zip = { version = "2.4", default-features = false, features = ["deflate"] }
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-# rust-rewrite-plan 2.5. `Result` is already `#[must_use]`, but `let _ = ` opts
-# back out of it silently, which is the exact affordance that let v1 write
-# `sizes, _ := r.FileSizes(...)` and report a broken remote as an empty one.
-# Denying it means discarding an error requires an `#[allow]` naming the reason.
+# `Result` is already `#[must_use]`, but `let _ = ` opts back out of it
+# silently. Denying it means discarding an error requires an `#[allow]` naming
+# the reason.
 let_underscore_must_use = "deny"
 
 [profile.release]

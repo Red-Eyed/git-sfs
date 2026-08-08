@@ -85,8 +85,7 @@ impl From<PullError> for Error {
 /// Downloads every cache object referenced by git-sfs symlinks at or below
 /// `scope` that is not already verified locally.
 ///
-/// Invalid symlinks are ignored here, matching v1's
-/// `collectGitSFSSymlinks`; `verify` reports them instead.
+/// Invalid symlinks are ignored here; `verify` reports them instead.
 ///
 /// # Errors
 ///

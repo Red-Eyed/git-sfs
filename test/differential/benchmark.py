@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
 """Performance baselines, captured from the binary rather than from packages.
 
-rust-rewrite-plan §9b: the rewrite claims a throughput win from SHA-NI and
-measures nothing, while the classic regression for a tool of this shape is
-`rayon` defaulting to CPU-count threads on I/O-bound work and turning
-parallelism into contention. At TB scale a 2x slowdown is a serious user-facing
-regression, so Phase 7 gates on it.
+The classic regression for a tool of this shape is parallel work turning into
+I/O contention. At TB scale a 2x slowdown is a serious user-facing regression,
+so the benchmark compares binaries measured in the same run.
 
-Everything here drives the CLI. The existing Go benchmarks
-(BenchmarkStore8MiB and friends) measure internal packages, which is the one
-thing that cannot survive an idiomatic rewrite -- those seams will not exist in
-v2. Only the command surface is comparable across both implementations.
+Everything here drives the CLI. Only the command surface is comparable across
+implementations.
 
 **Absolute numbers do not gate anything.** A millisecond count from one laptop
 says nothing about another machine, so the gate is the *ratio* between two
 binaries measured side by side in a single run:
 
-    benchmark.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+    benchmark.py --binary old=./git-sfs --binary new=./target/release/git-sfs
 
 Committed baselines are reference material -- they record what the shape of the
 workload cost on a named machine, so a later run on that machine can be
 sanity-checked. They are not the acceptance criterion.
 
-Two tiers, because the costs are different (§9b, "tests run at the wrong
-scale" -- every workflow scenario today uses twelve-byte files):
+Two tiers, because the costs are different and workflow scenarios use tiny
+fixtures:
 
   count       many small objects; per-object overhead, locks, syscalls, walks
   throughput  one large object; the hashing hot path where the SHA-NI claim lives
@@ -75,7 +71,7 @@ def measure(context: dict, args: list[str]) -> float:
     """Wall time for one command, failing loudly rather than timing an error path.
 
     --quiet throughout: progress rendering is real work but it is also the part
-    v2 replaces wholesale (indicatif for progress.go), so including it would
+    current replaces wholesale , so including it would
     measure the renderer rather than the operation.
     """
     env = dict(context["env"])
@@ -214,9 +210,9 @@ def exceeding(
 ) -> list[tuple[str, str, float]]:
     """Operations where a binary is slower than the baseline by more than limit.
 
-    This is the Phase 7 gate. It compares binaries measured in the same run
-    rather than against a committed number, because an absolute time is a
-    property of the machine that produced it.
+    Compares binaries measured in the same run rather than against a committed
+    number, because an absolute time is a property of the machine that produced
+    it.
     """
     over = []
     for name, timings in results.items():

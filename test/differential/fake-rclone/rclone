@@ -30,7 +30,7 @@ import sys
 import time
 from pathlib import Path
 
-FAKE_VERSION = "v1.99.0-fake"
+FAKE_VERSION = "v0.0.0-fake"
 
 # Substituted into the log so a run-to-run random suffix does not read as a
 # difference. The list file's *contents* are recorded instead of its path --
@@ -157,7 +157,7 @@ def matching_fault(subcommand: str, occurrence: int, argv: list[str]) -> dict | 
     interesting failures reachable: git-sfs runs a connectivity preflight before
     per-object queries, so a fault matching every `lsjson` is caught by the
     preflight and never exercises the per-object path where errors collapse into
-    "not found" (contract-spec 13.3). Targeting `/files/sha256/` reaches it.
+    "not found". Targeting `/files/sha256/` reaches it.
     """
     source = os.environ.get("RCLONE_FAULTS")
     if not source or not Path(source).is_file():
@@ -195,12 +195,8 @@ def count_invocation(subcommand: str) -> int:
 def describe(path: Path, relative: str) -> dict:
     """One lsjson entry.
 
-    `Path` is relative to the listing root and `Name` is the basename -- they
-    differ only under --recursive, which is exactly where it matters:
-    parseFileSizesJSON (command.go) matches objects on `Name`, so emitting the
-    relative path there made every object look absent from the remote. That
-    silently disabled the remote half of `verify` and `status` in this harness
-    for as long as the fake has existed.
+    `Path` is relative to the listing root and `Name` is the basename. Emitting
+    the relative path as `Name` made every object look absent from the remote.
     """
     return {
         "Path": relative,

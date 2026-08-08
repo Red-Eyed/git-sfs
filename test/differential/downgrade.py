@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Downgrade as an invariant: v1 must still operate anything v2 has touched.
+"""Cross-version state handoff invariants.
 
-rust-rewrite-plan §7c. Users self-update *forward* and nothing in v1 goes back,
-so if v2 ships a defect that touches data the exit path has to already exist --
-writing one afterwards is too late, because the affected users are exactly the
-ones who cannot afford to experiment.
-
-The invariant is nearly free given decisions already made (no version floor,
-identical cache/remote/lock layouts), and stating it as an invariant is what
-makes it *testable* rather than incidental.
+Users self-update forward, but stable state must remain legible to supported
+binaries. The invariant is nearly free given the stable cache, remote, lock, and
+config layouts, and stating it as an invariant makes it testable rather than
+incidental.
 
 Handoff, not concurrency: one binary does a full workflow, the other takes over
 the same repo, cache, and remote. That is a different question from the tree
@@ -20,8 +16,8 @@ With one it degrades to a self-check that still exercises every handoff step.
 
 Usage:
 
-    test/differential/downgrade.py --binary v1=./git-sfs
-    test/differential/downgrade.py --binary v2=./target/release/git-sfs --binary v1=./git-sfs
+    test/differential/downgrade.py --binary current=./target/release/git-sfs
+    test/differential/downgrade.py --binary old=./git-sfs --binary new=./target/release/git-sfs
 """
 
 from __future__ import annotations
@@ -47,8 +43,7 @@ SETUP = HARNESS_DIR / "replicated-setup.sh"
 
 TRACKED = "data/blob.bin"
 
-# A plausible v2-only cache addition (rust-rewrite-plan §7). Spec §4 calls it
-# additive and migration-safe; this harness is where that stops being a claim.
+# A plausible cache addition that should stay invisible to normal object walks.
 TRASH_BATCH = "20260721T000000Z"
 
 
@@ -84,7 +79,7 @@ def commit(context: dict, message: str) -> None:
 def test_reads_foreign_state(writer: Binary, reader: Binary, root: Path, r: Results):
     """Everything the writer left behind must be legible to the reader.
 
-    Covers the four artifacts §7c names: cache, symlinks, config, and remote.
+    Covers cache, symlinks, config, and remote state.
     """
     print(f"\n[{writer.name} writes, {reader.name} reads] existing state")
     context = prepare_workspace(
@@ -114,7 +109,7 @@ def test_reads_foreign_state(writer: Binary, reader: Binary, root: Path, r: Resu
 def test_pull_from_foreign_remote(
     writer: Binary, reader: Binary, root: Path, r: Results
 ):
-    """The remote layout is shared across versions, not just across workspaces."""
+    """The remote layout is shared across binaries, not just workspaces."""
     print(f"\n[{writer.name} pushes, {reader.name} pulls] remote layout")
     context = prepare_workspace(
         writer, root / f"pull-{writer.name}-{reader.name}", SETUP
@@ -178,13 +173,12 @@ def test_round_trip(writer: Binary, reader: Binary, root: Path, r: Results):
 
 
 def test_trash_stays_ignorable(binary: Binary, root: Path, r: Results):
-    """v2's `trash/` must be invisible to v1, or §7c is broken on arrival.
+    """`trash/` must be invisible to normal cache object walks.
 
-    Provable before v2 exists, because the claim is about *v1's* behavior:
-    countOrphans walks only files/sha256 and PurgeTmp touches only tmp/. This
-    plants the directory and checks that the most invasive walks leave it alone.
+    This plants the directory and checks that the most invasive walks leave it
+    alone.
     """
-    print(f"\n[{binary.name}] a v2-style trash/ directory in the cache")
+    print(f"\n[{binary.name}] a current-style trash/ directory in the cache")
     context = prepare_workspace(binary, root / f"trash-{binary.name}", SETUP)
     digest = tracked_object(context["repo"], TRACKED)
 
@@ -209,13 +203,10 @@ def test_trash_stays_ignorable(binary: Binary, root: Path, r: Results):
 
 
 def test_unknown_config_keys_are_rejected(binary: Binary, root: Path, r: Results):
-    """The constraint §7c does not currently state, pinned so v2 cannot trip it.
+    """Unknown config keys remain rejected.
 
-    config.go:188-245 rejects unknown sections, top-level fields, settings
-    fields, and remote fields with ErrInvalidConfig. So **any** config key v2
-    invents makes the config unreadable by v1 the moment it is written -- and
-    config.toml is committed, so it reaches every clone. Recorded as an ASSERT
-    of v1's actual behavior because that is what constrains v2's design.
+    `config.toml` is committed, so any new key reaches every clone. Until the
+    schema is intentionally widened, unknown sections and fields must fail.
     """
     print(f"\n[{binary.name}] unknown config keys")
     context = prepare_workspace(binary, root / f"config-{binary.name}", SETUP)
@@ -236,7 +227,7 @@ def test_unknown_config_keys_are_rejected(binary: Binary, root: Path, r: Results
         config.write_text(text)
         r.check(
             run(context, binary, ["verify", "--no-check-remote"]).returncode != 0,
-            f"an unknown {label} is rejected, so v2 must not add one",
+            f"an unknown {label} is rejected",
         )
 
     config.write_text(original)
@@ -260,8 +251,8 @@ def main() -> None:
     results = Results()
     root = workspace_root("git-sfs-downgrade-")
     try:
-        # Both directions when two binaries are given: downgrade is the one that
-        # matters, but an upgrade that cannot read old state is equally fatal.
+        # Both directions matter when two binaries are given: any supported
+        # handoff must preserve readable state.
         pairs = [(a, b) for a in args.binary for b in args.binary if a.name != b.name]
         if not pairs:
             only = args.binary[0]

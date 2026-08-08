@@ -2,13 +2,10 @@
 
 /// The version `--version` prints.
 ///
-/// contract-spec 11 requires this to stay parseable as the release tag, in
-/// `vX.Y.Z` form, because the workflow suite asserts on it and installed
-/// binaries resolve release archives by it. That form is not valid semver
-/// (contract-spec 6.6), so it cannot be derived from Cargo's `version` field
-/// and is injected by the release build instead.
+/// Release builds inject the tag-shaped version string. Cargo's `version`
+/// field cannot supply that form because Cargo metadata must be plain semver.
 ///
-/// Development builds report `dev`, matching v1.
+/// Development builds report `dev`.
 pub const VERSION: &str = match option_env!("GIT_SFS_VERSION") {
     Some(version) => version,
     None => "dev",

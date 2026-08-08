@@ -1,27 +1,14 @@
 //! The repository: walking the tree, reading the symlinks on it.
 //!
-//! contract-spec §3.3/§5b, rust-rewrite-plan §3.3. [`Repo`] gets a trait
-//! because there are genuinely two implementations — [`FsRepo`] (real) and
-//! [`FakeRepo`] (in-memory, for higher-layer tests) — the bar
-//! rust-rewrite-plan §3.3 sets for introducing one at all.
+//! [`Repo::scan`] returns every candidate as data: [`ScannedEntry::Tracked`]
+//! for a symlink that validates, [`ScannedEntry::Invalid`] for one that does
+//! not, and [`ScannedEntry::Unrepresentable`] for a path git-sfs cannot name
+//! losslessly. Each command chooses its own policy: `push`, `pull`, and
+//! `status` ignore invalid symlinks; `verify` reports them.
 //!
-//! [`Repo::scan`] is one shared mechanism standing in for v1's *two* walks
-//! that do the same traversal for different purposes: `collectGitSFSSymlinks`
-//! (`walk.go:18`, used by `push`/`pull`/`status`/`init`), which silently
-//! drops anything that fails symlink validation, and `verify`'s own walk
-//! (`verify.go:120-155`), which instead reports each failure as a "broken
-//! git symlink" issue. Returning every candidate here — [`ScannedEntry::Tracked`]
-//! for one that validates, [`ScannedEntry::Invalid`] for one that doesn't —
-//! unifies the mechanism; which policy a given command applies (drop the
-//! invalid ones, or report them) is a Phase 4 decision, not this port's.
-//! `git-sfs-core` cannot print (see the crate doc), so even the "report" side
-//! of that stays data here — a command layer turns it into a warning.
-//!
-//! Directory-read failures (or the requested scope not existing at all)
-//! abort the whole scan with `Err`, matching v1's `filepath.WalkDir` and
-//! rust-rewrite-plan §2.5's "cannot determine the tree's contents" being an
-//! error, not a silently partial result. A single candidate symlink failing
-//! validation does not abort — matching v1's per-entry `return nil`.
+//! Directory-read failures, or the requested scope not existing at all, abort
+//! the whole scan with `Err` because git-sfs cannot determine the tree's
+//! contents. A single candidate symlink failing validation does not abort.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
@@ -37,7 +24,7 @@ use crate::error::Error;
 /// One candidate [`Repo::scan`] found at or below the requested scope.
 #[derive(Debug)]
 pub enum ScannedEntry {
-    /// A valid git-sfs symlink — contract-spec §3.2's six rules all held.
+    /// A valid git-sfs symlink.
     Tracked {
         /// Repo-relative path to the symlink.
         path: Utf8PathBuf,
@@ -46,9 +33,7 @@ pub enum ScannedEntry {
     },
     /// A symlink that looked like a candidate but is not a valid git-sfs
     /// link — either unrelated to git-sfs, or a broken/hand-edited one.
-    /// `push`/`pull`/`status` silently ignore these, mirroring v1's
-    /// `collectGitSFSSymlinks`; `verify` is expected to report them, matching
-    /// v1's own separate walk (`verify.go:143-151`, "broken git symlink").
+    /// `push`/`pull`/`status` ignore these; `verify` reports them.
     Invalid {
         /// Repo-relative path to the symlink.
         path: Utf8PathBuf,
@@ -82,8 +67,7 @@ impl ScannedEntry {
 }
 
 /// One regular file [`Repo::find_files`] found at or below the requested
-/// scope — `add`'s candidate set (contract-spec §5b's operation-scope
-/// pattern applied to plain files instead of symlinks).
+/// scope: `add`'s candidate set.
 #[derive(Debug)]
 pub enum FoundEntry {
     /// A regular file at this repo-relative path.
@@ -120,18 +104,16 @@ impl FoundEntry {
 #[derive(Debug, Error)]
 pub enum InvalidReason {
     /// `readlink()` itself failed — e.g. permission denied, or the entry
-    /// disappeared between being listed and being read. Treated as
-    /// unresolvable, the same as v1's `ParseGitSymlink` does when
-    /// `os.Readlink` errors.
+    /// disappeared between being listed and being read.
     #[error("reading symlink: {0}")]
     Unreadable(#[source] std::io::Error),
     /// The target text `readlink()` returned is not valid UTF-8 —
-    /// unrepresentable as the `&str` contract-spec §3.2's validation rules
-    /// operate over. Distinct from [`ScannedEntry::Unrepresentable`], which
-    /// is about the symlink's own *name*, not what it points at.
+    /// unrepresentable as the `&str` validation operates over. Distinct from
+    /// [`ScannedEntry::Unrepresentable`], which is about the symlink's own
+    /// *name*, not what it points at.
     #[error("symlink target is not valid UTF-8")]
     TargetNotUtf8,
-    /// One of contract-spec §3.2's six validation rules failed.
+    /// One of the symlink-target validation rules failed.
     #[error(transparent)]
     InvalidTarget(#[from] InvalidSymlinkTarget),
 }
@@ -168,9 +150,9 @@ impl From<RepoError> for Error {
 
 /// A repository tree: the source of every symlink git-sfs manages.
 pub trait Repo {
-    /// Every candidate symlink at or below `scope` (contract-spec §5b).
+    /// Every candidate symlink at or below `scope`.
     /// `scope` is repo-relative (`.` for the whole repository) or absolute;
-    /// either way it is resolved the same way v1's `absFromRepo` does.
+    /// either way it is resolved against the repository root.
     /// Results are sorted by path.
     ///
     /// Deduplication by hash, when a caller needs it for an object-level
@@ -197,19 +179,12 @@ pub trait Repo {
     fn find_files(&self, scope: &Utf8Path, cancel: &Cancel) -> Result<Vec<FoundEntry>, RepoError>;
 }
 
-/// v1's `shouldSkip` (`walk.go:58-65`), ported: exclude `.git` anywhere, the
-/// whole `.git-sfs` directory (cache, config, locks, tmp — however deep it's
-/// nested), and the top-level `.gitignore`.
+/// Excludes `.git` anywhere, the whole `.git-sfs` directory, and the top-level
+/// `.gitignore`.
 ///
-/// Operates on the repo-relative path rather than v1's absolute-path string
-/// comparisons. v1 spends three separate checks on `.git-sfs` (the exact
-/// top-level directory, its `config.toml` child, and a substring probe
-/// `strings.Contains(path, "/.git-sfs/")` for deeper nesting); "does any path
-/// component equal `.git-sfs`" is one check that produces the identical
-/// excluded set — a directory-vs-its-contents nuance in exactly *when* each
-/// approach prunes does not change *what* ends up in the final symlink list,
-/// since directories are never candidates either way. See the port's test
-/// suite for cases exercising this directly.
+/// Operates on the repo-relative path. Checking whether any component equals
+/// `.git-sfs` excludes the metadata directory and all of its descendants in one
+/// place.
 ///
 /// `pub(crate)`: [`super::super::exec::import`] reuses this for its own
 /// "destination must not be inside `.git-sfs`" check rather than duplicating
@@ -222,8 +197,8 @@ pub(crate) fn should_skip(repo_relative: &Utf8Path) -> bool {
         || repo_relative == Utf8Path::new(".gitignore")
 }
 
-/// v1's `absFromRepo` (`walk.go:80-85`): an absolute `scope` is used as-is
-/// (lexically cleaned), a relative one is resolved against `repo`.
+/// Resolves an absolute `scope` as-is (lexically cleaned), and a relative one
+/// against `repo`.
 ///
 /// `pub(crate)`: [`super::super::exec::mv`] resolves its `src`/`dest`
 /// arguments the same way `Repo::scan`'s own `scope` does, so it reuses this
@@ -428,8 +403,7 @@ fn lossy_relative(repo: &Utf8Path, absolute: &std::path::Path) -> String {
 }
 
 /// An in-memory [`Repo`], for tests above this layer that need a repository
-/// tree without a real filesystem. Its existence is what justifies `Repo`
-/// being a trait at all (rust-rewrite-plan §3.3).
+/// tree without a real filesystem.
 ///
 /// Seeded entries are raw target *text*, exactly what `readlink()` would
 /// return — not a pre-classified Tracked/Invalid — and [`FakeRepo::scan`]
@@ -500,8 +474,7 @@ fn fake_scope_rel(repo: &Utf8Path, scope: &Utf8Path) -> Utf8PathBuf {
         .unwrap_or_else(|_| resolved.clone())
 }
 
-/// Whether repo-relative `path` falls within `scope_rel` (contract-spec §5b:
-/// "at or below the path"; `.` means everything).
+/// Whether repo-relative `path` falls within `scope_rel`; `.` means everything.
 fn in_scope(scope_rel: &Utf8Path, path: &Utf8Path) -> bool {
     scope_rel == Utf8Path::new(".") || path.starts_with(scope_rel)
 }

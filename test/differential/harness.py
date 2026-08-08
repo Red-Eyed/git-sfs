@@ -50,12 +50,10 @@ def workspace_root(prefix: str) -> Path:
 
 @dataclass
 class Results:
-    """Tally that separates frozen mechanism from observed v1 policy.
+    """Tally conformance assertions.
 
-    ASSERT is contract: any conforming binary must satisfy it, so a failure
-    fails the run. OBSERVE records behavior v2 is *allowed or required* to
-    diverge from -- asserting it would mean inverting the test later, which is
-    how a harness teaches people to ignore it.
+    `observe` is reserved for non-failing diagnostics such as residue counts
+    that help debug failures but are not themselves part of the contract.
     """
 
     asserts_passed: int = 0

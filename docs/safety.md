@@ -83,7 +83,7 @@ This prevents absolute machine-local cache paths from being committed.
 
 ## What git-sfs Does Not Protect
 
-`git-sfs` v1 does not provide:
+`git-sfs` does not provide:
 
 - encryption
 - access control

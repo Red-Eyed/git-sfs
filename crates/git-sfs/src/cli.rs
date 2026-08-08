@@ -5,9 +5,8 @@
 //! then does lives in [`crate::dispatch`], so growing the tool does not touch
 //! this file and changing an argument does not touch that one.
 //!
-//! The surface is kept compatible with v1's because `test/workflows/` drives
-//! both binaries through the same invocations. Human-readable help text is not
-//! frozen (contract-spec 12) and is free to improve.
+//! The command names and flags are the stable automation surface. Human-readable
+//! help text can improve without changing the grammar.
 
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
@@ -17,11 +16,11 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "git-sfs",
     about = "store large file bytes outside Git while Git tracks symlinks",
-    // `--version` is handled by hand: clap's built-in flag prints
-    // "git-sfs <version>", and contract-spec 11 requires the bare tag.
+    // `--version` is handled by hand because clap's built-in flag prints
+    // "git-sfs <version>" while git-sfs exposes the bare version string.
     disable_version_flag = true,
-    // v1 has its own `help` *subcommand* (`Command::Help` below), so clap's
-    // auto-generated one would collide with it under the same name.
+    // git-sfs has a real `help` subcommand (`Command::Help` below), so clap's
+    // auto-generated help subcommand would collide with it.
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -36,9 +35,8 @@ pub struct Cli {
 
 /// Flags every command inherits.
 ///
-/// `global = true` reproduces kong's inheritance, so `git-sfs push --verbose`
-/// and `git-sfs --verbose push` are the same invocation. Scripts in the wild
-/// use both.
+/// `global = true` makes `git-sfs push --verbose` and
+/// `git-sfs --verbose push` the same invocation.
 #[derive(Debug, Args)]
 pub struct Global {
     /// dataset config path
@@ -239,7 +237,7 @@ pub struct StatusArgs {
     /// check presence and sizes against this remote (metadata only, no download)
     ///
     /// Absent means no network call is made at all, which is what makes
-    /// `status` usable offline (contract-spec 9.1).
+    /// `status` usable offline.
     #[arg(long = "remote", value_name = "NAME")]
     pub remote: Option<String>,
 
@@ -299,9 +297,8 @@ pub struct DoctorArgs {
 
 /// Writes the top-level help to stdout.
 ///
-/// Used for a bare `git-sfs` and for `git-sfs help`, both of which v1 answered
-/// with a hand-maintained usage block. Rendering clap's own help instead means
-/// the listing cannot drift from the grammar above.
+/// Used for a bare `git-sfs` and for `git-sfs help`. Rendering clap's own
+/// help means the listing cannot drift from the grammar above.
 pub fn print_help() -> std::io::Result<()> {
     use clap::CommandFactory;
 
@@ -420,7 +417,7 @@ mod tests {
     /// `move` is a Rust keyword, so the flag name has to be set by hand and a
     /// rename of the field would otherwise silently rename the flag.
     #[test]
-    fn import_accepts_its_flags_under_the_v1_names() {
+    fn import_accepts_its_stable_flag_names() {
         let Some(Command::Import(args)) =
             parse(&["git-sfs", "import", "--move", "-L", "src", "dst"]).command
         else {
@@ -448,10 +445,10 @@ mod tests {
         ));
     }
 
-    /// Every command v1 exposes must still parse; a missing one would only show
-    /// up as a workflow-suite failure much later.
+    /// Every stable command must parse; a missing one would only show up as a
+    /// workflow-suite failure much later.
     #[test]
-    fn every_v1_command_parses() {
+    fn every_stable_command_parses() {
         let invocations: &[&[&str]] = &[
             &["git-sfs", "init"],
             &["git-sfs", "setup"],

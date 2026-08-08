@@ -1,26 +1,11 @@
-//! Inter-process mutual exclusion — contract-spec §8.
+//! Inter-process mutual exclusion.
 //!
-//! **Not a trait.** There is one real implementation (`mkdir`-based, frozen
-//! name and mechanism) and no second one is contemplated, so per
-//! rust-rewrite-plan §3.3 this does not clear the bar for an abstraction —
-//! unlike [`super::store::Store`], which earns its trait from genuinely
-//! having two.
+//! **Not a trait.** There is one implementation: create a lock directory with
+//! `mkdir`, write an `owner` file, and remove the directory on release.
 //!
-//! **This is an inter-version contract, not an implementation detail.**
-//! During migration a user will plausibly run a v1 binary in one shell and
-//! v2 in another against the same cache. The five lock names in [`LockName`]
-//! and the `mkdir`/`owner`-file mechanism below are frozen exactly as
-//! `lock.go` defines them; changing either means both binaries can hold
-//! "the lock" on the same cache at once.
-//!
-//! What v2 does differently is policy, not mechanism (contract-spec §8.1):
-//! v1 spins on `os.Mkdir` forever, never checking whether the recorded owner
-//! PID is still alive, so a crashed/SIGKILLed/OOM-killed holder leaves a
-//! lock that blocks every future `add`/`import`/`push`/`pull` on that cache
-//! permanently, recoverable only by `rm -rf` inside the content-addressed
-//! store. [`Lock::acquire`] checks liveness and auto-breaks a *definitely*
-//! dead owner; [`Lock::force_break`] is the documented, named escape hatch
-//! for the cases liveness checking cannot resolve on its own.
+//! [`Lock::acquire`] waits on an existing lock, checks the recorded owner PID,
+//! and auto-breaks a *definitely* dead owner. [`Lock::force_break`] is the
+//! named recovery path for cases liveness checking cannot resolve on its own.
 
 use std::io;
 use std::time::Duration;
@@ -31,26 +16,24 @@ use thiserror::Error;
 use crate::cancel::Cancel;
 use crate::error::Error;
 
-/// Poll interval while waiting on a contended lock — contract-spec §8,
-/// frozen at 100ms alongside the rest of the mechanism.
+/// Poll interval while waiting on a contended lock.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// One of the five frozen lock names (contract-spec §8.2). A closed enum
-/// rather than a bare `&str`: the whole point of §8.2 is that these five
-/// names must never drift, and an exhaustive `match` on this type makes a
-/// typo'd or silently-renamed sixth variant a compile error instead of a
-/// cross-version exclusion failure discovered in production.
+/// One of the lock names git-sfs commands use.
+///
+/// A closed enum rather than a bare `&str` makes a typo or rename a compile
+/// error instead of an exclusion failure discovered in production.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockName {
-    /// `locks/add.lock` — `add.go:40`.
+    /// `locks/add.lock`.
     Add,
-    /// `locks/import.lock` — `import.go:59`.
+    /// `locks/import.lock`.
     Import,
-    /// `locks/setup.lock` — `init.go:90`.
+    /// `locks/setup.lock`.
     Setup,
-    /// `locks/pull.lock` — `pull.go:33`.
+    /// `locks/pull.lock`.
     Pull,
-    /// `locks/push.lock` — `push.go:42`.
+    /// `locks/push.lock`.
     Push,
 }
 
@@ -102,15 +85,11 @@ pub struct Lock {
 impl Lock {
     /// Blocks until `name`'s lock is held, or `cancel` fires.
     ///
-    /// Polls every 100ms (contract-spec §8, frozen). On contention, reads
-    /// the contending lock's `owner` file and checks that PID for liveness
-    /// (contract-spec §8.1): a definitely-dead owner (`kill(pid, 0)` →
-    /// `ESRCH`) is broken and acquisition retried immediately. A missing,
-    /// empty, or malformed owner file, or one naming a live PID, is treated
-    /// as "possibly alive" and the poll continues — this is deliberately
-    /// conservative, since v1 itself sometimes fails to write the owner file
-    /// (`lock.go:33` ignores that error) and a live v1 holder must never be
-    /// broken.
+    /// Polls every 100ms. On contention, reads the contending lock's `owner`
+    /// file and checks that PID for liveness: a definitely-dead owner
+    /// (`kill(pid, 0)` -> `ESRCH`) is broken and acquisition retried
+    /// immediately. A missing, empty, or malformed owner file, or one naming a
+    /// live PID, is treated as "possibly alive" and the poll continues.
     ///
     /// **Known limitation, not fixed here:** a PID can be reused by an
     /// unrelated process between the original holder crashing and this
@@ -164,11 +143,9 @@ impl Lock {
     }
 
     /// Unconditionally removes `name`'s lock, regardless of whether its
-    /// owner is alive. The documented break-glass path contract-spec §8.1
-    /// requires so that recovery from a lock liveness-checking cannot
-    /// resolve on its own — a reused PID, a network-mounted cache shared
-    /// with a host this process cannot see — is never "delete things inside
-    /// the data store by hand."
+    /// owner is alive. This keeps recovery from liveness-check edge cases,
+    /// such as a reused PID or a network-mounted cache shared with a host this
+    /// process cannot see, out of the content-addressed data store.
     ///
     /// A no-op, not an error, if the lock is not currently held.
     ///
@@ -205,9 +182,8 @@ fn release(path: &Utf8Path) {
     let _ = std::fs::remove_dir_all(path);
 }
 
-/// Writes the `owner` file recording this process's PID — advisory content
-/// (contract-spec §8: wording is not frozen), but presence and location are,
-/// since a waiting process reads it for the liveness check above.
+/// Writes the `owner` file recording this process's PID. A waiting process
+/// reads it for the liveness check above.
 fn write_owner(lock_path: &Utf8Path) -> io::Result<()> {
     std::fs::write(
         lock_path.join("owner"),
@@ -217,13 +193,9 @@ fn write_owner(lock_path: &Utf8Path) -> io::Result<()> {
 
 /// Reads the owning PID from `lock_path`'s `owner` file, or `None` if it is
 /// missing, empty, or malformed. Deliberately infallible rather than
-/// panicking: v1's own reader (`lock.go:62`) slices `data[:len(data)-1]`
-/// with no length check against a file whose creation (`lock.go:33`)
-/// ignores its own write error, so a zero-byte owner file is reachable in
-/// practice and v2 must tolerate it rather than crash reading a v1-held
-/// lock. A non-positive parsed value is also treated as malformed -- `kill`
-/// gives `0` and negative PIDs process-group/broadcast semantics that do not
-/// mean what a single-process liveness check needs here.
+/// panicking: a zero-byte owner file is reachable if a holder dies mid-write.
+/// A non-positive parsed value is also treated as malformed because `kill`
+/// gives `0` and negative PIDs process-group/broadcast semantics.
 fn read_owner_pid(lock_path: &Utf8Path) -> Option<i32> {
     let data = std::fs::read_to_string(lock_path.join("owner")).ok()?;
     let pid: i32 = data.trim().strip_prefix("pid:")?.trim().parse().ok()?;
@@ -284,8 +256,8 @@ mod tests {
 
     #[test]
     fn each_of_the_five_frozen_names_maps_to_its_own_directory() {
-        // Direct regression guard on contract-spec §8.2's frozen table --
-        // this must never be "cleaned up" to a shared constant.
+        // These names are the lock protocol; do not collapse them to one
+        // shared lock name.
         let cases = [
             (LockName::Add, "add"),
             (LockName::Import, "import"),
@@ -352,7 +324,7 @@ mod tests {
 
         let cancel = Cancel::new();
         // Bounded by the test harness's own timeout rather than looping
-        // forever if this regresses back to v1's indefinite wait.
+        // forever if this regresses back to indefinite waiting.
         let lock = Lock::acquire(&dir, LockName::Pull, &cancel)
             .expect("a dead owner's lock must be broken and reacquired promptly");
         drop(lock);
@@ -361,9 +333,7 @@ mod tests {
     #[test]
     fn acquiring_does_not_auto_break_a_lock_with_no_readable_owner() {
         // Conservative-by-construction: an owner file this process cannot
-        // interpret must never be treated as proof of death, since a live
-        // v1 holder can legitimately have one (lock.go:33 swallows its own
-        // write error).
+        // interpret must never be treated as proof of death.
         let cache = tempfile::tempdir().unwrap();
         let dir = locks_dir(&cache);
         std::fs::create_dir_all(&dir).unwrap();

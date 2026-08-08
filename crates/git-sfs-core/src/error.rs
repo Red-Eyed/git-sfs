@@ -1,6 +1,5 @@
 //! The failure taxonomy.
 //!
-//! contract-spec 12 unfreezes v1's exit-code taxonomy, so v2 designs its own.
 //! The grouping axis chosen here is **what the caller should do next**, because
 //! the only consumers of exit codes are humans at a shell and CI scripts:
 //!
@@ -13,11 +12,9 @@
 //! | [`Error::Unavailable`] | retry. git-sfs could not determine the answer |
 //! | [`Error::Canceled`] | nothing. The user asked for this |
 //!
-//! The last two rows carry the weight. v1 collapsed "absent" and "could not
-//! determine" into one `(false, nil)` return and then reported an unreachable
-//! remote as a remote holding none of the user's data (contract-spec 13.3).
-//! Splitting them at the top of the taxonomy makes that conflation something a
-//! developer has to type on purpose, rather than something a signature invites.
+//! The last two rows carry the weight. Splitting "absent" from "could not
+//! determine" prevents remote lookup failures from being reported as missing
+//! user data.
 
 use thiserror::Error;
 
@@ -30,10 +27,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// code without inspecting anything further, so introducing a failure mode
 /// means choosing its class here rather than editing a lookup table elsewhere.
 ///
-/// The `String` payloads are scaffolding. Phase 2 replaces them with typed
-/// domain errors carried as `#[source]`, at which point the message stops being
-/// the only machine-readable thing about a failure. The classification boundary
-/// is what phase 1 needs to get right, and that does not depend on the payload.
 /// Deliberately *not* `#[non_exhaustive]`. That attribute would force the
 /// binary's exit-code mapping to carry a wildcard arm, and a new failure mode
 /// would then inherit some existing code silently. Leaving the enum exhaustive
@@ -64,7 +57,7 @@ pub enum Error {
     /// **Never retry.** Retrying an integrity failure produces the same result
     /// more slowly, and treating it as transient is how a corrupt object gets
     /// replicated. This is the class `verify` exists to detect and the reason
-    /// it is usable as a CI gate (contract-spec 9.1).
+    /// it is usable as a CI gate.
     #[error("{0}")]
     Integrity(String),
 
@@ -72,8 +65,7 @@ pub enum Error {
     /// to, or a remote object a `pull` needs.
     ///
     /// Nothing is damaged. The remedy is another git-sfs command, which is why
-    /// this is not [`Integrity`](Error::Integrity) — contract-spec 9.1 is
-    /// explicit that missing is not corrupt.
+    /// this is not [`Integrity`](Error::Integrity).
     #[error("{0}")]
     Missing(String),
 
@@ -82,30 +74,16 @@ pub enum Error {
     ///
     /// The defining property is *ignorance*, not absence. A command that cannot
     /// reach a remote must fail this way rather than reporting the remote as
-    /// empty, which is the single defect contract-spec 13.3 catalogues five
-    /// instances of.
+    /// empty.
     #[error("{0}")]
     Unavailable(String),
 
     /// The user interrupted the run with SIGINT or SIGTERM.
     ///
-    /// The message is frozen: contract-spec 9 requires `git-sfs: canceled` on
-    /// stderr. Cancellation also outranks every other classification, so a run
-    /// that was interrupted reports this even if the aborted operation
-    /// produced some other error on its way out. The binary enforces that
-    /// precedence in one place rather than per command.
+    /// Cancellation outranks every other classification, so an interrupted run
+    /// reports this even if the aborted operation produced some other error on
+    /// its way out. The binary enforces that precedence in one place rather
+    /// than per command.
     #[error("canceled")]
     Canceled,
-
-    /// The command parses but this build cannot run it yet.
-    ///
-    /// Scaffolding for the port: it exists so that an unported command fails
-    /// loudly instead of exiting 0 and being read as success by the
-    /// differential harness. Phase 4 removes the last of these along with the
-    /// variant itself.
-    #[error("{command} is not implemented in this build")]
-    NotImplemented {
-        /// The command as it was written on the command line.
-        command: &'static str,
-    },
 }

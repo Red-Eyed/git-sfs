@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Which contract-spec clauses actually have a test behind them.
+"""Which stable-behavior clauses actually have a test behind them.
 
-rust-rewrite-plan §7 states the Phase 7 acceptance gate literally: **every
-contract-spec clause maps to a passing assertion**, and contract-spec §15 warns
-that clauses without assertions are aspirational. That gate needs an enumeration
-to check against, and prose cannot be checked.
+Stable behavior needs an enumeration to check against, and prose cannot be
+checked.
 
 So the map is data, and it is self-verifying. Every clause claiming coverage
 names the file and a fragment of the assertion that covers it; this script
@@ -13,7 +11,7 @@ rather than quietly lying -- which is the failure mode a hand-maintained
 checklist always reaches eventually.
 
     coverage.py            report, and fail only if a claim has gone stale
-    coverage.py --gate     also fail while any clause is UNCOVERED (Phase 7)
+    coverage.py --gate     also fail while any clause is UNCOVERED
 
 The default is deliberately not the gate. Gaps here are known and tracked, not
 regressions; making them fail today would only teach people to skip the script.
@@ -38,13 +36,12 @@ REPO_ROOT = HARNESS_DIR.parent.parent
 
 # How a clause is held down, weakest to strongest.
 UNCOVERED = "UNCOVERED"  # nothing tests it
-V2_ONLY = "V2-ONLY"  # untestable until the Rust binary exists
-DECLARED = "DECLARED"  # enumerated in divergences.py; asserts itself once v2 exists
-OBSERVED = "OBSERVED"  # recorded as a v1 baseline; v2 must diverge, so not yet asserted
+DECLARED = "DECLARED"  # enumerated in divergences.py; asserts itself for candidates
+OBSERVED = "OBSERVED"  # recorded as diagnostic behavior, not a release gate
 STRUCTURAL = "STRUCTURAL"  # any change shows up as a state manifest diff
 ASSERTED = "ASSERTED"  # a named assertion fails if violated
 
-ORDER = [ASSERTED, STRUCTURAL, DECLARED, OBSERVED, V2_ONLY, UNCOVERED]
+ORDER = [ASSERTED, STRUCTURAL, DECLARED, OBSERVED, UNCOVERED]
 
 
 @dataclass(frozen=True)
@@ -53,7 +50,7 @@ class Clause:
     statement: str
     status: str
     # File containing the evidence, and a fragment that must appear in it.
-    # Both empty for UNCOVERED and V2_ONLY.
+    # Both empty for UNCOVERED.
     source: str = ""
     evidence: str = ""
 
@@ -190,7 +187,7 @@ CLAUSES = [
     ),
     Clause(
         "4.1",
-        "v1 trusts a protected-but-rotted object forever",
+        "ordinary commands trust a protected-but-rotted object",
         OBSERVED,
         "mode_preservation.py",
         "pull against a protected rotted object",
@@ -232,7 +229,7 @@ CLAUSES = [
     ),
     Clause(
         "4",
-        "a v2-style trash/ directory is invisible to v1",
+        "trash/ is invisible to normal object walks",
         ASSERTED,
         "downgrade.py",
         "unaffected by a trash/ directory",
@@ -264,7 +261,7 @@ CLAUSES = [
         "backend and path compose to backend:path, trailing slashes stripped",
         ASSERTED,
         "../../crates/git-sfs-core/src/domain/remote.rs",
-        "matches_the_contract_spec_url_composition_table",
+        "matches_the_url_composition_table",
     ),
     Clause(
         "5.1",
@@ -343,7 +340,7 @@ CLAUSES = [
         "unknown top-level fields, sections, settings and remote fields are rejected",
         ASSERTED,
         "downgrade.py",
-        "is rejected, so v2 must not add one",
+        "an unknown {label} is rejected",
     ),
     Clause(
         "6.2",
@@ -356,14 +353,14 @@ CLAUSES = [
         "6.2",
         "`version` absent or not 1 is rejected",
         ASSERTED,
-        "../../crates/git-sfs-core/src/domain/config/legacy_scanner.rs",
+        "../../crates/git-sfs-core/src/domain/config/compat_scanner.rs",
         "rejects_missing_version",
     ),
     Clause(
         "6.2",
         "`algorithm` other than sha256 is rejected",
         ASSERTED,
-        "../../crates/git-sfs-core/src/domain/config/legacy_scanner.rs",
+        "../../crates/git-sfs-core/src/domain/config/compat_scanner.rs",
         "rejects_an_unsupported_algorithm",
     ),
     Clause(
@@ -382,12 +379,18 @@ CLAUSES = [
     ),
     Clause(
         "6.3",
-        "`#` inside a quoted value truncates under v1's scanner",
+        "`#` inside a quoted value truncates under the compatibility scanner",
         ASSERTED,
-        "../../crates/git-sfs-core/src/domain/config/legacy_scanner.rs",
+        "../../crates/git-sfs-core/src/domain/config/compat_scanner.rs",
         "strips_the_first_hash_anywhere_including_inside_quotes",
     ),
-    Clause("6.5", "both parsers are run and disagreement is an error", V2_ONLY),
+    Clause(
+        "6.5",
+        "both parsers are run and disagreement is an error",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/domain/config/mod.rs",
+        "a_hash_inside_a_quoted_string_is_reported_as_ambiguous_not_silently_resolved",
+    ),
     Clause(
         "6.4",
         "the init template parses under the implementation's own validator",
@@ -411,7 +414,7 @@ CLAUSES = [
     ),
     Clause(
         "6.6",
-        "v2 is never less permissive than v1 on the version forms v1 accepts",
+        "leading zeros are accepted in version floor values",
         ASSERTED,
         "../../crates/git-sfs-core/src/domain/version_floor.rs",
         "leading_zeros_are_accepted",
@@ -476,10 +479,10 @@ CLAUSES = [
     ),
     Clause(
         "8.1",
-        "v1 waits forever and panics on a malformed owner file",
-        OBSERVED,
+        "malformed lock owner files do not crash the waiter",
+        ASSERTED,
         "lock_contention.py",
-        "zero-byte owner",
+        "zero-byte owner: no crash",
     ),
     Clause(
         "8.2",
@@ -530,7 +533,7 @@ CLAUSES = [
         "presence-only verify passes where --with-integrity fails (0 vs 3)",
         STRUCTURAL,
         "scenarios/03-corrupt-cache.sh",
-        "The split it exists to pin is 0 vs 3",
+        "presence-only success versus integrity failure",
     ),
     Clause(
         "9.1",
@@ -752,7 +755,7 @@ CLAUSES = [
 
 def verify(clause: Clause) -> str | None:
     """Return a problem description, or None when the claim still holds."""
-    if clause.status in (UNCOVERED, V2_ONLY):
+    if clause.status == UNCOVERED:
         return None
     path = HARNESS_DIR / clause.source
     if not path.is_file():
@@ -775,7 +778,7 @@ def main() -> None:
     parser.add_argument(
         "--gate",
         action="store_true",
-        help="also fail while any clause is UNCOVERED (the Phase 7 criterion)",
+        help="also fail while any clause is UNCOVERED",
     )
     parser.add_argument(
         "--list", choices=ORDER, help="print only clauses with this status"
@@ -793,7 +796,7 @@ def main() -> None:
         return
 
     width = max(len(status) for status in ORDER)
-    print(f"contract-spec coverage ({len(CLAUSES)} clauses)\n")
+    print(f"behavior coverage ({len(CLAUSES)} clauses)\n")
     for status in ORDER:
         print(f"  {status:<{width}}  {counts[status]:>3}")
 

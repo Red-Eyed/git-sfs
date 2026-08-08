@@ -1,9 +1,8 @@
 //! The committed symlink: construction and validation.
 //!
-//! contract-spec §3. Both directions are pure path arithmetic over strings the
-//! caller already has — the actual `readlink()`/`symlink()` syscalls are I/O
-//! and belong to a port (Phase 3); everything here only needs the text a
-//! syscall would produce or consume, so it is tested with zero filesystem.
+//! Both directions are pure path arithmetic over strings the caller already
+//! has. The actual `readlink()` and `symlink()` syscalls are I/O and belong to
+//! a port; this module only needs the text those syscalls produce or consume.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use path_clean::PathClean;
@@ -12,7 +11,7 @@ use thiserror::Error;
 use super::hash::{ALGORITHM, Sha256};
 
 /// Where `hash`'s cache object lives, relative to `repo`:
-/// `<repo>/.git-sfs/cache/files/sha256/<prefix>/<hash>` (contract-spec §3.1).
+/// `<repo>/.git-sfs/cache/files/sha256/<prefix>/<hash>`.
 #[must_use]
 pub fn cache_link_file(repo: &Utf8Path, hash: Sha256) -> Utf8PathBuf {
     repo.join(".git-sfs")
@@ -36,7 +35,6 @@ pub struct NoRelativePath {
 
 /// The relative symlink target to commit for a file with content `hash`.
 ///
-/// contract-spec §3.1: `target = relative_path_from(dirname(file), cache_link_file)`.
 /// Targets must be relative — the indirection through `.git-sfs/cache` is what
 /// keeps machine-local cache paths out of committed metadata, and a relative
 /// target is what makes that indirection actually opaque to Git.
@@ -59,8 +57,8 @@ pub fn git_link_target(
 
 /// Why a committed symlink's target failed validation.
 ///
-/// Every variant maps to contract-spec §3.2's `ErrInvalidSymlink` → exit 3;
-/// this enum exists so that mapping is a `match` arm, not a string comparison.
+/// This enum keeps each validation failure explicit instead of encoding the
+/// reason in strings.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum InvalidSymlinkTarget {
     /// Rule 2: the target is an absolute path.
@@ -96,9 +94,8 @@ pub enum InvalidSymlinkTarget {
     },
     /// Rule 6: the first component does not equal the hash's own prefix.
     ///
-    /// Redundant with the hash, but deliberately enforced (contract-spec
-    /// §3.2) so a stale or hand-edited link fails loudly instead of resolving
-    /// to the wrong object.
+    /// Redundant with the hash, but deliberately enforced so a stale or
+    /// hand-edited link fails loudly instead of resolving to the wrong object.
     #[error("git symlink {file} prefix {prefix:?} does not match hash")]
     PrefixMismatch {
         /// The symlink whose target was rejected.
@@ -108,8 +105,7 @@ pub enum InvalidSymlinkTarget {
     },
 }
 
-/// Validates a committed symlink's target text against contract-spec §3.2 and,
-/// on success, returns the hash it names.
+/// Validates a committed symlink's target text and returns the hash it names.
 ///
 /// `target` is the text a `readlink()` on `file` already produced — this
 /// function performs no I/O of its own, so a corrupt-symlink test can hand it
@@ -117,9 +113,9 @@ pub enum InvalidSymlinkTarget {
 ///
 /// # Errors
 ///
-/// Returns [`InvalidSymlinkTarget`] for any of the six validation rules
-/// contract-spec §3.2 enumerates (rule 1, "`readlink` succeeds", is the
-/// caller's concern — it already has `target` in hand by the time this runs).
+/// Returns [`InvalidSymlinkTarget`] for invalid target text. `readlink`
+/// failures are the caller's concern because `target` is already in hand by
+/// the time this runs.
 pub fn validate_symlink_target(
     repo: &Utf8Path,
     file: &Utf8Path,
@@ -145,11 +141,9 @@ pub fn validate_symlink_target(
         file: file.to_owned(),
     };
     let rel = pathdiff::diff_utf8_paths(&resolved, &cache_root).ok_or_else(outside_cache)?;
-    // Go's `filepath.Rel` returns "." when the two paths are identical; `pathdiff`
-    // has no such special case and returns an empty path instead (its component
-    // loop never pushes anything when every component matches). Both mean the
-    // target points at the cache root itself, not an object inside it, so both
-    // must be rejected here.
+    // Some path libraries represent "same path" as "." and others as an empty
+    // path. Both mean the target points at the cache root itself, not an
+    // object inside it, so both must be rejected here.
     if rel.as_str().is_empty() || rel == "." || rel.as_str().starts_with("..") {
         return Err(outside_cache());
     }
@@ -175,12 +169,11 @@ pub fn validate_symlink_target(
 }
 
 /// Lexically normalizes `.`/`..` components without touching the filesystem —
-/// the `Utf8Path` equivalent of Go's `filepath.Clean`, needed because
-/// `Utf8Path::join` (like `Path::join`) does not resolve them on its own.
+/// needed because `Utf8Path::join` does not resolve them on its own.
 ///
 /// `pub(crate)`: [`super::super::ports::repo`] reuses this for the same
-/// reason (`absFromRepo`'s `filepath.Clean` on an absolute scope argument)
-/// rather than duplicating a second lexical-clean helper.
+/// repository-scope normalization instead of duplicating a second lexical
+/// clean helper.
 pub(crate) fn clean_utf8(path: &Utf8Path) -> Utf8PathBuf {
     let cleaned = path.as_std_path().clean();
     Utf8PathBuf::from_path_buf(cleaned)
@@ -198,9 +191,8 @@ mod tests {
     const H: &str = "ab3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a";
 
     #[test]
-    fn construction_matches_the_contract_spec_example() {
-        // contract-spec 3.1's own worked example: repo/data/train.bin, hash
-        // starting ab3f..., target ../.git-sfs/cache/files/sha256/ab/ab3f....
+    fn construction_matches_the_expected_relative_target() {
+        // repo/data/train.bin climbs one level to reach repo/.git-sfs/cache.
         let repo = Utf8Path::new("/repo");
         let file = Utf8Path::new("/repo/data/train.bin");
         let target = git_link_target(repo, file, hash(H)).unwrap();
@@ -295,9 +287,9 @@ mod tests {
 
     #[test]
     fn rejects_a_prefix_that_does_not_match_the_hash() {
-        // contract-spec 3.2 rule 6: deliberately redundant with the hash, so
-        // a stale or hand-edited link fails loudly instead of resolving to
-        // the wrong object.
+        // The prefix check is deliberately redundant with the hash, so a stale
+        // or hand-edited link fails loudly instead of resolving to the wrong
+        // object.
         let repo = Utf8Path::new("/repo");
         let file = Utf8Path::new("/repo/data/train.bin");
         let target = format!("../.git-sfs/cache/files/sha256/00/{H}");
@@ -307,9 +299,8 @@ mod tests {
 
     #[test]
     fn tolerates_dot_segments_that_still_resolve_into_the_cache() {
-        // filepath.Clean-equivalent lexical resolution, exercised directly:
-        // a target with a redundant "./" still lands in the cache and
-        // validates, matching v1's Clean(Join(...)) behavior.
+        // A target with a redundant "./" still lands in the cache after
+        // lexical cleanup and therefore validates.
         let repo = Utf8Path::new("/repo");
         let file = Utf8Path::new("/repo/data/train.bin");
         let prefix = &H[..2];

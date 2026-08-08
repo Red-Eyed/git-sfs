@@ -1,16 +1,12 @@
-//! `mv` — ported from `mv.go`. Moves a git-sfs symlink, or a whole directory
-//! of them, to a new location and rewrites each relative target for its new
-//! depth from the repository root.
+//! `mv` moves a git-sfs symlink, or a whole directory of them, to a new
+//! location and rewrites each relative target for its new depth from the
+//! repository root.
 //!
-//! Deliberately never touches the cache: contract-spec §3.3 is explicit that
-//! a committed symlink is the unit of operation, not the object behind it,
-//! and `mv` must succeed even when that object is absent — reorganizing a
-//! dataset before a `pull` has finished is exactly the recovery case this
-//! exists for.
+//! It deliberately never touches the cache: a committed symlink is the unit of
+//! operation, not the object behind it. `mv` must succeed even when that object
+//! is absent, which lets a user reorganize a dataset before `pull` has finished.
 //!
-//! Both branches below mirror v1's `mvLink`/`mvDir` (`mv.go:35-117`)
-//! exactly, including two of its sequencing choices that matter for
-//! correctness, not just style:
+//! Two sequencing choices matter:
 //!
 //! - The single-symlink case validates `src` as a git-sfs symlink and writes
 //!   the new symlink *before* removing the old one, then rolls the new one
@@ -47,10 +43,9 @@ pub struct MovedLink {
 pub enum MvError {
     /// `src` exists but is not a valid git-sfs symlink — either not a
     /// symlink at all, its target is not valid UTF-8, or the target fails
-    /// contract-spec §3.2's validation. Mirrors v1's undifferentiated wrap
-    /// (`mv.go:38`): by the time this is checked, `mv` has already confirmed
-    /// the path exists, so every remaining failure mode means the same
-    /// thing to the caller — this is not something `mv` can operate on.
+    /// validation. By the time this is checked, `mv` has already confirmed the
+    /// path exists, so every remaining failure mode means the same thing to
+    /// the caller: this is not something `mv` can operate on.
     #[error("{path} is not a git-sfs symlink")]
     NotATrackedLink {
         /// The path that failed to validate.
@@ -130,11 +125,10 @@ impl MvFailure {
 
 /// Moves `src` to `dst`, both resolved the same way [`Repo::scan`]'s own
 /// scope argument is (an absolute path is used as-is, a relative one
-/// resolves against `repo` — v1's `absFromRepo`).
+/// resolves against `repo`).
 ///
-/// `src`'s own [`std::fs::symlink_metadata`] decides which of v1's two
-/// branches applies: a directory moves as a tree, anything else moves as a
-/// single symlink.
+/// `src`'s own [`std::fs::symlink_metadata`] decides the branch: a directory
+/// moves as a tree, anything else moves as a single symlink.
 ///
 /// # Errors
 ///
@@ -169,8 +163,7 @@ pub fn mv(
     }
 }
 
-/// `readlink()` at `path`, validated as a git-sfs symlink target -- v1's
-/// `ParseGitSymlink` (`mv.go:36`).
+/// `readlink()` at `path`, validated as a git-sfs symlink target.
 fn read_tracked_link(repo: &Utf8Path, path: &Utf8Path) -> Result<Sha256, MvError> {
     let raw = std::fs::read_link(path.as_std_path()).map_err(|_| MvError::NotATrackedLink {
         path: path.to_owned(),
@@ -196,8 +189,7 @@ fn place_inside_existing_dir(dst_abs: &Utf8Path, basename: &Utf8Path) -> Utf8Pat
     }
 }
 
-/// Moves a single git-sfs symlink from `src_abs` to `dst_abs` -- v1's
-/// `mvLink` (`mv.go:35-63`).
+/// Moves a single git-sfs symlink from `src_abs` to `dst_abs`.
 fn mv_file(repo: &Utf8Path, src_abs: &Utf8Path, dst_abs: &Utf8Path) -> Result<MovedLink, MvError> {
     let hash = read_tracked_link(repo, src_abs)?;
 
@@ -246,8 +238,7 @@ fn mv_file(repo: &Utf8Path, src_abs: &Utf8Path, dst_abs: &Utf8Path) -> Result<Mo
     })
 }
 
-/// Moves a directory of git-sfs symlinks from `src_abs` to `dst_abs` -- v1's
-/// `mvDir` (`mv.go:65-117`).
+/// Moves a directory of git-sfs symlinks from `src_abs` to `dst_abs`.
 fn mv_dir(
     repo_port: &dyn Repo,
     repo: &Utf8Path,

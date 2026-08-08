@@ -26,8 +26,8 @@ workflows: build
 differential: build
     python3 test/differential/run.py --binary a=./target/release/git-sfs --binary b=./target/release/git-sfs
 
-# contract-spec 8 makes the lock a cross-process contract. Pass a second
-# --binary to exercise compatibility with an older binary.
+# The lock protocol is cross-process state. Pass a second --binary to exercise
+# compatibility with another released binary.
 
 [group('conformance')]
 [doc('lock protocol conformance across processes')]
@@ -43,8 +43,8 @@ lock-contention: build
 cancellation: build
     python3 test/differential/cancellation.py --binary current=./target/release/git-sfs
 
-# contract-spec 4.1: the read-only bit stands in for "hash-verified", so this
-# covers what happens when it stops telling the truth.
+# Cache object write bits are a storage invariant. This covers what happens when
+# the bits no longer match the bytes' integrity.
 
 [group('conformance')]
 [doc('mode/content disagreement on cache objects')]
@@ -60,11 +60,11 @@ mode-preservation: build
 downgrade: build
     python3 test/differential/downgrade.py --binary current=./target/release/git-sfs
 
-# Fails on a stale claim, not on a known gap. Add --gate for the Phase 7
-# criterion that no clause is UNCOVERED.
+# Fails on a stale claim, not on a known gap. Add --gate when every stable
+# behavior must have explicit coverage.
 
 [group('conformance')]
-[doc('contract-spec clause coverage map')]
+[doc('stable behavior coverage map')]
 spec-coverage:
     python3 test/differential/coverage.py
 

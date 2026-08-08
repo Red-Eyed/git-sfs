@@ -492,19 +492,19 @@ mod tests {
         let mut fetcher = FakeFetcher::default();
         fetcher.final_urls.insert(
             "https://example.test/latest".to_owned(),
-            "https://example.test/releases/tag/v2.1.0".to_owned(),
+            "https://example.test/releases/tag/vX.Y.Z".to_owned(),
         );
 
         let latest = latest_git_sfs_version(&fetcher, "https://example.test/latest").unwrap();
 
-        assert_eq!(latest, "v2.1.0");
+        assert_eq!(latest, "vX.Y.Z");
     }
 
     #[test]
     fn parses_sha256sum_entry_for_the_exact_asset() {
-        let sums = b"aaa other.tar.gz\nbbb git-sfs-v2.1.0-linux-amd64.tar.gz\n";
+        let sums = b"aaa other.tar.gz\nbbb git-sfs-vX.Y.Z-linux-amd64.tar.gz\n";
 
-        let parsed = parse_sha256_sums(sums, "git-sfs-v2.1.0-linux-amd64.tar.gz").unwrap();
+        let parsed = parse_sha256_sums(sums, "git-sfs-vX.Y.Z-linux-amd64.tar.gz").unwrap();
 
         assert_eq!(parsed, "bbb");
     }
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn extracts_rclone_from_zip_by_basename() {
-        let data = zip_with_file("rclone-v1.0.0-linux-amd64/rclone", b"rclone-bin");
+        let data = zip_with_file("rclone-vX.Y.Z-linux-amd64/rclone", b"rclone-bin");
 
         let extracted = extract_zip(&data, "rclone").unwrap();
 

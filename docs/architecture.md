@@ -59,9 +59,10 @@ remote.copy_to_remote     verify staged sizes, then rclone move --files-from
 ```
 
 Push stages under the configured remote itself, not a system temp directory.
-The staging path includes a repository-specific and process-specific component
-so overlapping pushes do not share one global temp path. Final remote objects
-are published only after the batch transfer and basic size verification pass.
+The staging path includes a user-specific component so failed pushes can resume
+staged objects without all users sharing one global temp path. Final remote
+objects are published only after the batch transfer and basic size verification
+pass.
 
 ### pull
 
@@ -99,8 +100,8 @@ the format: relative target, correct prefix match, valid lowercase SHA-256 hash.
   locks/                                                directory-based locks
 ```
 
-Cache objects are immutable once published. A writable legacy object is treated
-as unverified: commands hash-check it before trusting it, then restore the
+Cache objects are immutable once published. A writable object is treated as
+unverified: commands hash-check it before trusting it, then restore the
 read-only mode.
 
 ## Remote Interface

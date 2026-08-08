@@ -1,5 +1,4 @@
-//! Pure planning for `pull` — contract-spec §5b, ported from
-//! `pull.go:18-64`.
+//! Pure planning for `pull`.
 //!
 //! Unlike push, pull never fails on an absent object — restoring exactly
 //! that is what the command exists to do.

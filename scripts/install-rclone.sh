@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Downloads and installs the rclone binary to ~/.local/bin.
-# Reads __RCLONE_VERSION from the environment (e.g. v1.68.2).
+# Reads __RCLONE_VERSION from the environment (e.g. vX.Y.Z).
 # Detects OS and arch from uname; supports Linux/macOS x86_64/arm64.
 set -eu
 

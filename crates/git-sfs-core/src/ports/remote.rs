@@ -1,30 +1,17 @@
 //! The remote: a second, subprocess-reached copy of the object store.
 //!
-//! contract-spec §5, rust-rewrite-plan §2.5/§3.3. `rclone` is the only
-//! supported mover (AGENTS.md), so [`Remote`] is not a backend-abstraction
-//! trait — it exists because there are genuinely two implementations,
-//! [`RcloneRemote`] (real) and [`FakeRemote`] (in-memory, for higher-layer
-//! tests), which is the bar rust-rewrite-plan §3.3 sets for introducing one
-//! at all.
-//!
 //! Every rclone invocation here is retried and classified the same way, by
 //! rclone's own documented exit codes (<https://rclone.org/docs/#exit-code>)
-//! rather than by grepping its message text — the fix contract-spec §13.3
-//! names directly for `isRemotePathNotFound`, which breaks on a wording
-//! change, a localized message, or a path containing the word "config".
+//! rather than by grepping its message text, which is brittle under wording
+//! changes, localized output, or paths containing error-like words.
 //! Three codes matter here: `3`/`4` ("directory/file not found", confirmed
 //! absence — a normal outcome, not a failure), `5` ("temporary error, more
-//! retries might fix it" — the *only* class this module retries, unlike v1's
-//! `retryLoop`, which retried bad credentials and missing paths just as
-//! eagerly as a network blip). Everything else is permanent.
+//! retries might fix it" — the *only* class this module retries), and
+//! everything else, which is permanent.
 //!
-//! **`--temp-dir` is mandatory, not optional.** v1 omits it entirely from
-//! push and only warns-then-proceeds when it is unset for pull
-//! (`command.go:234-274`) — the exact gap that let a full system-wide `/tmp`
-//! take a shared cluster's git-sfs down even though the cache itself, on a
-//! separate filesystem, had room (contract-spec §13.4, [`super::store`]'s
-//! module doc). [`RcloneRemote::new`] takes `temp_dir` as a required
-//! argument and routes every write through it, for both directions.
+//! **`--temp-dir` is mandatory.** [`RcloneRemote::new`] takes `temp_dir` as a
+//! required argument and routes every write through it, for both directions.
+//! The OS-wide temp directory is never part of remote transfer staging.
 //!
 //! **Remote writes are staged, then published.** `copy_to_remote` uploads the
 //! whole requested set with one `rclone copy --files-from`, but its destination
@@ -94,9 +81,7 @@ pub enum RemoteError {
         source: serde_json::Error,
     },
     /// The bytes downloaded from the remote for verification do not hash to
-    /// the name they are stored under. Corrupt, not absent — contract-spec
-    /// §9.1 is explicit that the two are different classes, mirroring
-    /// `StoreError::HashMismatch`.
+    /// the name they are stored under. Corrupt, not absent.
     #[error("remote object corrupt: does not hash to its own name (want {want}, got {got})")]
     HashMismatch {
         /// The hash the remote object is supposed to have.
@@ -206,12 +191,10 @@ pub trait Remote {
 
     /// Whether `hash` is present on the remote.
     ///
-    /// Three outcomes, not two, per rust-rewrite-plan §2.5: `Ok(false)`
-    /// means rclone confirmed the object is absent; `Ok(true)` means
-    /// present; `Err` means the question could not be answered. A caller
-    /// that cannot reach the remote must never be able to mistake that for
-    /// the remote being empty — the exact defect `sizes, _ :=
-    /// r.FileSizes(...)` commits in v1.
+    /// Three outcomes, not two: `Ok(false)` means rclone confirmed the object
+    /// is absent; `Ok(true)` means present; `Err` means the question could not
+    /// be answered. A caller that cannot reach the remote must never mistake
+    /// that for an empty remote.
     ///
     /// # Errors
     ///
@@ -234,10 +217,8 @@ pub trait Remote {
     /// # Errors
     ///
     /// Returns `Err` if the listing itself could not be completed. This is
-    /// the call site contract-spec §13.3's headline defect names directly —
-    /// v1 turns exactly this failure into an empty map, which
-    /// `status --remote`/`verify --check-remote` then report as "the remote
-    /// has none of your data."
+    /// distinct from a successful listing that simply does not include a
+    /// requested object.
     fn file_sizes(
         &self,
         hashes: &[Sha256],
@@ -246,8 +227,7 @@ pub trait Remote {
 
     /// Uploads the objects at `rel_paths` (relative to `cache_files_dir`,
     /// e.g. `sha256/ab/ab3f...`) to the remote. Existing remote objects are
-    /// never overwritten — see the module doc on why this direction carries
-    /// `--ignore-existing` where v1's does not. A no-op if `rel_paths` is
+    /// never overwritten. A no-op if `rel_paths` is
     /// empty.
     ///
     /// # Errors
@@ -277,13 +257,13 @@ pub trait Remote {
     /// Downloads `hash`'s remote object to a scratch location and
     /// hash-verifies it — the full-content check `verify --check-remote`/
     /// `--integrity` needs, which [`Remote::file_size`] alone cannot provide
-    /// (contract-spec §9.2: a truncated object can still match on size).
+    /// because a truncated object can still match on size.
     ///
     /// Three outcomes mirroring [`super::store::Store::verified`]: `Ok(true)`
     /// present and byte-verified; `Ok(false)` confirmed absent;
     /// `Err(RemoteError::HashMismatch)` present but corrupt — missing and
-    /// corrupt are different classes (contract-spec §9.1), so this is never
-    /// collapsed to `Ok(false)`.
+    /// corrupt are different classes, so this is never collapsed to
+    /// `Ok(false)`.
     ///
     /// # Errors
     ///
@@ -305,10 +285,8 @@ struct LsjsonEntry {
 
 /// Parses an `lsjson` response, treating blank output the same as `[]`.
 ///
-/// `size` is deserialized as `u64` rather than the signed type rclone emits,
-/// deliberately: a negative or unparseable size on the one object path git-sfs
-/// asked for is not a value to guess through (contract-spec's own
-/// philosophy — see rust-rewrite-plan §2.5) — it becomes
+/// `size` is deserialized as `u64` deliberately: a negative or unparseable
+/// size on an object path git-sfs asked for becomes
 /// [`RemoteError::InvalidListing`] instead of silently reading as "absent" or
 /// "zero bytes".
 fn parse_lsjson_entries(json: &str) -> Result<Vec<LsjsonEntry>, RemoteError> {
@@ -345,9 +323,8 @@ fn classify_exit(code: Option<i32>) -> ExitClass {
 }
 
 /// A shell-quoted rendering of an invocation, for [`RemoteError`]'s
-/// diagnostic text. The exact text is unfrozen (contract-spec: human output
-/// is free) — this only needs to be readable, not to match v1's `shellQuote`
-/// (`command.go:444-454`) byte for byte, though it follows the same idea.
+/// diagnostic text. This only needs to be readable; it is not a stable output
+/// format.
 fn describe(command: &str, args: &[String]) -> String {
     let mut parts = Vec::with_capacity(args.len() + 1);
     parts.push(command.to_owned());
@@ -460,9 +437,7 @@ pub struct RcloneRemote {
 
 impl RcloneRemote {
     /// `url` is a pre-composed rclone target (see
-    /// [`crate::domain::remote::compose_remote_url`]). `temp_dir` is
-    /// mandatory — see the module doc for why v1's optional `TempDir` is not
-    /// reproduced.
+    /// [`crate::domain::remote::compose_remote_url`]). `temp_dir` is mandatory.
     #[must_use]
     pub fn new(url: impl Into<String>, temp_dir: impl Into<Utf8PathBuf>) -> Self {
         Self {
@@ -476,7 +451,7 @@ impl RcloneRemote {
     }
 
     /// Sets `--config`, for a repository pinning a non-default rclone config
-    /// file (contract-spec §6).
+    /// file.
     #[must_use]
     pub fn with_config(mut self, config: impl Into<Utf8PathBuf>) -> Self {
         self.config = Some(config.into());
@@ -515,9 +490,7 @@ impl RcloneRemote {
         format!("{}/tmp/{user}/files", self.url)
     }
 
-    /// The bare backend prefix, e.g. `"s3:"` from `"s3:bucket/prefix"` —
-    /// probed before checking a specific path, mirroring v1's
-    /// `backendRoot` (`command.go:82-87`).
+    /// The bare backend prefix, e.g. `"s3:"` from `"s3:bucket/prefix"`.
     fn backend_root(&self) -> String {
         match self.url.split_once(':') {
             Some((backend, _)) => format!("{backend}:"),
@@ -553,11 +526,9 @@ impl RcloneRemote {
     }
 
     /// Runs `rclone` to completion, retrying only its own exit-5 "temporary
-    /// error" class with exponential backoff — unlike v1's `retryLoop`,
-    /// which retried every failure indiscriminately, turning a
-    /// bad-credentials error into merely a slow one (contract-spec §13.4).
-    /// `--config` is prepended when this remote has one, matching
-    /// `newRcloneRemote`'s "must appear before any remote access" ordering.
+    /// error" class with exponential backoff. Permanent failures are returned
+    /// immediately. `--config` is prepended when this remote has one so it
+    /// applies to every remote access.
     fn run(&self, subcommand_args: &[String], cancel: &Cancel) -> Result<String, RemoteError> {
         let mut args = Vec::with_capacity(subcommand_args.len() + 2);
         if let Some(config) = &self.config {
@@ -681,10 +652,8 @@ impl RcloneRemote {
 
     /// Stages the `--files-from` list [`Remote::copy_to_remote`]/
     /// [`Remote::copy_from_remote`] need, one relative path per line, inside
-    /// this remote's own `temp_dir` — **never** the OS temp directory. v1's
-    /// `writeTempPathList` falls back to `os.TempDir()` when unset
-    /// (`command.go:213`); see the module doc for why that gap is not
-    /// reproduced here. The returned [`tempfile::NamedTempFile`] cleans
+    /// this remote's own `temp_dir` — **never** the OS temp directory. The
+    /// returned [`tempfile::NamedTempFile`] cleans
     /// itself up on drop, so a failed or canceled copy leaves nothing behind
     /// for the caller to remember to remove.
     fn write_transfer_list(
@@ -762,9 +731,8 @@ fn parse_rclone_version(output: &str) -> Option<String> {
 
 impl Remote for RcloneRemote {
     fn require_exists(&self, cancel: &Cancel) -> Result<(), RemoteError> {
-        // Overrides the default composition to add the config-file
-        // precondition first, matching v1's `RequireExists`
-        // (`validateConfig` -> `CheckBackend` -> `CheckPath`).
+        // Check a configured rclone config file before any remote probe so the
+        // user gets a direct path error.
         self.validate_config()?;
         self.check_backend(cancel)?;
         self.check_path(cancel)
@@ -1107,14 +1075,11 @@ fn hashes_by_prefix(hashes: &[Sha256]) -> BTreeMap<String, Vec<Sha256>> {
 }
 
 /// An in-memory [`Remote`], for tests above this layer that need a remote
-/// without a network or an `rclone` binary. Its existence is what justifies
-/// `Remote` being a trait at all (rust-rewrite-plan §3.3) — mirrors
-/// [`super::store::FakeStore`]'s role for [`super::store::Store`].
+/// without a network or an `rclone` binary.
 ///
 /// Objects are keyed by the same relative path [`Remote::copy_to_remote`]
-/// addresses them by (`sha256/<prefix>/<hash>`), so the local-side "files/"
-/// root and this remote's object space line up exactly the way contract-spec
-/// §5 requires of the real thing.
+/// addresses them by (`sha256/<prefix>/<hash>`), so the local-side `files/`
+/// root and this remote's object space line up with the real remote layout.
 #[derive(Default)]
 pub struct FakeRemote {
     objects: std::sync::Mutex<HashMap<Utf8PathBuf, Vec<u8>>>,
@@ -1511,9 +1476,8 @@ exit 0
         assert!(!remote.has_file(a_hash(), &Cancel::new()).unwrap());
     }
 
-    /// The headline test for rust-rewrite-plan §2.5: an unreachable remote
-    /// must surface as `Err`, never silently collapse to "the object is
-    /// absent" the way v1's `HasFile`/`FileSizes` do.
+    /// An unreachable remote must surface as `Err`, never silently collapse to
+    /// "the object is absent".
     #[test]
     fn has_file_returns_an_error_when_the_remote_cannot_be_reached() {
         let fixture = tempfile::tempdir().unwrap();
@@ -1617,9 +1581,7 @@ exit 0
         let fixture = tempfile::tempdir().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         // exit 7 ("fatal error") is never in ExitClass::Temporary, so no
-        // amount of retry_max should cause a second attempt -- the fix for
-        // v1's retryLoop retrying bad credentials as if they were a
-        // network blip (contract-spec §13.4).
+        // amount of retry_max should cause a second attempt.
         flaky_rclone(fixture.path(), 10, 7);
         let remote = remote_at(fixture.path(), temp_dir.path());
 
@@ -1678,8 +1640,7 @@ exit 0
         std::fs::write(files_dir.join(&rel), b"object bytes").unwrap();
         // `remote_root` is the composed URL's target; `files_url()` appends
         // its own "/files", so the pre-existing object must live one level
-        // deeper than `remote_root` itself, matching what a real remote's
-        // `<url>/files/...` layout (contract-spec §5) resolves to.
+        // deeper than `remote_root` itself.
         let remote_root = cache.path().join("remote-root");
         std::fs::create_dir_all(remote_root.join("files").join(rel.parent().unwrap())).unwrap();
         // Already present on the "remote" -- must survive untouched.

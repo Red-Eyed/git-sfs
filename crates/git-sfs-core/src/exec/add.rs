@@ -1,31 +1,20 @@
-//! `add` — ported from `add.go`. Hashes each regular file found under the
-//! given paths, stores it in the cache, and replaces it with a git-sfs
-//! symlink.
+//! `add` hashes each regular file found under the given paths, stores it in the
+//! cache, and replaces it with a git-sfs symlink.
 //!
-//! Deliberately minimal for this pass:
+//! Deliberately simple:
 //!
-//! - **Sequential.** No rayon-based parallelism yet — that is a performance
-//!   layer on top of correct sequential behavior, not part of getting the
-//!   operation right the first time.
-//! - **No progress callback.** rust-rewrite-plan §3.2: core does not take a
-//!   writer or a callback so a caller can observe it; Phase 5's `Event`
-//!   stream is the real mechanism, added uniformly across every command
-//!   rather than ad hoc here. [`add`] returning the outcome-so-far alongside
-//!   an error (rather than only one or the other) is what lets the binary
-//!   still report partial progress without it.
-//! - **Stops at the first failure**, matching v1's own observed behavior
-//!   (`add.go:73-79`): files are hashed and stored best-effort, but the loop
-//!   that then publishes symlinks returns on the first error rather than
-//!   skipping past it. Re-running `add` afterward is safe and effectively
-//!   resumes: [`crate::ports::Store::store`] is idempotent, so already-cached
-//!   objects are a fast no-op the second time.
+//! - **Sequential.** Correctness and resumability come before parallelism.
+//! - **No progress callback.** Core returns the outcome-so-far alongside an
+//!   error so the binary can report partial progress without passing writers
+//!   into core.
+//! - **Stops at the first failure.** Re-running `add` afterward is safe and
+//!   effectively resumes: [`crate::ports::Store::store`] is idempotent, so
+//!   already-cached objects are a fast no-op the second time.
 //! - **Relative path arguments resolve against the repository root, not the
-//!   current directory** — matching v1's `absFromRepo(repo, p)` exactly
-//!   (`add.go:47`, `walk.go:80-85`). This is a real usability quirk (`cd
-//!   data && git-sfs add foo.bin` looks for `<repo>/foo.bin`, not
+//!   current directory**. This is a real usability quirk (`cd data &&
+//!   git-sfs add foo.bin` looks for `<repo>/foo.bin`, not
 //!   `<repo>/data/foo.bin`) worth reconsidering, but changing it is an
-//!   argument-semantics decision, not a mechanical port, so it is preserved
-//!   here rather than silently changed.
+//!   argument-semantics decision and is therefore documented here explicitly.
 
 use std::collections::BTreeSet;
 
@@ -54,7 +43,7 @@ pub struct AddOutcome {
     /// Every file successfully converted, in the order they were processed.
     pub added: Vec<AddedFile>,
     /// Candidates whose own filename is not valid UTF-8 — skipped, not
-    /// converted, but reported rather than silently dropped (mirrors
+    /// converted, but reported rather than silently dropped, just like
     /// [`crate::ports::repo::ScannedEntry::Unrepresentable`]).
     pub unrepresentable: Vec<String>,
 }
@@ -84,7 +73,6 @@ pub enum AddError {
     /// `path` hashed and stored, but its cache object is not reachable
     /// through the repository's own `.git-sfs/cache` symlink — publishing a
     /// working-tree symlink through it would just be dangling on arrival.
-    /// Mirrors v1's `materialize.Link` sanity check (`materialize.go:11-20`).
     #[error("{path}: cache object for {hash} is not reachable through .git-sfs/cache")]
     CacheLinkUnreachable {
         /// The file being processed.
@@ -182,8 +170,8 @@ pub fn add(
     let mut outcome = AddOutcome::default();
     let mut files = BTreeSet::new();
     for path in paths {
-        // v1's absFromRepo: an absolute argument is used as-is, a relative
-        // one resolves against the repository root -- see the module doc.
+        // An absolute argument is used as-is; a relative one resolves against
+        // the repository root.
         let scope = if path.is_absolute() {
             path.clone()
         } else {
@@ -517,9 +505,8 @@ mod tests {
 
     #[test]
     fn a_relative_path_argument_resolves_against_the_repo_root_not_the_scope_of_a_subdirectory() {
-        // Documents the deliberately-preserved v1 quirk from the module doc:
         // "foo.bin" always means "<repo>/foo.bin", regardless of where the
-        // caller conceptually "is".
+        // caller conceptually is.
         let (_dir, repo, cache) = init_repo();
         std::fs::create_dir_all(repo.join("subdir")).unwrap();
         std::fs::write(repo.join("subdir/foo.bin"), b"nested").unwrap();

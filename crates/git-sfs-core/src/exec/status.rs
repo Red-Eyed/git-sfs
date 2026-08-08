@@ -2,8 +2,7 @@
 //!
 //! `status` is deliberately observational. Missing files are data to report,
 //! not a failure class, and remote lookup failures become `unknown` in the
-//! report rather than being collapsed into "absent" — the v1 defect called out
-//! in rust-rewrite-plan §2.5 and contract-spec §13.3.
+//! report rather than being collapsed into "absent".
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -119,8 +118,8 @@ struct ObjectState {
 
 /// Builds a status report for every tracked link at or below `scope`.
 ///
-/// Invalid or unrepresentable symlinks are ignored here, matching v1's
-/// `collectGitSFSSymlinks` behavior for `status`; `verify` reports them.
+/// Invalid or unrepresentable symlinks are ignored here; `verify` reports
+/// them.
 ///
 /// # Errors
 ///

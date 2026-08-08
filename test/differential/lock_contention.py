@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
 """Cross-binary lock contention tests.
 
-contract-spec §8 makes the lock protocol an *inter-version* contract: during
-migration a user will run v1 in one shell and v2 in another against the same
-cache. If the two disagree about the lock path or mechanism, both acquire "the
-lock" simultaneously and write concurrently to one cache. No single-binary test
-can detect that, which is why this harness drives two real processes.
+The lock protocol has to work across processes and across installed binaries.
+If two binaries disagree about the lock path or mechanism, both can acquire
+"the lock" simultaneously and write concurrently to one cache. No single-binary
+test can detect that, which is why this harness drives real processes.
 
 Two kinds of check, and the distinction is deliberate:
 
-  ASSERT   frozen mechanism (§8). Any conforming binary must satisfy it, so a
-           failure fails the run.
-  OBSERVE  policy v1 gets wrong (§8.1) -- waiting forever, no liveness check,
-           a panic on a malformed owner file. Recorded as a baseline rather
-           than asserted, because v2 is required to *diverge* here and a check
-           demanding v1's behavior would have to be inverted later.
+  ASSERT   any conforming binary must satisfy it, so a failure fails the run.
+  OBSERVE  non-failing diagnostic output useful while debugging lock behavior.
 
 Usage:
 
-    test/differential/lock_contention.py --binary v1=./git-sfs
-    test/differential/lock_contention.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+    test/differential/lock_contention.py --binary current=./target/release/git-sfs
 """
 
 from __future__ import annotations
@@ -45,12 +39,11 @@ from harness import (
 HARNESS_DIR = Path(__file__).parent
 SETUP = HARNESS_DIR / "lock-setup.sh"
 
-# Every lock git-sfs takes (internal/core: add, import, setup, pull, push).
+# Every lock git-sfs takes.
 LOCK_NAMES = ("add", "import", "setup", "pull", "push")
 
 HOLD_SECONDS = 3.0
-# How long a blocked process is given to prove it is genuinely blocked. v1 waits
-# forever by design, so this bounds the run rather than measuring anything.
+# How long a blocked process is given to prove it is genuinely blocked.
 BLOCK_PROBE_SECONDS = 2.0
 
 
@@ -59,7 +52,7 @@ def lock_path(cache: Path, name: str) -> Path:
 
 
 def write_lock(cache: Path, name: str, owner: bytes | None) -> Path:
-    """Create a lock exactly as contract-spec §8 specifies another binary would."""
+    """Create a lock exactly as another git-sfs process would."""
     path = lock_path(cache, name)
     path.mkdir(parents=True, mode=0o755)
     if owner is not None:
@@ -91,7 +84,7 @@ def start_push(context: dict, faults: str | None = None) -> subprocess.Popen:
 
 
 def command_for(lock_name: str, source: Path) -> list[str]:
-    """The command that takes each lock (contract-spec §8.2)."""
+    """The command that takes each lock."""
     return {
         "add": ["add", "data"],
         "import": ["import", str(source), "imported/blob.bin"],
@@ -154,19 +147,18 @@ def test_blocks_on_foreign_lock(binary: Binary, context: dict, r: Results):
 
 
 def test_every_command_locks_its_own_name(binary: Binary, context: dict, r: Results):
-    """§8.2: five locks, one per command, and the names are themselves contract.
+    """Five locks, one per command, and the names are themselves protocol.
 
     Consolidating them into a single cache.lock is the obvious cleanup and is
     more correct in isolation. It also silently removes everything this file
-    exists to protect: v2's `add` would take cache.lock while v1's takes
-    add.lock, the two mkdir calls would target different paths, neither would
-    block, and both binaries would report holding the lock.
+    exists to protect: an older binary and a newer binary could take different
+    lock paths, neither would block, and both would report holding the lock.
 
     Planting each lock exactly as a foreign process would write it, then
     requiring the matching command to wait, is what catches that. Note what is
     deliberately *not* asserted: nothing here requires a command to ignore
-    another command's lock. §8.2 lets v2 take extra locks, since acquiring more
-    is strictly more conservative and cannot break interop with v1.
+    another command's lock. Taking extra locks is conservative; skipping this
+    command's own lock is not.
     """
     print(f"\n[{binary.name}] every command blocks on its own lock name")
     cache = context["cache"]
@@ -201,8 +193,8 @@ def test_cross_binary_contention(
     cache = context["cache"]
     reset_remote_uploads(context)
 
-    # The waiter runs against the holder's cache and repo, which is the actual
-    # migration scenario -- one user, one dataset, two binaries.
+    # The waiter runs against the holder's cache and repo: one user, one
+    # dataset, two binaries.
     waiter_env = dict(context["env"]) | {"GIT_SFS": str(waiter.path.resolve())}
 
     holding = start_push(context, f'{{"subcommand": "copy", "sleep": {HOLD_SECONDS}}}')
@@ -253,7 +245,7 @@ def reset_remote_uploads(context: dict) -> None:
 
 
 def observe_malformed_owner(binary: Binary, context: dict, r: Results):
-    """§8.1: v1 slices data[:len(data)-1] with no length check (lock.go:62)."""
+    """A malformed owner file must not crash the waiter."""
     print(f"\n[{binary.name}] behavior with a zero-byte owner file")
     cache = context["cache"]
     write_lock(cache, "push", b"")
@@ -261,13 +253,13 @@ def observe_malformed_owner(binary: Binary, context: dict, r: Results):
     try:
         finished = wait_for(lambda: process.poll() is not None, BLOCK_PROBE_SECONDS)
         if not finished:
-            r.observe("zero-byte owner", "blocked (no crash)")
+            r.check(True, "zero-byte owner: blocks without crashing")
             return
         stderr = (process.stderr.read() or "").strip()
         crashed = "panic" in stderr or (process.returncode or 0) > 128
-        r.observe(
-            "zero-byte owner",
-            f"exit={process.returncode} crashed={crashed} stderr={stderr.splitlines()[:1]}",
+        r.check(
+            not crashed,
+            f"zero-byte owner: no crash (exit={process.returncode} stderr={stderr.splitlines()[:1]})",
         )
     finally:
         if process.poll() is None:
@@ -276,7 +268,7 @@ def observe_malformed_owner(binary: Binary, context: dict, r: Results):
 
 
 def observe_stale_lock(binary: Binary, context: dict, r: Results):
-    """§8.1: no liveness check, so a dead owner blocks every future operation."""
+    """A definitely dead owner is auto-broken."""
     print(f"\n[{binary.name}] behavior with a stale lock held by a dead pid")
     cache = context["cache"]
     dead_pid = find_dead_pid()
@@ -284,11 +276,9 @@ def observe_stale_lock(binary: Binary, context: dict, r: Results):
     process = start_push(context)
     try:
         finished = wait_for(lambda: process.poll() is not None, BLOCK_PROBE_SECONDS)
-        r.observe(
+        r.check(
+            finished,
             f"stale lock (pid {dead_pid} not running)",
-            "broke the lock and proceeded"
-            if finished
-            else f"still waiting after {BLOCK_PROBE_SECONDS}s",
         )
     finally:
         if process.poll() is None:

@@ -15,11 +15,9 @@ use crate::{Error, Result};
 /// Cloning shares the flag rather than copying it, so a `Cancel` handed to a
 /// worker thread observes a cancellation requested anywhere.
 ///
-/// AGENTS.md requires every byte-moving loop to check for cancellation each
-/// chunk. Phase 3 makes that structural with a `Read` adapter built on this
-/// type, so hashing and copying inherit prompt cancellation from plain
-/// [`std::io::copy`] instead of each loop hand-writing the check
-/// (rust-rewrite-plan 2.4).
+/// Byte-moving loops wrap their reader with this flag, so hashing and copying
+/// inherit prompt cancellation from ordinary read calls instead of relying on
+/// each loop to remember a separate check.
 #[derive(Clone, Debug, Default)]
 pub struct Cancel(Arc<AtomicBool>);
 

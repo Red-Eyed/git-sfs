@@ -1,20 +1,11 @@
-//! `import` — ported from `import.go`. Ingests external files into the
-//! cache and creates git-sfs symlinks at their destination paths inside the
-//! repository.
+//! `import` ingests external files into the cache and creates git-sfs symlinks
+//! at destination paths inside the repository.
 //!
-//! **Deliberately reorders v1's own sequencing to fix contract-spec §13.1.**
-//! v1's `ImportWithOptions` runs a *parallel prepare phase* that hashes and
-//! `--move`s every source into the cache first (`import.go:70-79`), and only
-//! afterward, in a second serial pass, creates any destination symlinks
-//! (`import.go:80-102`). A crash between the two phases leaves a file gone
-//! from its external source location with no symlink yet pointing back at
-//! it — the bytes are safe in the cache by hash, but nothing in the user's
-//! working tree reaches them. Here, each source is hashed, cached
-//! (`Store::store` for a copy, `Store::adopt` for `--move` — rename on the
-//! same filesystem, falling back to verified copy-then-remove across a
-//! device boundary), and symlinked back-to-back before the next source is
-//! even looked at, so at most one file is ever "in flight" at once instead
-//! of the whole import.
+//! Each source is hashed, cached (`Store::store` for a copy, `Store::adopt`
+//! for `--move`), and symlinked before the next source is processed. That keeps
+//! at most one file in flight at a time: after any interruption, completed
+//! entries have symlinks and the current entry is either still at its source or
+//! already reachable through the cache.
 //!
 //! `Store::adopt` (not a plain copy) is still the `--move` primitive
 //! deliberately: for the large datasets this project targets, requiring a
@@ -22,20 +13,10 @@
 //! roughly double the free disk space to move data that already fits once —
 //! exactly the scenario `--move` exists for.
 //!
-//! Two things stay batched up front, because they are read-only and
-//! aborting cleanly on a bad argument is itself part of the contract:
-//! destination-collision validation across the whole source tree
-//! (contract-spec §5b.2: "import validates before it moves anything, so a
-//! rejected import is a no-op") and the not-a-git-sfs-concern parallel hash
-//! pass v1 used for progress reporting, which does not exist yet in this
-//! pass (see the module's own simplifications below).
-//!
-//! Deliberately not ported/simplified this pass, matching precedent set by
-//! [`super::add`]:
-//! - No auto-`init`/cache-creation. `import` requires an already-bound
-//!   cache, same policy as `add` — the init/setup question stays parked.
-//! - Sequential only, no rayon-based parallelism.
-//! - No progress callback (Phase 5's `Event` stream is the real mechanism).
+//! Destination-collision validation happens across the whole source tree before
+//! any source file is moved or copied. A rejected import is therefore a no-op.
+//! Like `add`, this command requires an already-bound cache and keeps progress
+//! rendering out of core.
 
 use std::collections::BTreeMap;
 
@@ -68,7 +49,7 @@ pub struct ImportOutcome {
     /// Every file successfully ingested, in the order they were processed.
     pub imported: Vec<ImportedFile>,
     /// Source candidates whose own filename is not valid UTF-8 — skipped,
-    /// not ingested, but reported rather than silently dropped (mirrors
+    /// not ingested, but reported rather than silently dropped, just like
     /// [`crate::ports::repo::FoundEntry::Unrepresentable`]).
     pub unrepresentable: Vec<String>,
 }
@@ -102,8 +83,8 @@ pub enum ImportError {
         dest: Utf8PathBuf,
     },
     /// A symlink was reached as (or within) the source without `-L`.
-    /// Contract-spec §5b.2: refusing by default is the safe choice, since a
-    /// symlink in an incoming tree may point anywhere on the machine.
+    /// Refusing by default is the safe choice, since a symlink in an incoming
+    /// tree may point anywhere on the machine.
     #[error("source symlinks are not supported without -L: {path}")]
     SourceSymlinkRequiresFollow {
         /// The symlink that was reached.
@@ -112,8 +93,7 @@ pub enum ImportError {
     /// A symlink found *while walking a source directory* resolved to
     /// something other than a regular file. (A directory symlink is only
     /// permitted as the top-level `src` argument itself, not nested within
-    /// one — matching v1's own asymmetry, `import.go:194-201` vs
-    /// `import.go:240-242`.)
+    /// one.
     #[error("source symlink must resolve to a regular file: {path}")]
     SourceSymlinkTargetNotRegular {
         /// The symlink whose target was rejected.
@@ -245,14 +225,14 @@ struct ImportPair {
 }
 
 /// The validated shape of one `import` invocation, computed entirely
-/// read-only before anything is touched (contract-spec §5b.2). Not a
+/// read-only before anything is touched. Not a
 /// `crate::plan` type despite the name: unlike that module's pure functions,
 /// this performs real filesystem I/O (`lstat`, `canonicalize`, directory
 /// walks) to validate `src`/`dst`, so it lives here in `exec` instead.
 struct ImportPlan {
     pairs: Vec<ImportPair>,
     /// Source directories to remove if left empty by `--move`, deepest-ish
-    /// first (v1 sorts by path length, `import.go:260`) with `src` itself
+    /// first with `src` itself
     /// last.
     dirs: Vec<Utf8PathBuf>,
     /// Followed (`-L`) symlinks to remove under `--move` — distinct from
@@ -262,11 +242,9 @@ struct ImportPlan {
     unrepresentable: Vec<String>,
 }
 
-/// The two independent flags `import` takes -- v1's own `ImportOptions`
-/// (`import.go:20-23`), grouped here for the same reason: they are read
-/// together at nearly every call site below, and grouping them keeps
-/// [`import`] under clippy's argument-count lint without losing either
-/// flag's own name at the call site the way a bare `(bool, bool)` would.
+/// The two independent flags `import` takes, grouped because they are read
+/// together at nearly every call site below. Keeping the names at the call
+/// site is clearer than a bare `(bool, bool)`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ImportOptions {
     /// Delete each source after it is safely cached and symlinked (see the
@@ -277,18 +255,16 @@ pub struct ImportOptions {
     pub follow_symlinks: bool,
 }
 
-/// Ingests `src` (a path resolved against `cwd`, matching v1's
-/// `filepath.Abs` — unlike `dst`, an external source has no reason to
-/// resolve against the repository root) into the cache, creating a git-sfs
-/// symlink at `dst` (resolved against `repo`, like every other command's
-/// path arguments).
+/// Ingests `src` (resolved against `cwd`, because it is external to the repo)
+/// into the cache, creating a git-sfs symlink at `dst` (resolved against
+/// `repo`, like other repository path arguments).
 ///
 /// # Errors
 ///
 /// Returns the files ingested so far bundled with the first [`ImportError`]
 /// encountered, so a caller can report partial progress even on failure. A
 /// failure during validation (before any file is touched) reports an empty
-/// outcome, matching contract-spec §5b.2's "a rejected import is a no-op."
+/// outcome because a rejected import is a no-op.
 pub fn import(
     store: &dyn Store,
     repo: &Utf8Path,
@@ -344,7 +320,7 @@ pub fn import(
         for dir in &plan.dirs {
             #[allow(
                 clippy::let_underscore_must_use,
-                reason = "best-effort empty-directory cleanup matching v1 (import.go:265-269): a directory that is not actually empty is left alone, not a failure"
+                reason = "best-effort empty-directory cleanup; a directory that is not actually empty is left alone, not a failure"
             )]
             let _ = std::fs::remove_dir(dir.as_std_path());
         }
@@ -410,8 +386,7 @@ fn publish(repo: &Utf8Path, dst: &Utf8Path, hash: Sha256) -> Result<(), ImportEr
     })
 }
 
-/// Validates `src`/`dst` and, for a directory source, walks it -- v1's
-/// `planMove` (`import.go:160-263`), read-only throughout.
+/// Validates `src`/`dst` and, for a directory source, walks it read-only.
 fn plan_import(
     repo: &Utf8Path,
     cwd: &Utf8Path,
@@ -509,9 +484,8 @@ fn plan_import(
 }
 
 /// Walks a directory source, collecting one [`ImportPair`] per regular file
-/// (or `-L`-followed symlink resolving to one) -- v1's `filepath.WalkDir`
-/// closure (`import.go:212-256`). Rejects up front, touching nothing, if any
-/// computed destination already exists.
+/// (or `-L`-followed symlink resolving to one). Rejects up front, touching
+/// nothing, if any computed destination already exists.
 fn walk_source_dir(
     src_abs: &Utf8Path,
     dst_abs: &Utf8Path,
@@ -594,8 +568,7 @@ fn walk_source_dir(
     })
 }
 
-/// `path`, made absolute against `cwd` if it is not already -- v1's
-/// `filepath.Abs` (`import.go:161`).
+/// `path`, made absolute against `cwd` if it is not already.
 fn absolute(cwd: &Utf8Path, path: &Utf8Path) -> Utf8PathBuf {
     if path.is_absolute() {
         clean_utf8(path)
@@ -615,9 +588,9 @@ fn resolve_symlink(path: &Utf8Path) -> std::io::Result<Option<Utf8PathBuf>> {
 }
 
 /// The key used to detect that two source paths are the same underlying
-/// file -- v1's `canonicalSourceKey` (`import.go:277-283`). Best-effort:
-/// falls back to `path` itself if it cannot be canonicalized (matching v1),
-/// since this is a deduplication aid, not a correctness-critical value.
+/// file. Best-effort: falls back to `path` itself if it cannot be
+/// canonicalized, since this is a deduplication aid, not a correctness-critical
+/// value.
 fn canonical_key(path: &Utf8Path) -> Utf8PathBuf {
     std::fs::canonicalize(path.as_std_path())
         .ok()

@@ -10,8 +10,7 @@
 //!
 //! Not a trait: multiple callers, but exactly one implementation — the same
 //! reasoning that keeps [`super::lock::Lock`] a plain type rather than a
-//! trait (rust-rewrite-plan §3.3's "second implementation" bar applies to
-//! traits, not to a shared function with several call sites).
+//! trait.
 
 use std::fs::File;
 use std::io;

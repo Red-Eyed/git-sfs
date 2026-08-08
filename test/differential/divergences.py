@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
-"""Differences between v1 and v2 that are fixes, declared before they happen.
+"""Expected differences for a named candidate binary.
 
-rust-rewrite-plan §5.1: "An unenumerated divergence is a regression. An
-enumerated one is a fix. The difference is written down in advance, never
-adjudicated after a red run." The state diff cannot tell the two apart on its
-own -- both are just differences -- so this is where the writing down happens.
+The state diff cannot tell an allowed compatibility difference from a
+regression on its own, so this is where those allowed differences are declared.
 
 A suppression list would be the obvious shape and is the wrong one. Ignoring a
-known difference makes the harness silent about whether v2 actually fixed
+known difference makes the harness silent about whether current actually fixed
 anything, and a list of ignores only ever grows. Each declaration here does two
 jobs instead:
 
   normalize   collapse the dimension that is *allowed* to differ, applied to
               both sides. Everything outside it still compares strictly, so an
               unrelated regression in the same scenario is still caught.
-  occurred    assert the divergence *did* happen. A v2 that quietly kept v1's
-              behavior fails, which a suppression list can never detect.
+  occurred    assert the candidate-side change actually happened.
 
 Declarations only apply when a candidate binary is named (`run.py --candidate`).
 A self-check comparing one binary against itself must produce no divergence at
@@ -151,7 +148,7 @@ SECTION_LABELS = (
 @dataclass(frozen=True)
 class Divergence:
     id: str
-    spec: str
+    behavior: str
     scenario: str  # substring of the scenario name
     section: str  # manifest section label the divergence lives in
     statement: str
@@ -162,17 +159,17 @@ class Divergence:
 DIVERGENCES = [
     Divergence(
         id="fresh-init-verifies-without-remote",
-        spec="§13.3",
+        behavior="remote verification",
         scenario="01-add-commit",
         section="outcomes",
-        statement="a fresh v2 repo does not fail default verify because init no "
+        statement="a fresh current repo does not fail default verify because init no "
         "longer writes a missing rclone.conf reference",
         normalize=mask_outcome("verify_default"),
         occurred=outcome_became_zero("verify_default"),
     ),
     Divergence(
         id="init-default-config-omits-local-rclone-config-add",
-        spec="§13.3",
+        behavior="default config",
         scenario="01-add-commit",
         section="repo",
         statement="the default config template changes so a fresh repo does not "
@@ -182,7 +179,7 @@ DIVERGENCES = [
     ),
     Divergence(
         id="init-default-config-omits-local-rclone-config-corrupt",
-        spec="§13.3",
+        behavior="default config",
         scenario="03-corrupt-cache",
         section="repo",
         statement="the default config template changes so a fresh repo does not "
@@ -192,7 +189,7 @@ DIVERGENCES = [
     ),
     Divergence(
         id="init-default-config-omits-local-rclone-config-writable",
-        spec="§13.3",
+        behavior="default config",
         scenario="06-writable-cache",
         section="repo",
         statement="the default config template changes so a fresh repo does not "
@@ -202,7 +199,7 @@ DIVERGENCES = [
     ),
     Divergence(
         id="verify-remote-denial-is-not-a-local-failure",
-        spec="§13.3",
+        behavior="remote verification",
         scenario="05-remote-fault",
         section="outcomes",
         statement="verify with remote checking reports the local tree result "
@@ -212,7 +209,7 @@ DIVERGENCES = [
     ),
     Divergence(
         id="verify-integrity-remote-denial-is-not-a-local-failure",
-        spec="§13.3",
+        behavior="remote verification",
         scenario="05-remote-fault",
         section="outcomes",
         statement="verify --with-integrity reports the local tree result "
@@ -222,7 +219,7 @@ DIVERGENCES = [
     ),
     Divergence(
         id="status-backend-denial-is-unknown-not-fatal",
-        spec="§10.1/§13.3",
+        behavior="remote status",
         scenario="05-remote-fault",
         section="outcomes",
         statement="status represents remote lookup failure as unknown instead "
@@ -232,7 +229,7 @@ DIVERGENCES = [
     ),
     Divergence(
         id="writable-object-is-repaired-without-integrity-flag",
-        spec="§4.1/§9.1",
+        behavior="cache integrity",
         scenario="06-writable-cache",
         section="outcomes",
         statement="verify hash-verifies and re-protects an intact writable "
@@ -242,17 +239,17 @@ DIVERGENCES = [
     ),
     Divergence(
         id="writable-object-is-repaired-not-failed",
-        spec="§4.1/§9.1",
+        behavior="cache integrity",
         scenario="06-writable-cache",
         section="outcomes",
         statement="verify --with-integrity hash-verifies an intact but writable "
-        "object and exits 0, where v1 reports wrong-cache-permissions",
+        "object and exits 0",
         normalize=mask_outcome("verify_integrity"),
         occurred=outcome_became_zero("verify_integrity"),
     ),
     Divergence(
         id="writable-object-is-reprotected",
-        spec="§4.1",
+        behavior="cache protection",
         scenario="06-writable-cache",
         section="cache",
         statement="the verified object is protected in place, so the write bits "

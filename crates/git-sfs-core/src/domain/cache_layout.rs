@@ -1,11 +1,8 @@
-//! Pure path arithmetic for the cache root — contract-spec §4.
+//! Pure path arithmetic for the cache root.
 //!
 //! `<cache_root>` itself is resolved elsewhere through the `.git-sfs/cache`
-//! symlink — all of it I/O, all of it a ports concern. Everything here is a deterministic
-//! function of a root path and, where relevant, a hash — no filesystem access,
-//! so it is exactly as pure as [`super::symlink::cache_link_file`], which
-//! computes the analogous path from the *repository* side of the same
-//! indirection.
+//! symlink. Resolving that symlink is I/O and belongs to a port; everything
+//! here is a deterministic function of a root path and, where relevant, a hash.
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -34,8 +31,7 @@ pub fn locks_dir(cache_root: &Utf8Path) -> Utf8PathBuf {
     cache_root.join("locks")
 }
 
-/// Reclaimed-object trash root, a v2 addition (rust-rewrite-plan §7):
-/// `<cache_root>/trash`. Additive and migration-safe — v1 never looks here.
+/// Reclaimed-object trash root: `<cache_root>/trash`.
 #[must_use]
 pub fn trash_dir(cache_root: &Utf8Path) -> Utf8PathBuf {
     cache_root.join("trash")
@@ -52,7 +48,7 @@ mod tests {
     const H: &str = "ab3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a";
 
     #[test]
-    fn object_path_matches_contract_spec_layout() {
+    fn object_path_matches_cache_layout() {
         let root = Utf8Path::new("/cache");
         assert_eq!(
             object_path(root, hash(H)),

@@ -1,13 +1,7 @@
 //! Routes a parsed command line to core.
 //!
-//! This is the file phase 4 grows, one arm at a time, which is why it is not
-//! part of `main.rs`: implementing a command should not touch process setup,
-//! and changing process setup should not touch commands.
-//!
-//! Every unported command is still a stub. A stub returns
-//! [`Error::NotImplemented`](git_sfs_core::Error::NotImplemented) rather than
-//! succeeding quietly, so the differential harness reads an unported command as
-//! a failure instead of as a run that did nothing.
+//! Command routing stays separate from process setup: implementing a command
+//! should not touch signal handling, parse-error reporting, or exit-code setup.
 
 use camino::Utf8PathBuf;
 use std::io::Write as _;
@@ -45,9 +39,6 @@ use crate::reporting::{self, RenderMode};
 const PULL_TMP_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Runs the requested command.
-///
-/// `_cli` carries the global flags and `_cancel` the interrupt flag; each arm
-/// drops its underscore as phase 4 wires that command up.
 pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
     match command {
         Command::Help => print_help(),
@@ -121,7 +112,7 @@ fn run_add(cli: &Cli, args: &AddArgs, cancel: &Cancel) -> Result<()> {
 /// `git-sfs mv <source> <dest>` — moves a git-sfs symlink (or a directory of
 /// them) and rewrites the relative targets for their new location. Never
 /// touches the cache, so unlike `add` this needs no cache resolution and no
-/// lock (contract-spec §3.3; v1's `mv.go` takes no lock either).
+/// lock.
 fn run_mv(cli: &Cli, args: &MvArgs, cancel: &Cancel) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
@@ -143,7 +134,7 @@ fn run_mv(cli: &Cli, args: &MvArgs, cancel: &Cancel) -> Result<()> {
 /// `git-sfs import <source> <dest>` — ingests an external file or directory
 /// into the cache and creates git-sfs symlinks at `dest`. Requires an
 /// already-bound cache and takes the `import` lock, like `add` and unlike
-/// `mv` (contract-spec §3.3 exempts `mv` alone from touching the cache).
+/// `mv`.
 fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;

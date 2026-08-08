@@ -4,12 +4,6 @@
 //! class* a failure belongs to; this module owns *which number* that class
 //! prints as. Splitting it that way is what keeps the taxonomy in one place
 //! while leaving the process-level concern where it belongs.
-//!
-//! contract-spec 9 freezes exactly two things, and neither is really git-sfs's:
-//! `0` versus non-zero, which is the Unix contract every CI script depends on,
-//! and `130` for SIGINT, which is the shell's `128 + signal` convention.
-//! Everything else is v2's to choose, and the choice is documented on
-//! [`git_sfs_core::Error`].
 
 use git_sfs_core::Error;
 
@@ -30,13 +24,6 @@ pub const UNAVAILABLE: u8 = 5;
 /// that way.
 pub const CANCELED: u8 = 130;
 
-/// `EX_SOFTWARE` from `sysexits.h`: the program itself is at fault.
-///
-/// Deliberately outside git-sfs's own range so that a stub command left behind
-/// by the port is unmistakable at a glance. No released build may return it —
-/// phase 4 removes the variant that produces it.
-pub const UNIMPLEMENTED: u8 = 70;
-
 /// The exit code for a failure.
 #[must_use]
 pub fn code_for(error: &Error) -> u8 {
@@ -47,7 +34,6 @@ pub fn code_for(error: &Error) -> u8 {
         Error::Missing(_) => MISSING,
         Error::Unavailable(_) => UNAVAILABLE,
         Error::Canceled => CANCELED,
-        Error::NotImplemented { .. } => UNIMPLEMENTED,
     }
 }
 
@@ -55,9 +41,8 @@ pub fn code_for(error: &Error) -> u8 {
 mod tests {
     use super::*;
 
-    /// The half of contract-spec 9 that is actually frozen: a failure must not
-    /// look like success. Everything else in this table is v2's to change, but
-    /// a zero here would make a broken repository pass CI.
+    /// A failure must not look like success; otherwise a broken repository can
+    /// pass CI.
     #[test]
     fn every_failure_exits_non_zero() {
         let failures = [
@@ -67,7 +52,6 @@ mod tests {
             Error::Missing(String::new()),
             Error::Unavailable(String::new()),
             Error::Canceled,
-            Error::NotImplemented { command: "add" },
         ];
 
         for failure in &failures {
@@ -91,8 +75,7 @@ mod tests {
         );
     }
 
-    /// contract-spec 9.1: "missing is not corrupt". v1 stated it in prose and
-    /// then mapped both to the same fall-through code.
+    /// Missing data has an actionable remedy; corrupt data does not.
     #[test]
     fn missing_is_not_corrupt() {
         assert_ne!(

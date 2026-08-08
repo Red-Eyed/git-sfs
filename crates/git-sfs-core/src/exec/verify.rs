@@ -102,7 +102,7 @@ impl VerifyIssue {
 /// Verify issue categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IssueKind {
-    /// Reserved for v1 output compatibility; v2 deliberately does not fail on
+    /// Reserved for compatibility; verify deliberately does not fail on
     /// unrelated regular files because false reds weaken a CI gate.
     UnconvertedFile,
     /// A symlink candidate exists but does not validate as a git-sfs link.
@@ -111,8 +111,8 @@ pub enum IssueKind {
     MissingCacheFile,
     /// A referenced local cache object hashes to the wrong bytes.
     CorruptCacheFile,
-    /// Reserved for v1 output compatibility; v2 repairs intact writable
-    /// legacy objects through [`Store::verified`].
+    /// Reserved for compatibility; intact writable objects are repaired
+    /// through [`Store::verified`].
     WrongCachePermissions,
     /// A referenced object is absent from the remote.
     MissingRemoteFile,

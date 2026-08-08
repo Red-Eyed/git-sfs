@@ -1,5 +1,4 @@
-//! Pure planning for `push` — contract-spec §5b.1, ported from
-//! `push.go:29-147`.
+//! Pure planning for `push`.
 //!
 //! Whether an object is actually reachable on the remote is not this
 //! module's concern: push always attempts every locally-present object, and
@@ -28,9 +27,8 @@ pub struct PushPlan {
 }
 
 /// One object `push --skip-missing` left out, and every tracked path that
-/// references it — contract-spec §5b.1's dual count: reporting only the
-/// object total understates how much of the tree is unbacked, since one
-/// object can back many paths.
+/// references it. Reporting only the object total understates how much of the
+/// tree is unbacked, since one object can back many paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedObject {
     /// The absent object.
@@ -44,12 +42,9 @@ pub struct SkippedObject {
 /// Why [`plan_push`] refused to produce a plan.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PlanPushError {
-    /// A referenced cache object is not present locally and
-    /// `--skip-missing` was not given (contract-spec §5b.1). Names a
-    /// working-tree path, not a bare hash, so the user sees a file they
-    /// recognize and the exact command that restores it — `missingCachedFileError`
-    /// (`push.go:120-129`), which reports the first missing hash in
-    /// path-sorted order so the same repo state always names the same file.
+    /// A referenced cache object is not present locally and `--skip-missing`
+    /// was not given. Names a working-tree path, not a bare hash, so the user
+    /// sees a file they recognize and the exact command that restores it.
     #[error("cache file missing for {path} ({hash}): run: git-sfs pull {path}")]
     MissingCachedFile {
         /// The path named in the error.

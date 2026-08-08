@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Differential harness: run one scenario against several git-sfs binaries and
-diff what each left behind.
+"""Differential harness: run one scenario against several git-sfs binaries.
 
-The comparison artifact is filesystem state plus per-command success/failure --
-the two surfaces the conformance contract still freezes once human output, the
-exit-code taxonomy, and the status --json schema are unfrozen (contract-spec 12).
+The comparison artifact is filesystem state plus per-command success/failure.
+Human output is intentionally outside this harness.
 
 Usage:
 
-    test/differential/run.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+    test/differential/run.py --binary old=./git-sfs --binary new=./target/release/git-sfs
     test/differential/run.py --binary a=./git-sfs --binary b=./git-sfs   # self-check
 
 Exits non-zero when any pair of binaries diverges on any scenario.
@@ -33,8 +31,7 @@ HARNESS_DIR = Path(__file__).parent
 SCENARIO_DIR = HARNESS_DIR / "scenarios"
 
 # .git holds commit hashes and index timestamps that differ between two runs of
-# the same scenario. The worktree symlinks it tracks are captured directly, so
-# excluding it costs no coverage of anything the contract freezes.
+# the same scenario. The worktree symlinks it tracks are captured directly.
 WORKTREE_EXCLUDED = [".git", ".git-sfs/README.md"]
 REMOTE_EXCLUDED = ["tmp"]
 
@@ -142,12 +139,7 @@ def compare(
     reports: dict[str, list[tuple[str, str]]],
     applicable: list[divergences.Divergence],
 ) -> tuple[str, list[str]]:
-    """Diff two runs, and report on every divergence declared for them.
-
-    Returns the unified diff (empty when they agree) and one status line per
-    declared divergence. A declared divergence that did not happen is a failure
-    in its own right: it means v2 kept the behavior 13 says to fix.
-    """
+    """Diff two runs, and report on every declared compatibility difference."""
     base_sections = divergences.normalize_sections(reports[base.name], applicable)
     other_sections = divergences.normalize_sections(reports[other.name], applicable)
     delta = diff_reports(
@@ -162,7 +154,7 @@ def compare(
         )
         mark = "confirmed" if happened else "MISSING"
         notes.append(
-            f"     divergence {divergence.spec} {divergence.id}: {mark}"
+            f"     divergence {divergence.behavior} {divergence.id}: {mark}"
             f" -- {divergence.statement}"
         )
     return delta, notes
@@ -199,8 +191,7 @@ def main() -> None:
     parser.add_argument(
         "--candidate",
         metavar="NAME",
-        help="binary expected to implement the contract-spec 13 fixes; enables "
-        "the declared divergences in divergences.py",
+        help="binary expected to differ in the ways declared by divergences.py",
     )
     args = parser.parse_args()
 
@@ -244,9 +235,8 @@ def main() -> None:
                 continue
 
             for other in args.binary[1:]:
-                # Declarations describe how v2 differs from v1, so they apply
-                # only to a pair where one side is the named candidate. A
-                # self-check must show no divergence at all.
+                # Declarations apply only to a pair where one side is the named
+                # candidate. A self-check must show no divergence at all.
                 applicable = (
                     divergences.for_scenario(scenario.name)
                     if other.name == args.candidate

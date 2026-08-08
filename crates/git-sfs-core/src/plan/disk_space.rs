@@ -1,5 +1,4 @@
-//! Pure disk-space guard for `pull` — v1's fixed 110%-margin policy
-//! (`pull.go:96-123`), ported.
+//! Pure disk-space guard for `pull` — the fixed 110%-margin policy.
 //!
 //! Kept as its own step rather than folded into [`super::pull::plan_pull`]:
 //! it needs different I/O-observed inputs — remote object sizes and the
@@ -7,17 +6,10 @@
 //! obtained (or want to pay for) at the same time it decides the download
 //! set itself.
 //!
-//! contract-spec §13.3 flags v1's guard as failing open twice: a hash
-//! missing from a remote listing silently contributes zero bytes, and a
-//! `statfs` failure only warns and proceeds. Neither gap is reproduced here
-//! by construction, not by extra defensive code: [`sum_needed_bytes`] simply
-//! sums whatever `remote_sizes` map it is given, and
-//! `ports::remote::RcloneRemote::file_sizes` already returns `Err` rather
-//! than a partial map on listing failure — so as long as a caller propagates
-//! that `Err` instead of catching it, "the remote is unreachable" can never
-//! read as "nothing needs space" here. The `statfs` half is entirely the
-//! caller's own I/O to get right; this module only ever sees the byte count
-//! already determined.
+//! A caller must pass a complete remote-size map and a known cache free-space
+//! value. If the remote listing or `statfs` failed, the caller should propagate
+//! that error instead of manufacturing partial inputs; otherwise "unknown"
+//! could look like "nothing needs space."
 
 use std::collections::HashMap;
 
@@ -26,8 +18,8 @@ use thiserror::Error;
 use crate::domain::hash::Sha256;
 
 /// `pull` refuses to proceed unless the cache volume has at least this much
-/// headroom over what is actually needed (`pull.go:119`) — a fixed 10%
-/// margin, not a config knob, matching v1 exactly.
+/// headroom over what is actually needed: a fixed 10% margin, not a config
+/// knob.
 const REQUIRED_MARGIN_PERCENT: u64 = 110;
 
 /// The cache volume does not have enough free space for
@@ -53,7 +45,7 @@ pub fn sum_needed_bytes(download: &[Sha256], remote_sizes: &HashMap<Sha256, u64>
 }
 
 /// Checks `needed_bytes` (from [`sum_needed_bytes`]) against
-/// `available_bytes` (the cache volume's free space) with v1's fixed 110%
+/// `available_bytes` (the cache volume's free space) with the fixed 110%
 /// margin.
 ///
 /// # Errors
@@ -105,16 +97,15 @@ mod tests {
     #[test]
     fn requires_a_ten_percent_margin_over_what_is_needed() {
         // Exactly 110% of needed is the boundary: available == required must
-        // still pass (v1's comparison is strictly `>`, not `>=`).
+        // still pass.
         assert!(check_disk_space(1000, 1100).is_ok());
         assert!(check_disk_space(1000, 1099).is_err());
     }
 
     #[test]
     fn error_reports_the_actual_bytes_needed_not_the_margin_inflated_figure() {
-        // v1's message reports the raw `needed`, not `needed*110/100`
-        // (pull.go:120) -- the number a human should see is what the
-        // objects actually cost, not the safety threshold.
+        // The number a human should see is what the objects actually cost,
+        // not the safety threshold.
         let err = check_disk_space(1000, 0).unwrap_err();
         assert_eq!(err.needed_bytes, 1000);
     }

@@ -1,13 +1,9 @@
 //! `min_git_sfs_version` / `min_rclone_version` comparison.
 //!
-//! contract-spec §6.6: this is **not** semver, and every difference is
-//! load-bearing. `semver::Version::parse` — the crate rust-rewrite-plan §4.1
-//! otherwise adopts — inverts all three rules below, so it cannot be used
-//! here: it rejects a leading `v`, rejects leading zeros, and accepts
-//! prerelease. Using it unmodified would not be a refactor, it would change
-//! which committed configs load, and it would reject git-sfs's *own* version
-//! string (§11 pins `--version` to the `v1.21.0` tag form), breaking every
-//! repo that sets `min_git_sfs_version` in one release.
+//! These floor values are intentionally not parsed as semver. They accept an
+//! optional leading `v` and leading zeros, and reject prerelease/build metadata.
+//! Using `semver::Version::parse` would change which committed configs load
+//! and would reject git-sfs release strings such as `vX.Y.Z`.
 //!
 //! `semver` remains the right crate wherever this project wants genuine
 //! semver compliance; this module exists because that is not one of those
@@ -15,10 +11,7 @@
 
 use thiserror::Error;
 
-/// A version compared as three lexicographically-ordered integers — nothing
-/// more. Derived `Ord` on `[u32; 3]` is exactly v1's comparison loop
-/// (`config.go:49-57`): compare component by component, first difference
-/// decides, equal falls through to the next.
+/// A version compared as three lexicographically ordered integers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VersionTriple([u32; 3]);
 
@@ -46,10 +39,10 @@ pub enum VersionParseError {
 impl VersionTriple {
     /// Parses `[v]major.minor.patch`.
     ///
-    /// - An optional leading `v` is stripped (`config.go:19`).
-    /// - Exactly three `.`-separated components are required, matching Go's
-    ///   `SplitN(s, ".", 3)`: a fourth `.` does not split further, it becomes
-    ///   part of the third component and then fails to parse as an integer.
+    /// - An optional leading `v` is stripped.
+    /// - Exactly three `.`-separated components are required. A fourth `.`
+    ///   stays inside the patch component and then fails to parse as an
+    ///   integer.
     /// - Leading zeros are accepted (`"1.07.0"` reads as `1.7.0`).
     /// - Prerelease and build metadata are rejected: `"1.67.0-beta"` is an
     ///   error, because `"0-beta"` is not a bare integer.
@@ -103,7 +96,7 @@ pub enum VersionCheckError {
 /// Checks git-sfs's own version against `min_git_sfs_version`.
 ///
 /// `current == "dev"` always passes — development builds are never blocked
-/// (`config.go:38-40`), which is what keeps an unreleased build usable against
+///, which is what keeps an unreleased build usable against
 /// a repo that sets a floor.
 ///
 /// # Errors
@@ -118,7 +111,7 @@ pub fn check_git_sfs_version(current: &str, minimum: &str) -> Result<(), Version
 }
 
 /// Checks a detected rclone version against `min_rclone_version`. Unlike
-/// [`check_git_sfs_version`], there is no `"dev"` bypass — v1 has none either.
+/// [`check_git_sfs_version`], there is no `"dev"` bypass.
 ///
 /// # Errors
 ///
@@ -197,15 +190,11 @@ mod tests {
         assert!(check_rclone_version("dev", "1.0.0").is_err());
     }
 
-    /// The sharp edge rust-rewrite-plan §6.6 names directly: `bare semver`
-    /// rejects a leading `v`, and git-sfs's own `--version` output is pinned
-    /// to the `v1.21.0` tag form (contract-spec §11). If this parsed with
-    /// `semver::Version::parse` instead, a repo with `min_git_sfs_version`
-    /// set would fail to parse the running binary's *own* version and error
-    /// on every invocation.
+    /// Release versions carry a leading `v`; floor checks must accept that
+    /// exact string so a repo can require the release currently running it.
     #[test]
     fn a_release_binaries_own_v_prefixed_version_satisfies_its_own_floor() {
-        assert!(check_git_sfs_version("v1.21.0", "1.6.0").is_ok());
+        assert!(check_git_sfs_version("v9.0.0", "1.6.0").is_ok());
     }
 
     #[test]

@@ -1,18 +1,10 @@
-//! Pure planning — rust-rewrite-plan §3.1. No I/O, no clock: every function
-//! here takes data the `exec` layer already obtained from a `ports::Store`/
-//! `ports::Remote`/`ports::Repo` call and decides what should happen next.
-//! Commands become `scan → plan → execute → report`; this module is the
-//! `plan` step. It depends on nothing in `ports` — the input shapes below
-//! are plain data shaped like what a port can cheaply produce, not port
-//! trait objects, which is what keeps this layer testable with zero
-//! filesystem.
+//! Pure planning.
 //!
-//! `plan_verify` is not here yet — deliberately deferred alongside the
-//! `verify` command itself (Phase 4, see rust-rewrite-plan's Phase 2
-//! checklist), since its planning shape is meaningfully richer than
-//! push/pull's: eight issue kinds, a cheap-by-default vs. opt-in-expensive
-//! remote check, and orphan detection needing the whole cache listing, not
-//! just tracked links.
+//! No I/O, no clock: every function here takes data the `exec` layer already
+//! obtained from a `ports::Store`/`ports::Remote`/`ports::Repo` call and
+//! decides what should happen next. Commands become `scan -> plan -> execute
+//! -> report`. The input shapes below are plain data, not port trait objects,
+//! which keeps this layer testable with zero filesystem.
 
 use camino::Utf8PathBuf;
 

@@ -23,8 +23,8 @@ from pathlib import Path
 
 # Symlink permission bits are not portable -- Linux reports 0o777, macOS 0o755 --
 # and carry no meaning, so they are deliberately excluded from the manifest.
-# File and directory modes ARE recorded: contract-spec 4.1 makes the write bits
-# on cache objects load-bearing.
+# File and directory modes are recorded because cache object write bits are
+# load-bearing state.
 
 
 class Entry:
@@ -104,8 +104,8 @@ def walk(
     """Collect every entry under `root`, normalized and content-hashed.
 
     Symlinks are never followed: their target string is itself part of the
-    frozen contract (spec 3.1), so recording where they point matters more than
-    recording what they point at -- and following them would also escape `root`.
+    stable state, so recording where they point matters more than recording what
+    they point at -- and following them would also escape `root`.
     """
     entries: list[Entry] = []
 

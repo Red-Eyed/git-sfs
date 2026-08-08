@@ -1,18 +1,15 @@
-//! The only side-effecting seams — rust-rewrite-plan §3.1.
+//! The side-effecting seams.
 //!
 //! Everything in [`crate::domain`] is a pure value or a pure transform.
 //! Everything here touches the outside world: the filesystem, a subprocess, a
-//! clock. Commands (Phase 4) are built by composing these with `domain` and
-//! `plan`; nothing above this layer is allowed to reach past it and touch I/O
-//! directly.
+//! clock. Commands are built by composing these with `domain` and `plan`;
+//! nothing above this layer reaches past it and touches I/O directly.
 //!
 //! `Store`, `Remote`, and `Repo` get traits because there are genuinely two
-//! implementations each — a real one plus a test fake — which is the bar
-//! rust-rewrite-plan §3.3 sets for introducing one at all. `Lock`
-//! deliberately does not: one real implementation, no second one
-//! contemplated. `local_state` isn't a trait either, for the same reason as
-//! `Lock` — there is exactly one way to walk up for `.git` or read a
-//! symlink, no second implementation on the horizon.
+//! implementations each: a real one plus a test fake. `Lock` deliberately
+//! does not; there is one lock protocol and every command uses it directly.
+//! `local_state` is not a trait either, because repository discovery and cache
+//! binding are concrete filesystem operations.
 
 pub mod cancellable_io;
 pub mod hashing;

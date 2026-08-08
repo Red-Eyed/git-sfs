@@ -1,20 +1,14 @@
 //! The content-address type.
 //!
-//! rust-rewrite-plan §2.1: v1's `Hash` is `type Hash string` with a `Parse`
-//! function nothing forces callers through — `Hash("")` is legal everywhere,
-//! and error paths return exactly that. [`Sha256`] closes that: the only ways
-//! to build one are [`Sha256::parse`] and [`Sha256::from_digest`], both of
-//! which fix the length invariant at construction, so [`Sha256::prefix`]
-//! becomes total. The `len(s) < 2` guard clause in v1's `Prefix` (`hash.go:88`)
-//! is therefore deleted here, not ported — a value that exists at all already
-//! has exactly 32 bytes.
+//! [`Sha256`] is the boundary where external text and hasher output become a
+//! usable object id. Once constructed, the digest is exactly 32 bytes, so
+//! downstream operations such as fanout prefix calculation are total.
 
 use std::fmt;
 
 use thiserror::Error;
 
-/// SHA-256 digests are 32 bytes, always — the one algorithm contract-spec §6.1
-/// admits (`algorithm = "sha256"`, no other value validates).
+/// SHA-256 digests are 32 bytes, always.
 const DIGEST_LEN: usize = 32;
 
 /// A hex-encoded SHA-256 digest is exactly this many characters.
@@ -35,9 +29,9 @@ pub struct Sha256([u8; DIGEST_LEN]);
 
 /// Why a string failed to parse as a [`Sha256`].
 ///
-/// contract-spec §3.2 rule 5: exactly 64 characters, each `[0-9a-f]`.
-/// Uppercase is rejected — deliberately, not an oversight, so this type does
-/// not use a case-insensitive decoder even though one would parse more inputs.
+/// A valid object id is exactly 64 lowercase hex characters. Uppercase is
+/// rejected deliberately, so this type does not use a case-insensitive decoder
+/// even though one would parse more inputs.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum HashParseError {
     /// The input was not exactly [`HEX_LEN`] characters.
@@ -49,7 +43,7 @@ pub enum HashParseError {
         got: usize,
     },
     /// The input had the right length but contained a character outside
-    /// lowercase `0-9a-f` — including uppercase hex, which v1 also rejects.
+    /// lowercase `0-9a-f`.
     #[error("invalid sha256 hex {input:?}: must be lowercase hex")]
     NotLowercaseHex {
         /// The rejected input, for the error message.
@@ -89,9 +83,6 @@ impl Sha256 {
     }
 
     /// Wraps a digest a hasher already produced.
-    ///
-    /// This is the boundary Phase 3's file-hashing port will call once actual
-    /// bytes are read; nothing in this crate reads a file today.
     #[must_use]
     pub fn from_digest(digest: [u8; DIGEST_LEN]) -> Self {
         Self(digest)
@@ -110,9 +101,7 @@ impl Sha256 {
     }
 
     /// The two-character fanout directory this hash's cache object lives
-    /// under: `files/sha256/<prefix>/<hash>` (contract-spec §4).
-    ///
-    /// Total, unlike v1's `Prefix` — see the module doc.
+    /// under: `files/sha256/<prefix>/<hash>`.
     #[must_use]
     pub fn prefix(&self) -> String {
         hex::encode([self.0[0]])
@@ -120,9 +109,7 @@ impl Sha256 {
 
     /// The leading 12 hex characters, for display next to a path.
     ///
-    /// Matches v1's `Short()` (`hash.go:76-83`): full 64 characters wrap
-    /// terminal lines without telling the reader anything more; 12 still
-    /// distinguishes objects by eye.
+    /// A short display form that still distinguishes objects by eye.
     #[must_use]
     pub fn short(&self) -> String {
         hex::encode(&self.0[..6])
@@ -154,8 +141,7 @@ mod tests {
 
     #[test]
     fn rejects_uppercase() {
-        // contract-spec 3.2 rule 5: uppercase is rejected, deliberately, not a
-        // case-insensitivity gap.
+        // Uppercase is rejected deliberately, not treated as canonical input.
         let upper = EXAMPLE.to_uppercase();
         assert!(matches!(
             Sha256::parse(&upper),
@@ -186,8 +172,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_string() {
-        // The v1 defect this type closes: `Hash("")` was a legal value
-        // everywhere. Parsing "" must fail outright, not yield a valid zero
+        // Empty input must fail outright, not yield a valid zero
         // value.
         assert!(Sha256::parse("").is_err());
     }

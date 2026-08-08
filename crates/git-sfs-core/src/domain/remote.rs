@@ -1,13 +1,8 @@
 //! Remote naming and URL composition.
 //!
-//! contract-spec §5/§5.1. The composition rule is frozen **across users, not
-//! just across versions**: several people and several git-sfs versions push
-//! into the same bucket concurrently, so a one-character difference here
-//! (e.g. a doubled slash) silently partitions a shared remote into two
-//! disjoint stores. `compose_remote_url` is ported from the exact algorithm in
-//! `internal/remote/command.go:41-63`, not reconstructed from the spec's prose
-//! summary of it — the prose collapses two `TrimRight` calls into one
-//! "unchanged" step that the code does not actually skip.
+//! The composition rule is stable across users: several people can push into
+//! the same bucket concurrently, so a one-character difference here, such as a
+//! doubled slash, silently partitions a shared remote into two disjoint stores.
 
 use std::borrow::Borrow;
 
@@ -31,7 +26,7 @@ impl Borrow<str> for RemoteName {
 /// The remote name every command falls back to when `-r`/`--remote` is absent.
 pub const DEFAULT_REMOTE_NAME: &str = "default";
 
-/// contract-spec §6.2: `[remotes.]` (an empty name) is a config error.
+/// Empty remote names are not valid config keys.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error("remote name must not be empty")]
 pub struct EmptyRemoteName;
@@ -72,11 +67,9 @@ impl std::fmt::Display for RemoteName {
 }
 
 /// Composes the rclone target URL for a `[remotes.<name>]` entry's `backend`
-/// and `path` fields, exactly reproducing
-/// `NewRcloneTargetWithOptions`/`newRcloneRemote` (`command.go:41-63`).
+/// and `path` fields.
 ///
-/// Object paths are then `<url>/files/<algorithm>/<prefix>/<hash>`
-/// (contract-spec §5).
+/// Object paths are then `<url>/files/<algorithm>/<prefix>/<hash>`.
 #[must_use]
 pub fn compose_remote_url(backend: &str, path: &str) -> String {
     let url = if backend.is_empty() {
@@ -89,15 +82,14 @@ pub fn compose_remote_url(backend: &str, path: &str) -> String {
             format!("{backend}:{}", path.trim_start_matches('/'))
         }
     };
-    // `newRcloneRemote` trims the fully composed URL's trailing slashes too,
-    // regardless of which branch above produced it.
+    // Trim after composition as well as before, so empty backends and backend
+    // URLs use the same trailing-slash rule.
     url.trim_end_matches('/').to_owned()
 }
 
 /// The remote object path for `hash`, mirroring the local cache's
 /// `files/sha256/<prefix>/<hash>` layout at the far end of a
-/// [`compose_remote_url`]'d `<url>` (contract-spec §5: "mirrors the local
-/// cache layout").
+/// [`compose_remote_url`]'d `<url>`.
 #[must_use]
 pub fn object_url(url: &str, hash: Sha256) -> String {
     format!(
@@ -107,7 +99,6 @@ pub fn object_url(url: &str, hash: Sha256) -> String {
     )
 }
 
-/// `command.go:62-64`: `len(path) >= 3 && path[1] == ':' && path[2] == '/'`.
 /// Byte indexing is safe here without a UTF-8 boundary check because the
 /// bytes being compared (`:`, `/`) are single-byte ASCII regardless of what
 /// surrounds them, and the length guard prevents indexing past the end.
@@ -130,11 +121,9 @@ mod tests {
         assert_eq!(RemoteName::default().as_str(), "default");
     }
 
-    /// contract-spec §5.1's own table, verbatim -- each row has a plausible
-    /// wrong answer, which is why the spec enumerates them individually
-    /// rather than describing the rule only in prose.
+    /// Each row has a plausible wrong answer, so the edge cases stay explicit.
     #[test]
-    fn matches_the_contract_spec_url_composition_table() {
+    fn matches_the_url_composition_table() {
         let cases = [
             ("local", "/srv/data", "local:/srv/data"),
             ("s3", "dataset/root", "s3:dataset/root"),
@@ -154,10 +143,8 @@ mod tests {
 
     #[test]
     fn trailing_slashes_never_survive_composition() {
-        // Skipping the trailing-slash strip yields `s3:dataset/root//files/...`,
-        // which several backends treat as a distinct key from the single-slash
-        // form -- contract-spec §5.1's stated failure mode, reached through one
-        // character.
+        // Some backends treat double slashes as distinct keys, so composition
+        // must remove trailing slashes before object paths are appended.
         assert_eq!(
             compose_remote_url("s3", "dataset/root///"),
             "s3:dataset/root"
@@ -166,9 +153,7 @@ mod tests {
 
     #[test]
     fn leading_slashes_are_stripped_only_when_not_absolute_looking() {
-        // A relative-looking path with an internal leading slash after
-        // trimming still gets its leading slash stripped, per the `else`
-        // branch of the ported algorithm.
+        // A slash-prefixed Unix path remains absolute-looking.
         assert_eq!(compose_remote_url("s3", "/nested/path"), "s3:/nested/path");
     }
 
@@ -189,9 +174,7 @@ mod tests {
 
     #[test]
     fn empty_backend_still_strips_trailing_slashes() {
-        // The spec's prose says step 1 leaves `path` "unchanged", but
-        // `newRcloneRemote` always applies `TrimRight(url, "/")` regardless of
-        // branch -- ground truth is the code, not the paraphrase.
+        // Empty-backend remotes still use the final trailing-slash cleanup.
         assert_eq!(compose_remote_url("", "/abs/path/"), "/abs/path");
     }
 }

@@ -68,7 +68,7 @@ impl From<PushError> for Error {
 
 /// Uploads cache objects referenced by git-sfs symlinks at or below `scope`.
 ///
-/// Invalid symlinks are ignored here, matching v1's
+/// Invalid symlinks are ignored here, matching the compatibility behavior.
 /// `collectGitSFSSymlinks`; `verify` reports them instead.
 ///
 /// # Errors

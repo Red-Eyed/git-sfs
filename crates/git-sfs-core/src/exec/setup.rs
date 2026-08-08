@@ -101,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_old_v1_cache_dir_when_link_is_missing() {
+    fn recognizes_old_cache_dir_when_link_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
         std::fs::create_dir(repo.join(".git")).unwrap();

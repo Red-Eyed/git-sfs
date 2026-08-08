@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """SIGINT driver: interrupt a transfer in flight and check what survives.
 
-AGENTS.md makes cancellation a safety requirement, not a convenience --
-"cancellation must leave state consistent: never publish a partial file, and
-surface the interrupt as a clean cancellation, not a corrupt result." Nothing
-else in the suite tests it, and rust-rewrite-plan §5.3 lists it first among the
-checks most likely to be skipped and most likely to lose data.
+Cancellation is a safety requirement, not a convenience: it must leave state
+consistent, never publish a partial file, and surface the interrupt as a clean
+cancellation.
 
 This is a separate entry point rather than a scenario in run.py because an
 interrupt lands at a point neither binary controls. The tree afterwards
-legitimately differs between two runs of one binary, let alone between v1 and
-v2, so there is nothing to diff. What is stable is the set of invariants that
-must hold no matter where the interrupt landed -- so those are asserted
-directly.
+legitimately differs between two runs of one binary, so there is nothing to
+diff. What is stable is the set of invariants that must hold no matter where
+the interrupt landed, so those are asserted directly.
 
 Usage:
 
-    test/differential/cancellation.py --binary v1=./git-sfs
-    test/differential/cancellation.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs
+    test/differential/cancellation.py --binary current=./target/release/git-sfs
 """
 
 from __future__ import annotations
@@ -52,8 +48,7 @@ from harness import (
 HARNESS_DIR = Path(__file__).parent
 SETUP = HARNESS_DIR / "replicated-setup.sh"
 
-# 128 = SIGINT's 130 by the shell's 128+signal convention. contract-spec §9 keeps
-# this frozen even though the rest of the taxonomy is v2's to redesign.
+# 128 = SIGINT's 130 by the shell's 128+signal convention.
 SIGINT_EXIT = 130
 
 # How long a stalled rclone holds its half-written object open. Only has to
@@ -122,8 +117,6 @@ def assert_clean_cancellation(
     r: Results, label: str, status: int, stdout: str, stderr: str
 ) -> None:
     r.check(status == SIGINT_EXIT, f"{label}: exits {SIGINT_EXIT} (got {status})")
-    # §9 freezes the stream and the "git-sfs: " prefix; the wording after it is
-    # free, so the assertion stops there.
     r.check(
         stderr.startswith("git-sfs: ") or "\ngit-sfs: " in stderr,
         f"{label}: reports on stderr with the git-sfs prefix",
@@ -183,36 +176,25 @@ def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
     process = start(
         context, ["pull"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
     )
-    if binary.name == "v1":
-        caught = wait_for(target.exists, SYNC_TIMEOUT)
-    else:
-        caught = wait_for(
-            lambda: bool(list(cache.glob(str(staged_pattern.relative_to(cache))))),
-            SYNC_TIMEOUT,
-        )
+    caught = wait_for(
+        lambda: bool(list(cache.glob(str(staged_pattern.relative_to(cache))))),
+        SYNC_TIMEOUT,
+    )
     r.check(caught, "pull: interrupt landed while the object was half-written")
     status, stdout, stderr = interrupt(process)
 
     assert_clean_cancellation(r, "pull", status, stdout, stderr)
-    if binary.name == "v1":
-        r.observe(
-            "pull: final cache object after interrupted download",
-            "present" if target.exists() else "absent",
-        )
-    else:
-        r.check(
-            not target.exists(),
-            "pull: final cache object is absent after an interrupted staged download",
-        )
+    r.check(
+        not target.exists(),
+        "pull: final cache object is absent after an interrupted staged download",
+    )
     assert_no_trusted_corruption(r, "pull", "after the interrupt", cache)
     observe_residue(r, "pull", cache)
 
     # Recoverability is the point of a clean cancellation: an interrupted pull
     # must leave nothing that stops the next one from finishing the job. The
-    # retry passes --ignore-existing (command.go:272), so it would skip the
-    # half-written file outright were it not for the explicit unlink of partial
-    # objects in pullMissingFiles (pull.go:79-87). That unlink is the mechanism
-    # under test here; without it this assertion fails.
+    # retry passes --ignore-existing, so recovery must ensure partial staged
+    # objects cannot make the next transfer skip needed bytes.
     completed = run_to_completion(context, ["pull"])
     r.check(completed.returncode == 0, "pull: re-running after the interrupt succeeds")
     r.check(
@@ -221,7 +203,7 @@ def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
     )
     r.check(
         target.is_file() and target.stat().st_mode & 0o222 == 0,
-        "pull: the recovered object is read-only (§4.1)",
+        "pull: the recovered object is read-only",
     )
     assert_no_trusted_corruption(r, "pull", "after the recovery", cache)
 
@@ -239,62 +221,40 @@ def test_push_interrupted(binary: Binary, context: dict, r: Results) -> None:
     process = start(
         context, ["push"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
     )
-    if binary.name == "v1":
-        caught = wait_for(landing.exists, SYNC_TIMEOUT)
-    else:
-        caught = wait_for(
-            lambda: bool(list(remote.glob(str(staged_pattern.relative_to(remote))))),
-            SYNC_TIMEOUT,
-        )
+    caught = wait_for(
+        lambda: bool(list(remote.glob(str(staged_pattern.relative_to(remote))))),
+        SYNC_TIMEOUT,
+    )
     r.check(caught, "push: interrupt landed while the object was half-written")
     status, stdout, stderr = interrupt(process)
 
     assert_clean_cancellation(r, "push", status, stdout, stderr)
     assert_no_trusted_corruption(r, "push", "after the interrupt", cache)
     observe_residue(r, "push", cache)
-    if binary.name == "v1":
-        if landing.is_file():
-            r.observe(
-                "push: final remote object after the interrupt",
-                "truncated" if sha256_of(landing) != expected else "complete",
-            )
-        else:
-            r.observe("push: final remote object after the interrupt", "absent")
-    else:
-        r.check(
-            not landing.exists(),
-            "push: final remote object is absent after an interrupted staged upload",
+    r.check(
+        not landing.exists(),
+        "push: final remote object is absent after an interrupted staged upload",
+    )
+    staged = list(remote.glob(str(staged_pattern.relative_to(remote))))
+    if staged:
+        r.observe(
+            "push: staged remote object after the interrupt",
+            "truncated" if sha256_of(staged[0]) != expected else "complete",
         )
-        staged = list(remote.glob(str(staged_pattern.relative_to(remote))))
-        if staged:
-            r.observe(
-                "push: staged remote object after the interrupt",
-                "truncated" if sha256_of(staged[0]) != expected else "complete",
-            )
 
     completed = run_to_completion(context, ["push"])
     r.check(completed.returncode == 0, "push: re-running after the interrupt succeeds")
-    if binary.name == "v1":
-        if landing.is_file():
-            r.observe(
-                "push: remote object after the recovery push",
-                "repaired" if sha256_of(landing) == expected else "STILL TRUNCATED",
-            )
-    else:
-        r.check(
-            landing.is_file() and sha256_of(landing) == expected,
-            "push: recovery publishes a complete final remote object",
-        )
+    r.check(
+        landing.is_file() and sha256_of(landing) == expected,
+        "push: recovery publishes a complete final remote object",
+    )
     assert_no_trusted_corruption(r, "push", "after the recovery", cache)
 
 
 def test_add_interrupted(binary: Binary, context: dict, r: Results) -> None:
     """The user's only copy is in play here, so absence is the failure to hunt.
 
-    add removes the source and then creates the symlink (§13.1), so an interrupt
-    in the wrong place leaves a path with neither. The assertion is written
-    against the spec rather than against v1: the file must be readable
-    afterwards, one way or the other.
+    The file must be readable afterwards, one way or the other.
     """
     print(f"\n[{binary.name}] SIGINT during add, mid-ingest")
     repo, cache = context["repo"], context["cache"]
@@ -303,12 +263,7 @@ def test_add_interrupted(binary: Binary, context: dict, r: Results) -> None:
     expected = sha256_of(source)
 
     process = start(context, ["add", "data"])
-    if binary.name == "v1":
-        # v1 stages inside files/sha256.
-        caught = wait_for(lambda: bool(stray_files(cache)), SYNC_TIMEOUT)
-    else:
-        # v2 stages local writes inside cache tmp/.
-        caught = wait_for(lambda: bool(staged_cache_files(cache)), SYNC_TIMEOUT)
+    caught = wait_for(lambda: bool(staged_cache_files(cache)), SYNC_TIMEOUT)
     status, stdout, stderr = interrupt(process)
     r.observe(
         "add: interrupt landed during the copy pass",

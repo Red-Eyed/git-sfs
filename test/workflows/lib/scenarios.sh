@@ -298,8 +298,8 @@ scenario_filesystem_workflows() {
     "$repo_b" "$shared_cache" "$remote" "$hash_train" "$hash_valid" "$hash_metrics"
 
   # Pull is the only command that cleans stale tmp entries, and it does so
-  # before waiting on pull.lock. The cleanup is selective rather than v1's
-  # blind RemoveAll(tmp/), so live staging from other commands is not targeted.
+  # before waiting on pull.lock. The cleanup is selective so live staging from
+  # other commands is not targeted.
   assert_tmp_cleanup_is_pull_scoped_before_lock "$repo_b" "$shared_cache"
 
   # Default verify is presence-only: if the files still exist in cache and on

@@ -12,6 +12,5 @@ Start here:
 - [Workflows](workflows.md)
 - [Remotes](remotes.md)
 - [Safety](safety.md)
-- [FAQ](FAQ.md) — tricky questions, honest answers
 - [Development](development.md)
 - [Architecture](architecture.md)

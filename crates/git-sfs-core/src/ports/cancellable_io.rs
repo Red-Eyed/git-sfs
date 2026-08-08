@@ -1,11 +1,9 @@
-//! Cancellation for byte-moving loops — rust-rewrite-plan §2.4.
+//! Cancellation for byte-moving loops.
 //!
-//! AGENTS.md requires every byte-moving loop (hash, copy, download) to check
-//! for cancellation each chunk, so Ctrl-C stops work within one chunk rather
-//! than at the end of the operation. v1 hand-writes that check in every such
-//! loop. Here it is written once, as a [`Read`] adapter, so hashing and
-//! copying inherit prompt cancellation from plain [`std::io::copy`] instead of
-//! each call site remembering to poll a flag.
+//! Hashing, copying, and downloading must notice Ctrl-C within one chunk
+//! instead of at the end of the operation. This adapter centralizes that check
+//! so byte-moving code can use ordinary [`std::io::copy`] while still
+//! propagating cancellation promptly.
 
 use std::io::{self, Read};
 

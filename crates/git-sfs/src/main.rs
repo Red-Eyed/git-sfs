@@ -2,7 +2,7 @@
 //!
 //! This crate is the imperative shell. It owns argv, the terminal, signals, and
 //! the exit code; `git-sfs-core` owns everything else and can do none of those
-//! things (rust-rewrite-plan 3).
+//! things.
 
 #![warn(missing_docs)]
 
@@ -42,10 +42,9 @@ fn main() -> ExitCode {
 
 /// The result of the run, with cancellation taking precedence.
 ///
-/// contract-spec 9 requires Ctrl-C to read as canceled rather than as whatever
-/// partial error the aborted operation produced on its way out. Applying that
-/// here means it holds for every command including ones not yet written, rather
-/// than depending on each of them returning the right error while unwinding.
+/// Ctrl-C should read as canceled rather than as whatever partial error the
+/// aborted operation produced on its way out. Applying that here makes the
+/// precedence uniform for every command.
 fn outcome(cli: &Cli, cancel: &Cancel) -> Result<()> {
     let result = run(cli, cancel);
     if cancel.is_canceled() {
@@ -77,8 +76,7 @@ fn watch_for_interrupts(cancel: &Cancel) -> Result<()> {
         .map_err(|err| Error::Unavailable(format!("could not handle interrupts: {err}")))
 }
 
-/// contract-spec 9 freezes the `git-sfs: ` prefix and the stream. The wording
-/// after the prefix is free.
+/// Reports command failures with the stable `git-sfs: ` prefix on stderr.
 fn report(error: &Error) -> ExitCode {
     eprintln!("git-sfs: {error}");
     ExitCode::from(exit::code_for(error))

@@ -26,7 +26,7 @@ Allowed here:
 
 `[settings]` currently supports:
 
-- `algorithm = "sha256"` — only `sha256` is supported in v1
+- `algorithm = "sha256"` — only `sha256` is supported
 - `n_jobs = 0` — worker cap for parallel operations (`add`, `import`, `push`, `pull`, `verify`); `0` means auto
 - `retry_max = 3` — retries per rclone call on transient failures
 - `min_rclone_version = "1.67.0"` — fail fast if the installed rclone is older than this version
@@ -69,7 +69,7 @@ git-sfs setup --cache /mnt/shared/git-sfs-cache
 After `init` or `setup`, normal commands use only the repo-facing
 `.git-sfs/cache` symlink. `--cache` is a binding option for `init`/`setup`, not
 a per-command override; environment variable cache overrides are not part of the
-v2 model.
+configuration model.
 
 Existing repos keep working: if `.git-sfs/cache` already exists, setup preserves
 it; if an old `.git-sfs/.cache` directory exists but the symlink is missing,

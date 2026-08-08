@@ -1,10 +1,5 @@
 //! The cache: content-addressed, write-once, read-only-after-storage.
 //!
-//! contract-spec §4, rust-rewrite-plan §2.2/§2.3. [`Store`] gets a trait
-//! because there are genuinely two implementations — [`FsStore`] (real) and
-//! [`FakeStore`] (in-memory, for higher-layer tests) — which is the bar
-//! rust-rewrite-plan §3.3 sets for introducing one at all.
-//!
 //! **Never stages in the OS-wide temp directory.** Every write goes through
 //! `tempfile::Builder::tempfile_in`, pointed at the cache's own `tmp/`
 //! (`domain::cache_layout::tmp_dir`), never the bare `NamedTempFile::new()`
@@ -32,19 +27,14 @@ use super::hashing;
 /// Proof that a hash's bytes are, at time of construction, verified present in
 /// the cache.
 ///
-/// rust-rewrite-plan §2.2 — "the highest-value" invariant in the correctness
-/// thesis. No public constructor and no public fields: the only way to obtain
-/// one is [`Store::verified`] or [`Store::store`], both of which either
-/// trusted an already-protected (read-only) object or freshly hash-verified
-/// one before returning it. A function that needs trustworthy bytes takes
-/// `&CacheEntry`, never a bare [`Sha256`] — passing an unverified hash where
-/// verified content is required stops compiling instead of relying on a
-/// caller to have checked first.
+/// No public constructor and no public fields: the only way to obtain one is
+/// [`Store::verified`] or [`Store::store`], both of which either trust an
+/// already-protected read-only object or freshly hash-verify one before
+/// returning it. A function that needs trustworthy bytes takes `&CacheEntry`,
+/// never a bare [`Sha256`].
 ///
 /// This proves "verified at construction", not "verified now": another
 /// process can still chmod or truncate the file after this value is created.
-/// contract-spec §4.1 remains mandatory — types shrink the vigilance surface,
-/// they do not eliminate it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacheEntry {
     hash: Sha256,
@@ -56,10 +46,9 @@ pub struct CacheEntry {
 /// Removes stale top-level files from `<cache_root>/tmp`, returning how many
 /// entries were removed.
 ///
-/// This is deliberately selective: `tmp/` is where live writes stage, so v2
-/// must not reproduce v1's blind `RemoveAll(tmp/)` while add/import/push/pull
-/// can run under different locks. Directories are left alone because their
-/// own mtime does not prove every child is stale.
+/// This is deliberately selective: `tmp/` is where live writes stage, and
+/// add/import/push/pull can run under different locks. Directories are left
+/// alone because their own mtime does not prove every child is stale.
 ///
 /// # Errors
 ///
@@ -151,11 +140,9 @@ impl CacheEntry {
 /// Why a [`Store`] operation failed.
 #[derive(Debug, Error)]
 pub enum StoreError {
-    /// An I/O operation failed for a reason other than "the object is
-    /// absent". This is the class v1's `HasValid`/`Protect` collapsed into
-    /// `false`/an ignored error (rust-rewrite-plan §2.5): a permission-denied
-    /// `stat` on a cache object is not the same fact as the object not
-    /// existing, and this variant is what keeps the two from being
+    /// An I/O operation failed for a reason other than "the object is absent".
+    /// A permission-denied `stat` on a cache object is not the same fact as the
+    /// object not existing, and this variant keeps the two from being
     /// conflated at the type level.
     #[error("{path}: {source}")]
     Io {
@@ -166,8 +153,7 @@ pub enum StoreError {
         source: io::Error,
     },
     /// The bytes at `path` do not hash to the name they are stored under.
-    /// Corrupt, not missing — contract-spec §9.1 is explicit that the two
-    /// are different classes.
+    /// Corrupt, not missing.
     #[error("cached object corrupt: {path} does not hash to its own name (want {want}, got {got})")]
     HashMismatch {
         /// The corrupt object's path.
@@ -199,13 +185,11 @@ pub trait Store {
 
     /// Whether `hash` is present and trustworthy.
     ///
-    /// Three outcomes, not two, per rust-rewrite-plan §2.5: `Ok(None)` means
-    /// genuinely absent; `Ok(Some(_))` means present and verified (read-only
-    /// objects are trusted without re-hashing — contract-spec §4.1's
-    /// load-bearing rule — a writable one is hash-verified and protected in
-    /// place); `Err` means the question could not be answered (a permission
-    /// error, a real I/O failure). A caller that cannot reach the cache must
-    /// never be able to mistake that for the cache being empty.
+    /// Three outcomes, not two: `Ok(None)` means genuinely absent;
+    /// `Ok(Some(_))` means present and verified. Read-only objects are trusted
+    /// without re-hashing; writable objects are hash-verified and protected in
+    /// place. `Err` means the question could not be answered. A caller that
+    /// cannot reach the cache must never mistake that for an empty cache.
     ///
     /// # Errors
     ///
@@ -235,7 +219,7 @@ pub trait Store {
     /// `hash`'s local cache size, or `None` if it is absent.
     ///
     /// This is a metadata query for `status`, not an integrity check: it
-    /// deliberately does not hash bytes or repair writable legacy objects.
+    /// deliberately does not hash bytes or repair writable objects.
     /// Commands that need trustworthy bytes use [`Store::verified`] instead.
     ///
     /// # Errors
@@ -284,14 +268,11 @@ pub trait Store {
     ) -> Result<CacheEntry, StoreError>;
 
     /// Moves `source`'s bytes into the store under `hash` — `import --move`'s
-    /// primitive (contract-spec §4.2). `source` is consumed on success: it no
+    /// primitive. `source` is consumed on success: it no
     /// longer exists at its original path.
     ///
-    /// `source` is hash-verified **before** it is touched, not after, unlike
-    /// v1's `Move` (`cache.go:130-177`), which renames or copies first and
-    /// only then hashes the result — so a hash mismatch there has already
-    /// destroyed the caller's only copy. Verifying first means a mismatch
-    /// leaves `source` exactly where the caller left it.
+    /// `source` is hash-verified **before** it is touched. Verifying first
+    /// means a mismatch leaves `source` exactly where the caller left it.
     ///
     /// Prefers a same-filesystem `rename` (cheap, and safe post-verify since
     /// a rename cannot alter content) and falls back to copy-then-remove on
@@ -333,8 +314,7 @@ pub struct FsStore {
 
 impl FsStore {
     /// A store rooted at `root` — the already-resolved cache directory
-    /// (contract-spec §7.2 governs how `root` itself is chosen; that
-    /// resolution happens above this type).
+    /// chosen by local-state resolution above this type.
     #[must_use]
     pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
         Self { root: root.into() }
@@ -361,10 +341,8 @@ impl Store for FsStore {
             return Ok(Some(CacheEntry { hash }));
         }
 
-        // Writable: either a legacy object predating write-protection, or
-        // contract-spec §9.1's declared divergence (v1 would flag this
-        // ErrCorruptCachedFile and exit 3; v2 hash-verifies and repairs in
-        // place instead, and exits 0 where the bytes are actually intact).
+        // Writable objects are not trusted. Verify once, then protect them so
+        // future checks can use the fast read-only path.
         let got = hash_file(&path, cancel)?;
         if got != hash {
             return Err(StoreError::HashMismatch {
@@ -576,8 +554,7 @@ impl Store for FsStore {
             return Ok(entry);
         }
 
-        // Verify *before* touching `source` -- see the trait doc. Unlike
-        // v1's `Move`, a mismatch here leaves `source` untouched.
+        // Verify before touching `source`; a mismatch leaves it untouched.
         let got = hash_file(source, cancel)?;
         if got != hash {
             return Err(StoreError::HashMismatch {
@@ -609,10 +586,9 @@ impl Store for FsStore {
             .permissions()
             .mode();
 
-        // Deterministic name, mirroring v1's `.{hash}.move`: two concurrent
-        // adopts of the same hash are already serialized by the caller's
-        // command lock (contract-spec §8), so collision is not a concern,
-        // and a leftover from a crashed prior run is simply overwritten by
+        // Deterministic name: two concurrent adopts of the same hash are
+        // serialized by the caller's command lock, so collision is not a
+        // concern, and a leftover from a crashed prior run is overwritten by
         // the rename/create below.
         let tmp_path = staging.join(format!(".{}.adopt", hash.to_hex()));
 
@@ -687,10 +663,8 @@ fn prepare_store_temp(
     hash: Sha256,
     cancel: &Cancel,
 ) -> Result<(), StoreError> {
-    // contract-spec §4.2: the final mode is set before publishing. v1 derives
-    // it from the *source* file's mode (write bits stripped, but e.g. an
-    // executable bit survives), not a fixed constant, and that is preserved
-    // here.
+    // The final mode is set before publishing. It comes from the source file's
+    // mode with write bits stripped, so executable bits survive.
     let mut perms = tmp
         .as_file()
         .metadata()
@@ -711,12 +685,8 @@ fn prepare_store_temp(
         source,
     })?;
 
-    // Verified *before* publishing, unlike v1 (contract-spec §4.2: v1
-    // renames first, hash-verifies the published file, then removes it on
-    // mismatch). Checking while the bytes are still hidden in `tmp/` means a
-    // corrupt object is never even briefly visible at its final, trusted path
-    // -- strictly stronger than the invariant v1's sequence protects, not a
-    // divergence from it.
+    // Verify before publishing. While bytes are still hidden in `tmp/`, a
+    // corrupt object is never visible at its final trusted path.
     tmp.as_file_mut()
         .seek(SeekFrom::Start(0))
         .map_err(|source| StoreError::Io {
@@ -746,9 +716,7 @@ fn persist_store_temp(
     })?;
     drop(persisted);
 
-    // contract-spec §13.2: v1 fsyncs the file but never the parent directory,
-    // so the rename can be lost on power loss even though the data was
-    // durable. "Atomic" is not "durable"; this is the fix.
+    // Atomic rename is not durable until the parent directory is synced.
     if let Some(parent) = dst.parent() {
         fsync_parent(parent).map_err(|source| StoreError::Io {
             path: parent.to_owned(),
@@ -869,8 +837,7 @@ fn fsync_dir(path: &Utf8Path) -> io::Result<()> {
 }
 
 /// An in-memory [`Store`], for tests above this layer that need a cache
-/// without a filesystem. Its existence is what justifies `Store` being a
-/// trait at all (rust-rewrite-plan §3.3).
+/// without a filesystem.
 #[derive(Default)]
 pub struct FakeStore {
     objects: std::sync::Mutex<std::collections::HashMap<Sha256, Vec<u8>>>,
@@ -1151,15 +1118,14 @@ mod tests {
     }
 
     #[test]
-    fn a_writable_legacy_object_is_verified_and_repaired_in_place() {
-        // contract-spec §4.1's one-time migration path, and §9.1's declared
-        // divergence: a writable object with intact content is repaired
-        // (chmod'd read-only) rather than treated as corrupt.
+    fn a_writable_object_is_verified_and_repaired_in_place() {
+        // A writable object with intact content is repaired in place by
+        // protecting it read-only.
         let cache = tempfile::tempdir().unwrap();
         let store = FsStore::new(Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap());
         let cancel = Cancel::new();
 
-        let content = b"pre-existing legacy object";
+        let content = b"pre-existing writable object";
         let hash = hash_of(content);
         let path = store.object_path(hash);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1178,7 +1144,7 @@ mod tests {
         assert_eq!(
             mode & 0o222,
             0,
-            "verifying a legacy object must protect it in place"
+            "verifying a writable object must protect it in place"
         );
     }
 
@@ -1197,10 +1163,8 @@ mod tests {
         assert!(matches!(err, StoreError::HashMismatch { .. }));
     }
 
-    /// rust-rewrite-plan §2.5's fix, made concrete: a `stat` failure that is
-    /// *not* "not found" must never collapse to the same `Ok(None)` an
-    /// actually-absent object produces. This is the exact defect class v1's
-    /// `HasValid` had (`os.Stat` erroring for *any* reason returned `false`).
+    /// A `stat` failure that is *not* "not found" must never collapse to the
+    /// same `Ok(None)` an actually-absent object produces.
     #[test]
     fn a_stat_failure_that_is_not_absence_is_an_error_not_none() {
         let cache = tempfile::tempdir().unwrap();
@@ -1326,7 +1290,7 @@ mod tests {
 
         let err = store.adopt(&source, wrong_hash, &cancel).unwrap_err();
         assert!(matches!(err, StoreError::HashMismatch { .. }));
-        // Unlike v1, a mismatch must never have consumed the source.
+        // A mismatch must never have consumed the source.
         assert!(source.exists());
         assert_eq!(std::fs::read(&source).unwrap(), b"actual content");
         assert!(store.verified(wrong_hash, &cancel).unwrap().is_none());

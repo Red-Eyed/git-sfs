@@ -1,4 +1,3 @@
-//! Reading already-existing local, per-machine state — contract-spec §7.
 //! Repository discovery and machine-local state.
 //!
 //! Normal commands intentionally resolve one cache source: the repo-facing
@@ -15,15 +14,13 @@ use crate::error::Error;
 /// Why local-state resolution failed.
 #[derive(Debug, Error)]
 pub enum LocalStateError {
-    /// No `.git` entry was found in `start` or any ancestor directory
-    /// (contract-spec §7.1).
+    /// No `.git` entry was found in `start` or any ancestor directory.
     #[error("not a git repository: no .git found in {start} or any parent directory")]
     NoRepository {
         /// Where the upward search started.
         start: Utf8PathBuf,
     },
-    /// None of the three precedence sources resolved a cache
-    /// (contract-spec §7.2).
+    /// None of the cache precedence sources resolved a cache.
     #[error("no cache configured: run git-sfs setup")]
     MissingCacheConfig,
     /// The `.git-sfs/cache` symlink exists but its target is not valid
@@ -80,8 +77,7 @@ impl From<LocalStateError> for Error {
 /// directory as the repository root.
 ///
 /// `.git` may be a directory (a normal repository) or a file (a submodule or
-/// worktree pointer) — both are accepted, matching v1's `os.Stat` rather
-/// than a directory-only check (contract-spec §7.1).
+/// worktree pointer) — both are accepted.
 ///
 /// # Errors
 ///
@@ -170,8 +166,8 @@ pub fn init_cache_dirs(cache_root: &Utf8Path) -> Result<(), LocalStateError> {
 /// Chooses the cache root `init`/`setup` should bind.
 ///
 /// Explicit `--cache` wins. Without it, existing repos stay where they are:
-/// an existing `.git-sfs/cache` binding is preserved, then the old v1 default
-/// `.git-sfs/.cache` is recognized, and only then does v2 choose its new
+/// an existing `.git-sfs/cache` binding is preserved, then the old default
+/// `.git-sfs/.cache` is recognized, and only then does git-sfs choose its
 /// private-Git-dir default.
 ///
 /// # Errors
@@ -281,10 +277,8 @@ fn canonical_path(path: &Utf8Path) -> Utf8PathBuf {
         .unwrap_or_else(|| clean_utf8(path))
 }
 
-/// `filepath.Abs`-equivalent: joins a relative path against the current
-/// directory, without resolving symlinks. Falls back to the original path
-/// unchanged if the current directory cannot be determined, matching v1's
-/// `abs()` (`localstate.go:89-95`).
+/// Makes a path absolute without resolving symlinks. Falls back to the
+/// original path unchanged if the current directory cannot be determined.
 fn absolute(path: &Utf8Path) -> Utf8PathBuf {
     match std::path::absolute(path.as_std_path()) {
         Ok(abs) => Utf8PathBuf::from_path_buf(abs).unwrap_or_else(|_| path.to_owned()),
@@ -319,9 +313,8 @@ mod tests {
 
     #[test]
     fn discover_repo_accepts_a_git_file_not_just_a_directory() {
-        // Submodules and worktrees have a `.git` *file* containing a
-        // `gitdir:` pointer, not a directory -- contract-spec §7.1 requires
-        // both to be accepted.
+        // Submodules and worktrees have a `.git` file containing a `gitdir:`
+        // pointer, not a directory.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(".git"), "gitdir: /elsewhere\n").unwrap();
         let start = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
@@ -435,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn choose_cache_root_recognizes_the_old_v1_default_when_no_link_exists() {
+    fn choose_cache_root_recognizes_the_old_default_when_no_link_exists() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
         std::fs::create_dir_all(repo.join(".git-sfs/.cache")).unwrap();

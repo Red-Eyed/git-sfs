@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Creates a GitHub release with changelog notes and an install header."""
+
 import argparse
 import subprocess
 import sys
@@ -39,7 +40,7 @@ def build_notes(version: str, repository: str, changelog_section: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("version")     # e.g. v1.20.0
+    parser.add_argument("version")  # e.g. vX.Y.Z
     parser.add_argument("repository")  # e.g. owner/repo
     args = parser.parse_args()
 
@@ -47,7 +48,9 @@ def main() -> None:
     section = extract_changelog_section(changelog, args.version)
 
     if not section:
-        print(f"error: no CHANGELOG.md section found for {args.version}", file=sys.stderr)
+        print(
+            f"error: no CHANGELOG.md section found for {args.version}", file=sys.stderr
+        )
         sys.exit(1)
 
     notes = build_notes(args.version, args.repository, section)
@@ -61,12 +64,17 @@ def main() -> None:
     try:
         subprocess.run(
             [
-                "gh", "release", "create", args.version,
+                "gh",
+                "release",
+                "create",
+                args.version,
                 *[str(p) for p in archives],
                 "dist/SHA256SUMS",
                 "scripts/install.sh",
-                "--title", args.version,
-                "--notes-file", notes_file,
+                "--title",
+                args.version,
+                "--notes-file",
+                notes_file,
             ],
             check=True,
         )

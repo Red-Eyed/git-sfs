@@ -1,12 +1,9 @@
 //! Pure domain values: illegal states unrepresentable, zero I/O.
 //!
-//! rust-rewrite-plan §3.1. Every type and function here is a value or a
-//! deterministic transform over values already in hand — no filesystem, no
-//! network, no clock. Where the real thing (a symlink, a config file) lives on
-//! disk, the pattern is the same throughout: whoever reads it does the I/O
-//! (a Phase 3 port), and hands the resulting bytes/text to a function here to
-//! interpret. That split is what makes this module testable with zero
-//! filesystem and is why every test in it runs in milliseconds.
+//! Every type and function here is a value or a deterministic transform over
+//! values already in hand: no filesystem, no network, no clock. Where the real
+//! thing lives on disk, a port reads the bytes or text and passes them here for
+//! interpretation.
 
 pub mod cache_layout;
 pub mod config;
