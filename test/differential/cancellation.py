@@ -28,7 +28,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from cache_state import (
@@ -47,6 +46,7 @@ from harness import (
     parse_binary,
     prepare_workspace,
     wait_for,
+    workspace_root,
 )
 
 HARNESS_DIR = Path(__file__).parent
@@ -151,19 +151,24 @@ def assert_no_trusted_corruption(
 
 def observe_residue(r: Results, label: str, cache: Path) -> None:
     strays = stray_files(cache)
-    r.observe(f"{label}: temp files left inside files/sha256", str(len(strays)))
+    r.check(
+        not strays,
+        f"{label}: no temp files are left inside files/sha256 ({len(strays)})",
+    )
     staged = list((cache / "tmp").glob("*")) if (cache / "tmp").is_dir() else []
     r.observe(f"{label}: files left in cache tmp/", str(len(staged)))
     r.observe(f"{label}: locks still held", str(held_locks(cache) or "none"))
 
 
-def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
-    """The dangerous direction: pull writes straight into the object store.
+def staged_cache_files(cache: Path) -> list[Path]:
+    tmp = cache / "tmp"
+    if not tmp.is_dir():
+        return []
+    return [path for path in tmp.rglob("*") if path.is_file()]
 
-    rclone is handed <cache>/files as its destination root, so a half-finished
-    download is a half-finished file *at a content-addressed path* -- not in a
-    staging area. Whether that file is left trusted is the whole question.
-    """
+
+def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
+    """The dangerous direction: pull must never stream into the final cache path."""
     print(f"\n[{binary.name}] SIGINT during pull, mid-download")
     cache = context["cache"]
     chmod_writable(cache)
@@ -171,15 +176,34 @@ def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
 
     expected = tracked_object(context["repo"], "data/blob.bin")
     target = object_path(cache, expected)
+    staged_pattern = (
+        cache / "tmp" / "git-sfs-pull-*" / "files" / "sha256" / expected[:2] / expected
+    )
 
     process = start(
         context, ["pull"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
     )
-    caught = wait_for(target.exists, SYNC_TIMEOUT)
+    if binary.name == "v1":
+        caught = wait_for(target.exists, SYNC_TIMEOUT)
+    else:
+        caught = wait_for(
+            lambda: bool(list(cache.glob(str(staged_pattern.relative_to(cache))))),
+            SYNC_TIMEOUT,
+        )
     r.check(caught, "pull: interrupt landed while the object was half-written")
     status, stdout, stderr = interrupt(process)
 
     assert_clean_cancellation(r, "pull", status, stdout, stderr)
+    if binary.name == "v1":
+        r.observe(
+            "pull: final cache object after interrupted download",
+            "present" if target.exists() else "absent",
+        )
+    else:
+        r.check(
+            not target.exists(),
+            "pull: final cache object is absent after an interrupted staged download",
+        )
     assert_no_trusted_corruption(r, "pull", "after the interrupt", cache)
     observe_residue(r, "pull", cache)
 
@@ -203,47 +227,63 @@ def test_pull_interrupted(binary: Binary, context: dict, r: Results) -> None:
 
 
 def test_push_interrupted(binary: Binary, context: dict, r: Results) -> None:
-    """A partial object on the remote is the copy that exists so the cache is not alone."""
+    """A partial upload must live in remote tmp, never at the final object path."""
     print(f"\n[{binary.name}] SIGINT during push, mid-upload")
     cache, remote = context["cache"], context["remote"]
     shutil.rmtree(object_dir(remote), ignore_errors=True)
 
     expected = tracked_object(context["repo"], "data/blob.bin")
     landing = object_path(remote, expected)
+    staged_pattern = remote / "tmp" / "*" / "files" / "sha256" / expected[:2] / expected
 
     process = start(
         context, ["push"], f'{{"subcommand": "copy", "stall": {STALL_SECONDS}}}'
     )
-    caught = wait_for(landing.exists, SYNC_TIMEOUT)
+    if binary.name == "v1":
+        caught = wait_for(landing.exists, SYNC_TIMEOUT)
+    else:
+        caught = wait_for(
+            lambda: bool(list(remote.glob(str(staged_pattern.relative_to(remote))))),
+            SYNC_TIMEOUT,
+        )
     r.check(caught, "push: interrupt landed while the object was half-written")
     status, stdout, stderr = interrupt(process)
 
     assert_clean_cancellation(r, "push", status, stdout, stderr)
     assert_no_trusted_corruption(r, "push", "after the interrupt", cache)
     observe_residue(r, "push", cache)
-    # v1 verifies nothing after upload (§13.4), so whether a truncated object is
-    # left behind is recorded rather than asserted -- v2 is required to diverge.
-    if landing.is_file():
-        r.observe(
-            "push: object left on the remote after the interrupt",
-            "truncated" if sha256_of(landing) != expected else "complete",
-        )
+    if binary.name == "v1":
+        if landing.is_file():
+            r.observe(
+                "push: final remote object after the interrupt",
+                "truncated" if sha256_of(landing) != expected else "complete",
+            )
+        else:
+            r.observe("push: final remote object after the interrupt", "absent")
     else:
-        r.observe("push: object left on the remote after the interrupt", "absent")
+        r.check(
+            not landing.exists(),
+            "push: final remote object is absent after an interrupted staged upload",
+        )
+        staged = list(remote.glob(str(staged_pattern.relative_to(remote))))
+        if staged:
+            r.observe(
+                "push: staged remote object after the interrupt",
+                "truncated" if sha256_of(staged[0]) != expected else "complete",
+            )
 
     completed = run_to_completion(context, ["push"])
     r.check(completed.returncode == 0, "push: re-running after the interrupt succeeds")
-    # Whether the retry repairs the remote is the question that matters. It does
-    # -- CopyToRemote omits --ignore-existing (command.go:272 uses it only on the
-    # pull direction), so a re-push overwrites. Recorded rather than asserted
-    # because the repair is incidental: push verifies nothing after upload
-    # (§13.4) and verify --check-remote accepts a truncated object (§9.2), so
-    # nothing ever tells the user the replica is bad. It is fixed only if they
-    # happen to push again.
-    if landing.is_file():
-        r.observe(
-            "push: remote object after the recovery push",
-            "repaired" if sha256_of(landing) == expected else "STILL TRUNCATED",
+    if binary.name == "v1":
+        if landing.is_file():
+            r.observe(
+                "push: remote object after the recovery push",
+                "repaired" if sha256_of(landing) == expected else "STILL TRUNCATED",
+            )
+    else:
+        r.check(
+            landing.is_file() and sha256_of(landing) == expected,
+            "push: recovery publishes a complete final remote object",
         )
     assert_no_trusted_corruption(r, "push", "after the recovery", cache)
 
@@ -263,9 +303,12 @@ def test_add_interrupted(binary: Binary, context: dict, r: Results) -> None:
     expected = sha256_of(source)
 
     process = start(context, ["add", "data"])
-    # The temp file AtomicCopy stages inside the object store is the only
-    # externally visible marker that ingest reached the copy pass.
-    caught = wait_for(lambda: bool(stray_files(cache)), SYNC_TIMEOUT)
+    if binary.name == "v1":
+        # v1 stages inside files/sha256.
+        caught = wait_for(lambda: bool(stray_files(cache)), SYNC_TIMEOUT)
+    else:
+        # v2 stages local writes inside cache tmp/.
+        caught = wait_for(lambda: bool(staged_cache_files(cache)), SYNC_TIMEOUT)
     status, stdout, stderr = interrupt(process)
     r.observe(
         "add: interrupt landed during the copy pass",
@@ -313,7 +356,7 @@ def main() -> None:
     args = parser.parse_args()
 
     results = Results()
-    root = Path(tempfile.mkdtemp(prefix="git-sfs-cancel-"))
+    root = workspace_root("git-sfs-cancel-")
     try:
         for binary in args.binary:
             context = prepare_workspace(binary, root, SETUP)

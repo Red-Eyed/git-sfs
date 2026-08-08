@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORK="${TMPDIR:-/tmp}/git-sfs-workflows-$$"
+WORK="$ROOT/.cache/workflows-$$"
 HOST_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 HOST_ARCH="$(uname -m)"
 BUILD_VERSION="v0.0.0-workflows"

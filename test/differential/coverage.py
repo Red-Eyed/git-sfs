@@ -643,16 +643,16 @@ CLAUSES = [
     Clause(
         "13.2",
         "temp files must not accumulate inside the object store",
-        OBSERVED,
+        ASSERTED,
         "cancellation.py",
-        "temp files left inside files/sha256",
+        "no temp files are left inside files/sha256",
     ),
     Clause(
         "13.3",
         "a denied remote must not be reported as an empty one",
-        OBSERVED,
-        "scenarios/05-remote-fault.sh",
-        "status_object_denied",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/status.rs",
+        "remote_lookup_failure_is_reported_as_unknown_not_absent",
     ),
     Clause(
         "13.3",
@@ -678,16 +678,16 @@ CLAUSES = [
     Clause(
         "13.4",
         "push must not overwrite a good replica with rotted bytes",
-        OBSERVED,
+        ASSERTED,
         "mode_preservation.py",
-        "push with a protected rotted object",
+        "must not overwrite a good remote copy",
     ),
     Clause(
         "13.4",
         "push must verify what landed",
-        OBSERVED,
+        ASSERTED,
         "cancellation.py",
-        "object left on the remote after the interrupt",
+        "recovery publishes a complete final remote object",
     ),
     Clause(
         "13.4",

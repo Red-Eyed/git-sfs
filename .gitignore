@@ -3,4 +3,6 @@ coverage.out
 /git-sfs
 ROADMAP.md
 /target
+/dist
+/.cache
 *.pyc

@@ -22,13 +22,12 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 import divergences
 import snapshot
-from harness import Binary, parse_binary
+from harness import Binary, parse_binary, workspace_root
 
 HARNESS_DIR = Path(__file__).parent
 SCENARIO_DIR = HARNESS_DIR / "scenarios"
@@ -229,7 +228,7 @@ def main() -> None:
     if problems:
         sys.exit("run: bad divergence declaration:\n  " + "\n  ".join(problems))
 
-    root = Path(tempfile.mkdtemp(prefix="git-sfs-differential-"))
+    root = workspace_root("git-sfs-differential-")
     failures = 0
     try:
         for scenario in scenarios:

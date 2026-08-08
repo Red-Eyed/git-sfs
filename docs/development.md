@@ -50,14 +50,14 @@ GO=/path/to/go just check
 It also defaults to writable caches:
 
 ```text
-/private/tmp/git-sfs-go-cache
-/private/tmp/git-sfs-go-modcache
+<repo>/.cache/go-build
+<repo>/.cache/go-mod
 ```
 
 Override when needed:
 
 ```sh
-GO=go GOCACHE=/tmp/go-cache GOMODCACHE=/tmp/go-modcache just check
+GO=go GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" just check
 ```
 
 ## Tests

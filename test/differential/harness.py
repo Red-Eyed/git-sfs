@@ -14,11 +14,13 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 HARNESS_DIR = Path(__file__).parent
+REPO_ROOT = HARNESS_DIR.parent.parent
 
 POLL_SECONDS = 0.05
 
@@ -37,6 +39,13 @@ def parse_binary(spec: str) -> Binary:
     if not os.access(resolved, os.X_OK):
         raise argparse.ArgumentTypeError(f"not executable: {path}")
     return Binary(name, resolved)
+
+
+def workspace_root(prefix: str) -> Path:
+    """Create a repo-local scratch root instead of relying on system temp."""
+    scratch_parent = REPO_ROOT / ".cache" / "differential"
+    scratch_parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=scratch_parent))
 
 
 @dataclass

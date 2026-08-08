@@ -111,7 +111,8 @@ fi
 
 asset="git-sfs-$version-$os-$arch.tar.gz"
 url="$release_base_url/$version/$asset"
-tmp="${TMPDIR:-/tmp}/git-sfs-install-$$"
+tmp_parent="$install_dir/.git-sfs-install-tmp"
+tmp="$tmp_parent/git-sfs-install-$$"
 rclone_os="$os"
 
 if [ "$rclone_os" = "darwin" ]; then
@@ -119,8 +120,8 @@ if [ "$rclone_os" = "darwin" ]; then
 fi
 
 rm -rf "$tmp"
-mkdir -p "$tmp" "$install_dir"
-trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$install_dir" "$tmp"
+trap 'rm -rf "$tmp"; rmdir "$tmp_parent" 2>/dev/null || true' EXIT
 
 download "$release_base_url/$version/SHA256SUMS" -o "$tmp/SHA256SUMS"
 download "$url" -o "$tmp/$asset"
@@ -135,7 +136,8 @@ if [ "$expected" != "$actual" ]; then
   exit 1
 fi
 tar -xzf "$tmp/$asset" -C "$tmp"
-install "$tmp/git-sfs" "$install_dir/git-sfs"
+install "$tmp/git-sfs" "$tmp/git-sfs.install"
+mv -f "$tmp/git-sfs.install" "$install_dir/git-sfs"
 
 git_sfs_version="$("$install_dir/git-sfs" --version)"
 echo "git-sfs $git_sfs_version installed to $install_dir/git-sfs"
@@ -162,7 +164,8 @@ if [ "$install_rclone" != "0" ]; then
     exit 1
   fi
   unzip -q "$tmp/$rclone_zip" -d "$tmp"
-  install "$tmp"/rclone-*-*/rclone "$install_dir/rclone"
+  install "$tmp"/rclone-*-*/rclone "$tmp/rclone.install"
+  mv -f "$tmp/rclone.install" "$install_dir/rclone"
   rclone_installed_version="$("$install_dir/rclone" --version | awk 'NR==1 {print $2; exit}')"
   echo "rclone $rclone_installed_version installed to $install_dir/rclone"
 fi

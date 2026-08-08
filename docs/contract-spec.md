@@ -273,6 +273,7 @@ acceptable price for it.
 
 ```
 <remote_url>/files/sha256/<prefix>/<hash>
+<remote_url>/tmp/<user>/files/sha256/<prefix>/<hash>   v2 staging for push
 ```
 
 (`command.go:67-70`, `command.go:207-209`)
@@ -281,6 +282,16 @@ Mirrors the local cache layout. This is frozen **across users**, not merely
 across versions: several people and several git-sfs versions push into the same
 bucket concurrently. A layout change silently partitions a shared remote into
 two disjoint stores, and the symptom is "my colleague's push didn't arrive."
+
+Remote staging is per user, not process-specific, so a failed push can resume
+its already-uploaded staged objects on the next run while different users do not
+write into one shared temp namespace. The final remote object path is never an
+in-flight upload target: `push` batches the full object set with rclone
+`copy --files-from` into `<remote_url>/tmp/<user>/files/...`, verifies staged
+sizes, then publishes with a batched move into `<remote_url>/files/...`. This is
+a deliberate tradeoff: a failed copy leaves resumable temp objects; a failed
+publish may leave a prefix of complete final objects, but not a truncated final
+object.
 
 `rclone` is the only supported mover. `<remote_url>` is composed from the
 remote's `backend` and `path` config fields.

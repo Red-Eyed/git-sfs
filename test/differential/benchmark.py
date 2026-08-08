@@ -38,12 +38,17 @@ import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 from cache_state import object_dir
-from harness import Binary, chmod_writable, parse_binary, prepare_workspace
+from harness import (
+    Binary,
+    chmod_writable,
+    parse_binary,
+    prepare_workspace,
+    workspace_root,
+)
 
 HARNESS_DIR = Path(__file__).parent
 SETUP = HARNESS_DIR / "bench-setup.sh"
@@ -251,7 +256,7 @@ def main() -> None:
         f"one {args.large_bytes // (1024 * 1024)} MiB file, "
         f"best of {args.repetitions}"
     )
-    root = Path(tempfile.mkdtemp(prefix="git-sfs-bench-"))
+    root = workspace_root("git-sfs-bench-")
     results: dict[str, dict[str, float]] = {}
     try:
         for binary in args.binary:

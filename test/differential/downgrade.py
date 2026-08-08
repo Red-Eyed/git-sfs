@@ -30,11 +30,17 @@ import argparse
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from cache_state import object_dir, object_path, sha256_of, tracked_object
-from harness import Binary, Results, chmod_writable, parse_binary, prepare_workspace
+from harness import (
+    Binary,
+    Results,
+    chmod_writable,
+    parse_binary,
+    prepare_workspace,
+    workspace_root,
+)
 
 HARNESS_DIR = Path(__file__).parent
 SETUP = HARNESS_DIR / "replicated-setup.sh"
@@ -252,7 +258,7 @@ def main() -> None:
     args = parser.parse_args()
 
     results = Results()
-    root = Path(tempfile.mkdtemp(prefix="git-sfs-downgrade-"))
+    root = workspace_root("git-sfs-downgrade-")
     try:
         # Both directions when two binaries are given: downgrade is the one that
         # matters, but an upgrade that cannot read old state is equally fatal.

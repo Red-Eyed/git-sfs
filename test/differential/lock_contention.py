@@ -29,7 +29,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -40,6 +39,7 @@ from harness import (
     parse_binary,
     prepare_workspace,
     wait_for,
+    workspace_root,
 )
 
 HARNESS_DIR = Path(__file__).parent
@@ -307,7 +307,7 @@ def main() -> None:
 
     print(f"lock names in this build: {', '.join(LOCK_NAMES)}")
     results = Results()
-    root = Path(tempfile.mkdtemp(prefix="git-sfs-lock-"))
+    root = workspace_root("git-sfs-lock-")
     try:
         contexts = {b.name: prepare_workspace(b, root, SETUP) for b in args.binary}
         for binary in args.binary:

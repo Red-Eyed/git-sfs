@@ -687,7 +687,7 @@ fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
         remote.as_ref().map(|remote| remote as &dyn Remote),
         &tmp_dir(&cache_root),
         &args.path,
-        args.with_integrity,
+        args.with_integrity || args.rehash || args.rehash_sample > 0,
         cancel,
     ) {
         Ok(report) => {

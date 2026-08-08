@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -35,6 +36,7 @@ FAKE_VERSION = "v1.99.0-fake"
 # which hashes move is the payload, the temp path is noise.
 TMPFILE_PLACEHOLDER = "{TMPFILE}"
 FILELIST_PLACEHOLDER = "{FILELIST}"
+REMOTE_TMP_PLACEHOLDER = "{REMOTE_TMP}"
 
 FLAGS_WITH_VALUE = {"--config", "--temp-dir", "--files-from"}
 
@@ -81,6 +83,16 @@ def canonicalize(argv: list[str]) -> list[str]:
             continue
         if "git-sfs-rclone-check-" in arg:
             result.append(TMPFILE_PLACEHOLDER)
+            index += 1
+            continue
+        if "/tmp/" in arg:
+            result.append(
+                re.sub(
+                    r"/tmp/[^/]+/files",
+                    f"/tmp/{REMOTE_TMP_PLACEHOLDER}/files",
+                    arg,
+                )
+            )
             index += 1
             continue
         result.append(arg)
@@ -205,7 +217,7 @@ def do_lsjson(operands: list[str]) -> int:
     target = map_path(targets[0])
 
     if not target.exists():
-        return fail(f"directory not found: {target}")
+        return not_found(f"directory not found: {target}")
     if target.is_file():
         print(json.dumps([describe(target, target.name)]))
         return 0
@@ -226,7 +238,7 @@ def do_lsd(operands: list[str]) -> int:
         return fail("lsd: no target")
     target = map_path(operands[0])
     if not target.is_dir():
-        return fail(f"directory not found: {target}")
+        return not_found(f"directory not found: {target}")
     return 0
 
 
@@ -265,7 +277,9 @@ def do_copyto(operands: list[str], stall: float) -> int:
     return 0
 
 
-def do_copy(operands: list[str], argv: list[str], stall: float) -> int:
+def do_copy(
+    operands: list[str], argv: list[str], stall: float, remove_source: bool
+) -> int:
     ignore_existing = "--ignore-existing" in operands
     roots = positional(operands)
     if len(roots) < 2:
@@ -285,12 +299,19 @@ def do_copy(operands: list[str], argv: list[str], stall: float) -> int:
         # Real rclone writes destination objects with default permissions
         # rather than mirroring the source's read-only cache bits.
         destination.chmod(0o644)
+        if remove_source:
+            source.unlink()
     return 0
 
 
 def fail(message: str) -> int:
     print(message, file=sys.stderr)
     return 1
+
+
+def not_found(message: str) -> int:
+    print(message, file=sys.stderr)
+    return 3
 
 
 def main() -> int:
@@ -326,7 +347,9 @@ def main() -> int:
     if subcommand == "copyto":
         return do_copyto(operands, stall)
     if subcommand == "copy":
-        return do_copy(operands, argv, stall)
+        return do_copy(operands, argv, stall, remove_source=False)
+    if subcommand == "move":
+        return do_copy(operands, argv, stall, remove_source=True)
 
     print(f"fake-rclone: unsupported subcommand: {subcommand!r}", file=sys.stderr)
     return 2

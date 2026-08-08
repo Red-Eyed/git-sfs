@@ -9,9 +9,10 @@ import 'just/go.just'
 import 'just/rust.just'
 import 'just/conformance.just'
 
+repo := justfile_directory()
 go := env_var_or_default("GO", "go")
-gocache := env_var_or_default("GOCACHE", "/private/tmp/git-sfs-go-cache")
-gomodcache := env_var_or_default("GOMODCACHE", "/private/tmp/git-sfs-go-modcache")
+gocache := env_var_or_default("GOCACHE", repo / ".cache/go-build")
+gomodcache := env_var_or_default("GOMODCACHE", repo / ".cache/go-mod")
 
 [doc('list recipes')]
 default:

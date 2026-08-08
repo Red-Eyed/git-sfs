@@ -31,7 +31,6 @@ import argparse
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from cache_state import (
@@ -43,7 +42,14 @@ from cache_state import (
     tracked_object,
     trusted_but_wrong,
 )
-from harness import Binary, Results, chmod_writable, parse_binary, prepare_workspace
+from harness import (
+    Binary,
+    Results,
+    chmod_writable,
+    parse_binary,
+    prepare_workspace,
+    workspace_root,
+)
 
 HARNESS_DIR = Path(__file__).parent
 SETUP = HARNESS_DIR / "replicated-setup.sh"
@@ -195,10 +201,16 @@ def test_push_replicates_rot(binary: Binary, root: Path, r: Results):
 
     push = run(context, ["push"])
     survived = remote_obj.is_file() and sha256_of(remote_obj) == digest
-    r.observe(
-        "push with a protected rotted object",
-        f"exit={push.returncode} good remote copy survived={survived}",
-    )
+    if binary.name == "v1":
+        r.observe(
+            "push with a protected rotted object",
+            f"exit={push.returncode} good remote copy survived={survived}",
+        )
+    else:
+        r.check(
+            push.returncode == 0 and survived,
+            "push: a protected rotted local object must not overwrite a good remote copy",
+        )
 
 
 def main() -> None:
@@ -213,7 +225,7 @@ def main() -> None:
     args = parser.parse_args()
 
     results = Results()
-    root = Path(tempfile.mkdtemp(prefix="git-sfs-modes-"))
+    root = workspace_root("git-sfs-modes-")
     try:
         for binary in args.binary:
             test_writable_but_intact_is_migrated(binary, root, results)

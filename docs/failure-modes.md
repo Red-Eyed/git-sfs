@@ -352,6 +352,14 @@ Every temp file this tool creates — its own, and every one it asks rclone to c
 live under the cache's own `tmp/`, never system `/tmp`, and an unconfigured temp location
 should be a hard error, not a warning a script can miss in a scrollback.
 
+For remote writes, the same rule applies one layer out: the final
+`files/sha256/<prefix>/<hash>` path must never be the upload stream target. A
+push may batch the full upload list through rclone, but the batch lands under a
+per-user remote `tmp/<user>/files/...` namespace first; only a completed,
+size-checked staged object is published into the final object store. A failed
+run may leave resumable temp objects, but it must not leave a truncated final
+object that the next run mistakes for "already pushed."
+
 **Never go there:** don't let the redundant copy be the unverified one. Push should
 confirm what landed, at least by size, and `verify --check-remote` should compare it (§4).
 

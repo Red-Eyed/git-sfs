@@ -5,6 +5,7 @@
 //! planning and one `copy_from_remote` transfer for the object list.
 
 use std::collections::BTreeSet;
+use std::io;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use thiserror::Error;
@@ -52,6 +53,15 @@ pub enum PullError {
         /// Hash that should have arrived.
         hash: Sha256,
     },
+    /// Scratch-space setup for staged downloads failed.
+    #[error("{path}: {source}")]
+    Scratch {
+        /// The path being prepared.
+        path: Utf8PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: io::Error,
+    },
 }
 
 impl From<PullError> for Error {
@@ -67,6 +77,7 @@ impl From<PullError> for Error {
                 Error::Missing(err.to_string())
             }
             PullError::DiskSpace(err) => Error::Unavailable(err.to_string()),
+            PullError::Scratch { .. } => Error::Unavailable(err.to_string()),
         }
     }
 }
@@ -121,9 +132,15 @@ pub fn pull(
         .iter()
         .map(|hash| remote_rel_path(*hash))
         .collect::<Vec<_>>();
-    remote.copy_from_remote(cache_files_dir, &rel_paths, cancel)?;
+    let staged = staged_download(cache_files_dir)?;
+    remote.copy_from_remote(&staged.files_dir, &rel_paths, cancel)?;
 
     for &hash in &plan.download {
+        let staged_path = staged.files_dir.join(remote_rel_path(hash));
+        if !staged_path.is_file() {
+            return Err(PullError::DownloadedObjectMissing { hash });
+        }
+        store.adopt(&staged_path, hash, cancel)?;
         if store.verified(hash, cancel)?.is_none() {
             return Err(PullError::DownloadedObjectMissing { hash });
         }
@@ -176,6 +193,46 @@ fn inspect_cache(
 
 fn remote_rel_path(hash: Sha256) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{ALGORITHM}/{}/{}", hash.prefix(), hash.to_hex()))
+}
+
+struct StagedDownload {
+    _scratch: tempfile::TempDir,
+    files_dir: Utf8PathBuf,
+}
+
+fn staged_download(cache_files_dir: &Utf8Path) -> Result<StagedDownload, PullError> {
+    let scratch_root = cache_files_dir
+        .parent()
+        .map(|cache_root| cache_root.join("tmp"))
+        .unwrap_or_else(|| Utf8PathBuf::from("tmp"));
+    std::fs::create_dir_all(&scratch_root).map_err(|source| PullError::Scratch {
+        path: scratch_root.clone(),
+        source,
+    })?;
+    let scratch = tempfile::Builder::new()
+        .prefix("git-sfs-pull-")
+        .tempdir_in(&scratch_root)
+        .map_err(|source| PullError::Scratch {
+            path: scratch_root,
+            source,
+        })?;
+    let files_dir = Utf8PathBuf::from_path_buf(scratch.path().join("files")).map_err(|path| {
+        PullError::Scratch {
+            path: Utf8PathBuf::from(path.to_string_lossy().into_owned()),
+            source: io::Error::new(
+                io::ErrorKind::InvalidData,
+                "staged pull path is not valid UTF-8",
+            ),
+        }
+    })?;
+    std::fs::create_dir_all(&files_dir).map_err(|source| PullError::Scratch {
+        path: files_dir.clone(),
+        source,
+    })?;
+    Ok(StagedDownload {
+        _scratch: scratch,
+        files_dir,
+    })
 }
 
 #[cfg(test)]
