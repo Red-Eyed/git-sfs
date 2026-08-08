@@ -744,7 +744,8 @@ fn build_progress_remote(
     config_dir: Option<&camino::Utf8Path>,
     cache_root: &camino::Utf8Path,
 ) -> Result<ProgressRemote<RcloneRemote>> {
-    let remote = build_rclone_remote(config, name, config_dir, cache_root)?;
+    let remote = build_rclone_remote(config, name, config_dir, cache_root)?
+        .with_transfer_progress(!cli.global.quiet);
     Ok(ProgressRemote::new(remote, !cli.global.quiet))
 }
 

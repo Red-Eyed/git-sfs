@@ -81,10 +81,8 @@ impl<R: Remote> Remote for ProgressRemote<R> {
         rel_paths: &[Utf8PathBuf],
         cancel: &Cancel,
     ) -> RemoteResult<()> {
-        self.step(
-            format!("uploading {} object(s)", rel_paths.len()),
-            |inner| inner.copy_to_remote(cache_files_dir, rel_paths, cancel),
-        )
+        self.inner
+            .copy_to_remote(cache_files_dir, rel_paths, cancel)
     }
 
     fn copy_from_remote(
@@ -93,10 +91,8 @@ impl<R: Remote> Remote for ProgressRemote<R> {
         rel_paths: &[Utf8PathBuf],
         cancel: &Cancel,
     ) -> RemoteResult<()> {
-        self.step(
-            format!("downloading {} object(s)", rel_paths.len()),
-            |inner| inner.copy_from_remote(cache_files_dir, rel_paths, cancel),
-        )
+        self.inner
+            .copy_from_remote(cache_files_dir, rel_paths, cancel)
     }
 
     fn verify_file(&self, hash: Sha256, cancel: &Cancel) -> RemoteResult<bool> {

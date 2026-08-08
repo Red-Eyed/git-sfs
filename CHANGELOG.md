@@ -9,6 +9,8 @@
   temp locations and publish only after verification.
 - Batch remote transfers and metadata checks through rclone instead of spawning
   one process per object.
+- Show rclone's live transfer progress, speed, and ETA during `push` and
+  `pull`.
 
 ### Backwards Incompatible Changes
 
@@ -67,6 +69,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
   objects only after the batch transfer and size verification pass.
 - Stage `pull` downloads in cache-owned temp storage, verify SHA-256, then adopt
   objects into the cache.
+- Show rclone's own transfer progress for `push` and `pull`, and silence it
+  with `--quiet`.
 - Skip downloading or hashing already-verified cache objects during ordinary
   pulls; writable cache objects are treated as unverified, hash-checked, and
   protected again.

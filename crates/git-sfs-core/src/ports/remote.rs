@@ -24,7 +24,7 @@
 //! interrupted uploads out of the final object namespace.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Write as _};
 use std::time::Duration;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -43,6 +43,9 @@ use super::hashing;
 /// contention at, kept consistent across the two ports that wait on
 /// something external.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Rclone's progress stream is mirrored live; failures only need enough tail
+/// output to show the final error without retaining every terminal refresh.
+const TRANSFER_DIAGNOSTIC_LIMIT: usize = 64 * 1024;
 
 /// Why a [`Remote`] operation failed.
 #[derive(Debug, Error)]
@@ -350,6 +353,65 @@ struct Invocation {
     stderr: String,
 }
 
+#[derive(Clone, Copy)]
+enum Mirror {
+    None,
+    Stdout,
+    Stderr,
+}
+
+#[derive(Clone, Copy)]
+enum Capture {
+    Full,
+    Tail(usize),
+}
+
+#[derive(Clone, Copy)]
+struct PipeMode {
+    stdout_mirror: Mirror,
+    stderr_mirror: Mirror,
+    stdout_capture: Capture,
+    stderr_capture: Capture,
+}
+
+struct PipeCapture {
+    bytes: Vec<u8>,
+    truncated: bool,
+    mode: Capture,
+}
+
+impl PipeCapture {
+    fn new(mode: Capture) -> Self {
+        Self {
+            bytes: Vec::new(),
+            truncated: false,
+            mode,
+        }
+    }
+
+    fn extend(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+        let Capture::Tail(limit) = self.mode else {
+            return;
+        };
+        let excess = self.bytes.len().saturating_sub(limit);
+        if excess == 0 {
+            return;
+        }
+        self.bytes.drain(..excess);
+        self.truncated = true;
+    }
+
+    fn into_string(self) -> String {
+        let text = String::from_utf8_lossy(&self.bytes).into_owned();
+        if self.truncated {
+            format!("[rclone output truncated]\n{text}")
+        } else {
+            text
+        }
+    }
+}
+
 /// stderr if non-empty, else stdout — the text rclone actually put a message
 /// in, for [`RemoteError::Failed`].
 fn combined_message(invocation: &Invocation) -> String {
@@ -411,6 +473,40 @@ fn sleep_cancelable(total: Duration, cancel: &Cancel) -> Result<(), RemoteError>
     Ok(())
 }
 
+fn read_pipe(mut pipe: impl io::Read, mirror: Mirror, capture: Capture) -> String {
+    let mut captured = PipeCapture::new(capture);
+    let mut chunk = [0; 8192];
+
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                mirror_bytes(mirror, &chunk[..n]);
+                captured.extend(&chunk[..n]);
+            }
+            Err(_) => break,
+        }
+    }
+
+    captured.into_string()
+}
+
+fn mirror_bytes(mirror: Mirror, bytes: &[u8]) {
+    match mirror {
+        Mirror::None => {}
+        Mirror::Stdout => {
+            write_best_effort(io::stdout().lock(), bytes);
+        }
+        Mirror::Stderr => {
+            write_best_effort(io::stderr().lock(), bytes);
+        }
+    }
+}
+
+fn write_best_effort(mut out: impl io::Write, bytes: &[u8]) {
+    let _result = out.write_all(bytes).and_then(|()| out.flush());
+}
+
 /// The real, `rclone`-subprocess-backed [`Remote`].
 pub struct RcloneRemote {
     /// The composed rclone target, e.g. `s3:bucket/prefix` —
@@ -433,6 +529,7 @@ pub struct RcloneRemote {
     /// mutating the process-global `PATH`, which is not safe under
     /// `cargo test`'s parallel execution.
     rclone_bin: String,
+    transfer_progress: bool,
 }
 
 impl RcloneRemote {
@@ -447,6 +544,7 @@ impl RcloneRemote {
             retry_max: 3,
             initial_backoff: Duration::from_secs(1),
             rclone_bin: "rclone".to_owned(),
+            transfer_progress: false,
         }
     }
 
@@ -463,6 +561,14 @@ impl RcloneRemote {
     #[must_use]
     pub fn with_retry_max(mut self, retry_max: u32) -> Self {
         self.retry_max = retry_max;
+        self
+    }
+
+    /// Mirrors rclone's own transfer progress during copy/move operations
+    /// while still retaining bounded diagnostics for failures.
+    #[must_use]
+    pub fn with_transfer_progress(mut self, enabled: bool) -> Self {
+        self.transfer_progress = enabled;
         self
     }
 
@@ -530,6 +636,58 @@ impl RcloneRemote {
     /// immediately. `--config` is prepended when this remote has one so it
     /// applies to every remote access.
     fn run(&self, subcommand_args: &[String], cancel: &Cancel) -> Result<String, RemoteError> {
+        self.run_with_output(
+            subcommand_args,
+            cancel,
+            PipeMode {
+                stdout_mirror: Mirror::None,
+                stderr_mirror: Mirror::None,
+                stdout_capture: Capture::Full,
+                stderr_capture: Capture::Full,
+            },
+        )
+    }
+
+    fn run_transfer(
+        &self,
+        subcommand_args: &[String],
+        cancel: &Cancel,
+    ) -> Result<String, RemoteError> {
+        let mut args = subcommand_args.to_vec();
+        if self.transfer_progress {
+            args.insert(args.len().min(1), "--progress".to_owned());
+        }
+        let capture = if self.transfer_progress {
+            Capture::Tail(TRANSFER_DIAGNOSTIC_LIMIT)
+        } else {
+            Capture::Full
+        };
+        self.run_with_output(
+            &args,
+            cancel,
+            PipeMode {
+                stdout_mirror: if self.transfer_progress {
+                    Mirror::Stdout
+                } else {
+                    Mirror::None
+                },
+                stderr_mirror: if self.transfer_progress {
+                    Mirror::Stderr
+                } else {
+                    Mirror::None
+                },
+                stdout_capture: capture,
+                stderr_capture: capture,
+            },
+        )
+    }
+
+    fn run_with_output(
+        &self,
+        subcommand_args: &[String],
+        cancel: &Cancel,
+        pipe_mode: PipeMode,
+    ) -> Result<String, RemoteError> {
         let mut args = Vec::with_capacity(subcommand_args.len() + 2);
         if let Some(config) = &self.config {
             args.push("--config".to_owned());
@@ -543,7 +701,7 @@ impl RcloneRemote {
             if cancel.is_canceled() {
                 return Err(RemoteError::Canceled);
             }
-            let invocation = self.spawn_and_wait(&args, cancel)?;
+            let invocation = self.spawn_and_wait(&args, cancel, pipe_mode)?;
             if invocation.status.success() {
                 return Ok(invocation.stdout);
             }
@@ -591,7 +749,12 @@ impl RcloneRemote {
     /// checks per read chunk because *we* own that loop — the byte-moving
     /// loop here belongs to the child process, not to us; killing it is the
     /// only way to stop it promptly.
-    fn spawn_and_wait(&self, args: &[String], cancel: &Cancel) -> Result<Invocation, RemoteError> {
+    fn spawn_and_wait(
+        &self,
+        args: &[String],
+        cancel: &Cancel,
+        pipe_mode: PipeMode,
+    ) -> Result<Invocation, RemoteError> {
         let mut child = std::process::Command::new(&self.rclone_bin)
             .args(args)
             .stdin(std::process::Stdio::null())
@@ -606,22 +769,18 @@ impl RcloneRemote {
         let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
         let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
         let stdout_handle = std::thread::spawn(move || {
-            let mut buf = String::new();
-            #[allow(
-                clippy::let_underscore_must_use,
-                reason = "a truncated or invalid-UTF-8 capture only degrades the diagnostic message on failure, never correctness"
-            )]
-            let _ = stdout_pipe.read_to_string(&mut buf);
-            buf
+            read_pipe(
+                &mut stdout_pipe,
+                pipe_mode.stdout_mirror,
+                pipe_mode.stdout_capture,
+            )
         });
         let stderr_handle = std::thread::spawn(move || {
-            let mut buf = String::new();
-            #[allow(
-                clippy::let_underscore_must_use,
-                reason = "a truncated or invalid-UTF-8 capture only degrades the diagnostic message on failure, never correctness"
-            )]
-            let _ = stderr_pipe.read_to_string(&mut buf);
-            buf
+            read_pipe(
+                &mut stderr_pipe,
+                pipe_mode.stderr_mirror,
+                pipe_mode.stderr_capture,
+            )
         });
 
         let status = loop {
@@ -828,7 +987,7 @@ impl Remote for RcloneRemote {
             .expect("rclone transfer list path is UTF-8")
             .to_owned();
 
-        self.run(
+        self.run_transfer(
             &[
                 "copy".to_owned(),
                 "--checksum".to_owned(),
@@ -853,7 +1012,7 @@ impl Remote for RcloneRemote {
             .to_str()
             .expect("rclone publish list path is UTF-8")
             .to_owned();
-        self.run(
+        self.run_transfer(
             &[
                 "move".to_owned(),
                 "--ignore-existing".to_owned(),
@@ -890,7 +1049,7 @@ impl Remote for RcloneRemote {
             .expect("rclone transfer list path is UTF-8")
             .to_owned();
 
-        self.run(
+        self.run_transfer(
             &[
                 "copy".to_owned(),
                 "--ignore-existing".to_owned(),
@@ -1373,7 +1532,6 @@ while IFS= read -r rel; do
   fi
 done < "$files_from"
 
-echo '[]'
 exit 0
 "#;
         write_executable(&dir.join("rclone"), script);
@@ -1728,6 +1886,58 @@ exit 0
             log.contains(temp_dir.path().to_str().unwrap()),
             "--temp-dir must point at this remote's own temp_dir, argv: {log}"
         );
+    }
+
+    #[test]
+    fn transfers_pass_rclone_progress_when_enabled() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        copying_rclone(fixture.path());
+
+        let hash = a_hash();
+        let rel = Utf8PathBuf::from(format!("{ALGORITHM}/{}/{}", hash.prefix(), hash));
+        let files_dir = cache.path().join("files");
+        std::fs::create_dir_all(files_dir.join(rel.parent().unwrap())).unwrap();
+        std::fs::write(files_dir.join(&rel), b"object bytes").unwrap();
+        let remote_root = cache.path().join("remote-root");
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let remote = RcloneRemote::new(
+            format!("local:{}", remote_root.display()),
+            Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).unwrap(),
+        )
+        .with_rclone_bin(fixture.path().join("rclone").to_str().unwrap().to_owned())
+        .with_transfer_progress(true);
+
+        let files_dir_utf8 = Utf8PathBuf::from_path_buf(files_dir).unwrap();
+        remote
+            .copy_to_remote(&files_dir_utf8, std::slice::from_ref(&rel), &Cancel::new())
+            .unwrap();
+        remote
+            .copy_from_remote(&files_dir_utf8, std::slice::from_ref(&rel), &Cancel::new())
+            .unwrap();
+
+        let log = std::fs::read_to_string(fixture.path().join("argv.log")).unwrap();
+        assert!(log.contains("\ncopy --progress --checksum "), "argv: {log}");
+        assert!(
+            log.contains("\nmove --progress --ignore-existing "),
+            "argv: {log}"
+        );
+        assert!(
+            log.contains("\ncopy --progress --ignore-existing "),
+            "argv: {log}"
+        );
+    }
+
+    #[test]
+    fn transfer_progress_capture_keeps_the_failure_tail() {
+        let mut captured = PipeCapture::new(Capture::Tail(16));
+        captured.extend(b"progress line before the final error");
+
+        let message = captured.into_string();
+
+        assert!(message.starts_with("[rclone output truncated]\n"));
+        assert!(message.ends_with("he final error"));
     }
 
     #[test]
