@@ -9,7 +9,7 @@
 #   REPO      git repository to operate on
 #   CACHE     cache root
 #   REMOTE    directory backing the rclone "local" remote
-#   OUTCOMES  file collecting per-command exit statuses
+#   OUTCOMES  file collecting per-command success/failure outcomes
 
 git_sfs() {
   "$GIT_SFS" --quiet "$@" </dev/null
@@ -28,7 +28,7 @@ require() {
   shift
   local status=0
   "$@" >/dev/null 2>&1 || status=$?
-  printf '%s=%s\n' "$label" "$status" >> "$OUTCOMES"
+  write_outcome "$label" "$status"
   if [ "$status" -ne 0 ]; then
     echo "scenario precondition failed: $label exited $status" >&2
     # A sentinel file, not just `exit`: require is normally called inside a
@@ -39,7 +39,7 @@ require() {
   fi
 }
 
-# Runs a command, recording its exit status instead of aborting the scenario.
+# Runs a command, recording success/failure instead of aborting the scenario.
 # Error paths are part of what the harness compares, so a failing command has to
 # leave the run alive -- otherwise the tree after a failure is never captured.
 record() {
@@ -47,7 +47,17 @@ record() {
   shift
   local status=0
   "$@" >/dev/null 2>&1 || status=$?
-  printf '%s=%s\n' "$label" "$status" >> "$OUTCOMES"
+  write_outcome "$label" "$status"
+}
+
+write_outcome() {
+  local label="$1"
+  local status="$2"
+  if [ "$status" -eq 0 ]; then
+    printf '%s=0\n' "$label" >> "$OUTCOMES"
+  else
+    printf '%s=nonzero\n' "$label" >> "$OUTCOMES"
+  fi
 }
 
 setup_repo() {

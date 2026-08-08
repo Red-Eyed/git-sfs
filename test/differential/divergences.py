@@ -67,6 +67,42 @@ def _outcome(body: str, label: str) -> str | None:
     return None
 
 
+def mask_manifest_path(path: str) -> Callable[[str], str]:
+    """Blank one manifest line by path, leaving neighboring state strict."""
+
+    def normalize(body: str) -> str:
+        lines = [
+            _mask_manifest_line(line, path) for line in body.splitlines(keepends=True)
+        ]
+        return "".join(lines)
+
+    return normalize
+
+
+def manifest_path_changed(path: str) -> Callable[[str, str], bool]:
+    """The candidate's manifest line for `path` differs from the reference."""
+
+    def occurred(reference: str, candidate: str) -> bool:
+        return _manifest_line(reference, path) != _manifest_line(candidate, path)
+
+    return occurred
+
+
+def _mask_manifest_line(line: str, path: str) -> str:
+    for prefix in ("file", "dir ", "link"):
+        marker = f"{prefix} {path} "
+        if line.startswith(marker):
+            return f"{marker}<manifest>\n"
+    return line
+
+
+def _manifest_line(body: str, path: str) -> str | None:
+    for line in body.splitlines():
+        if f" {path} " in line:
+            return line
+    return None
+
+
 def mask_object_modes(body: str) -> str:
     """Blank the mode on cache-object lines only.
 
@@ -124,6 +160,86 @@ class Divergence:
 
 
 DIVERGENCES = [
+    Divergence(
+        id="fresh-init-verifies-without-remote",
+        spec="§13.3",
+        scenario="01-add-commit",
+        section="outcomes",
+        statement="a fresh v2 repo does not fail default verify because init no "
+        "longer writes a missing rclone.conf reference",
+        normalize=mask_outcome("verify_default"),
+        occurred=outcome_became_zero("verify_default"),
+    ),
+    Divergence(
+        id="init-default-config-omits-local-rclone-config-add",
+        spec="§13.3",
+        scenario="01-add-commit",
+        section="repo",
+        statement="the default config template changes so a fresh repo does not "
+        "point at an uncreated local rclone.conf",
+        normalize=mask_manifest_path(".git-sfs/config.toml"),
+        occurred=manifest_path_changed(".git-sfs/config.toml"),
+    ),
+    Divergence(
+        id="init-default-config-omits-local-rclone-config-corrupt",
+        spec="§13.3",
+        scenario="03-corrupt-cache",
+        section="repo",
+        statement="the default config template changes so a fresh repo does not "
+        "point at an uncreated local rclone.conf",
+        normalize=mask_manifest_path(".git-sfs/config.toml"),
+        occurred=manifest_path_changed(".git-sfs/config.toml"),
+    ),
+    Divergence(
+        id="init-default-config-omits-local-rclone-config-writable",
+        spec="§13.3",
+        scenario="06-writable-cache",
+        section="repo",
+        statement="the default config template changes so a fresh repo does not "
+        "point at an uncreated local rclone.conf",
+        normalize=mask_manifest_path(".git-sfs/config.toml"),
+        occurred=manifest_path_changed(".git-sfs/config.toml"),
+    ),
+    Divergence(
+        id="verify-remote-denial-is-not-a-local-failure",
+        spec="§13.3",
+        scenario="05-remote-fault",
+        section="outcomes",
+        statement="verify with remote checking reports the local tree result "
+        "without collapsing a denied remote into missing objects",
+        normalize=mask_outcome("verify_object_denied"),
+        occurred=outcome_became_zero("verify_object_denied"),
+    ),
+    Divergence(
+        id="verify-integrity-remote-denial-is-not-a-local-failure",
+        spec="§13.3",
+        scenario="05-remote-fault",
+        section="outcomes",
+        statement="verify --with-integrity reports the local tree result "
+        "without collapsing a denied remote into missing objects",
+        normalize=mask_outcome("verify_integrity_denied"),
+        occurred=outcome_became_zero("verify_integrity_denied"),
+    ),
+    Divergence(
+        id="status-backend-denial-is-unknown-not-fatal",
+        spec="§10.1/§13.3",
+        scenario="05-remote-fault",
+        section="outcomes",
+        statement="status represents remote lookup failure as unknown instead "
+        "of treating it as a command failure",
+        normalize=mask_outcome("status_backend_denied"),
+        occurred=outcome_became_zero("status_backend_denied"),
+    ),
+    Divergence(
+        id="writable-object-is-repaired-without-integrity-flag",
+        spec="§4.1/§9.1",
+        scenario="06-writable-cache",
+        section="outcomes",
+        statement="verify hash-verifies and re-protects an intact writable "
+        "object without requiring --with-integrity",
+        normalize=mask_outcome("verify_presence"),
+        occurred=outcome_became_zero("verify_presence"),
+    ),
     Divergence(
         id="writable-object-is-repaired-not-failed",
         spec="§4.1/§9.1",

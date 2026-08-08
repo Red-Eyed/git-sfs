@@ -90,6 +90,8 @@ def _digest(data: bytes) -> str:
 
 
 def _is_excluded(relative: str, excludes: list[str]) -> bool:
+    if relative in excludes:
+        return True
     parts = relative.split("/")
     return any(exclude in parts for exclude in excludes)
 

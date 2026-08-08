@@ -556,14 +556,14 @@ CLAUSES = [
     Clause(
         "9.1",
         "verify exits 0 after repairing a writable but intact cache object",
-        DECLARED,
+        ASSERTED,
         "divergences.py",
-        "writable-object-is-repaired-not-failed",
+        "writable-object-is-repaired-without-integrity-flag",
     ),
     Clause(
         "4.1",
         "a verified writable object is protected in place, losing its write bits",
-        DECLARED,
+        ASSERTED,
         "divergences.py",
         "writable-object-is-reprotected",
     ),

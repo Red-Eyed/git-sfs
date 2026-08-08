@@ -35,7 +35,7 @@ SCENARIO_DIR = HARNESS_DIR / "scenarios"
 # .git holds commit hashes and index timestamps that differ between two runs of
 # the same scenario. The worktree symlinks it tracks are captured directly, so
 # excluding it costs no coverage of anything the contract freezes.
-WORKTREE_EXCLUDED = [".git"]
+WORKTREE_EXCLUDED = [".git", ".git-sfs/README.md"]
 REMOTE_EXCLUDED = ["tmp"]
 
 

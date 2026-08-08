@@ -138,6 +138,7 @@ fn write_file(path: &Utf8Path, text: &str) -> std::result::Result<(), InitError>
             path: path.to_owned(),
             source,
         })?;
+    set_project_file_mode(tmp.path(), path)?;
     tmp.persist(path).map_err(|source| InitError::Io {
         path: path.to_owned(),
         source: source.error,
@@ -145,8 +146,39 @@ fn write_file(path: &Utf8Path, text: &str) -> std::result::Result<(), InitError>
     Ok(())
 }
 
+#[cfg(unix)]
+fn set_project_file_mode(
+    tmp_path: &std::path::Path,
+    final_path: &Utf8Path,
+) -> Result<(), InitError> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let mut permissions = std::fs::metadata(tmp_path)
+        .map_err(|source| InitError::Io {
+            path: final_path.to_owned(),
+            source,
+        })?
+        .permissions();
+    permissions.set_mode(0o644);
+    std::fs::set_permissions(tmp_path, permissions).map_err(|source| InitError::Io {
+        path: final_path.to_owned(),
+        source,
+    })
+}
+
+#[cfg(not(unix))]
+fn set_project_file_mode(
+    _tmp_path: &std::path::Path,
+    _final_path: &Utf8Path,
+) -> Result<(), InitError> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+
     use super::*;
 
     #[test]
@@ -169,6 +201,25 @@ mod tests {
         let gitignore = std::fs::read_to_string(repo.join(".gitignore")).unwrap();
         assert!(gitignore.contains(".git-sfs/cache"));
         assert!(gitignore.contains(".git-sfs/.cache"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_files_are_world_readable_like_normal_tracked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+
+        init(&repo, &repo.join(".git-sfs/config.toml"), None, false).unwrap();
+
+        for path in [
+            repo.join(".git-sfs/config.toml"),
+            repo.join(".git-sfs/README.md"),
+            repo.join(".gitignore"),
+        ] {
+            let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o644);
+        }
     }
 
     #[test]
