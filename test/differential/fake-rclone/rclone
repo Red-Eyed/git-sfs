@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """A recording, fault-injecting stand-in for rclone.
 
-Serves the two needs of contract-spec 5 and rust-rewrite-plan 5.2b with one
-tool. git-sfs reaches every remote exclusively through rclone subprocesses, so
-its complete observable remote behavior *is* its rclone argv stream:
+This is adapter coverage, not the product contract. The differential release
+gate compares command outcomes plus repo/cache/remote state; the fake exists for
+the rclone boundary itself, where tests need two things a normal local backend
+does not provide:
 
-  record   append each invocation to $RCLONE_ARGV_LOG, canonicalized, so two
-           binaries' remote behavior can be diffed the way trees are
-  replay    return scripted failures from $RCLONE_FAULTS, so error paths a real
+  record   append each invocation to $RCLONE_ARGV_LOG, canonicalized, as
+           debugging evidence for adapter tests
+  replay   return scripted failures from $RCLONE_FAULTS, so error paths a real
            backend never produces locally (403, rate limit, expired
            credentials) become testable
 
 Between faults it really moves bytes, because recording is only useful if the
 workflow under test actually completes.
 
-Subcommands implemented are exactly those v1 invokes -- lsd, lsjson, copyto,
-copy, version (internal/remote/command.go). Anything else exits 2 loudly rather
-than pretending to succeed: a silent no-op here would look like a passing test.
+Subcommands implemented are the rclone surface git-sfs currently uses. Anything
+else exits 2 loudly rather than pretending to succeed: a silent no-op here would
+look like a passing test.
 """
 
 from __future__ import annotations

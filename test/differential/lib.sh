@@ -84,9 +84,10 @@ commit_all() {
   git -C "$REPO" commit -qm "$1"
 }
 
-# Puts the recording fake rclone ahead of the real one on PATH. Scenarios that
-# call this get the rclone argv stream captured into the manifest, and can
-# inject failures a local directory would never produce.
+# Puts the recording fake rclone ahead of the real one on PATH. Scenarios use it
+# when they need deterministic local-remote behavior or injected failures a
+# normal local directory would never produce. Its argv log is adapter/debug
+# evidence, not part of the high-level differential manifest.
 use_fake_rclone() {
   export PATH="$HARNESS_DIR/fake-rclone:$PATH"
   export RCLONE_ARGV_LOG="$WORK/rclone-argv.log"

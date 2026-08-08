@@ -23,7 +23,7 @@ workflows:
 # directly to compare different implementations.
 
 [group('conformance')]
-[doc('tree + argv diff between two binaries (self-check by default)')]
+[doc('state diff between two binaries (self-check by default)')]
 differential: build
     python3 test/differential/run.py --binary a=./git-sfs --binary b=./git-sfs
 

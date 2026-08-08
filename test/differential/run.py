@@ -35,7 +35,8 @@ SCENARIO_DIR = HARNESS_DIR / "scenarios"
 # .git holds commit hashes and index timestamps that differ between two runs of
 # the same scenario. The worktree symlinks it tracks are captured directly, so
 # excluding it costs no coverage of anything the contract freezes.
-EXCLUDED = [".git"]
+WORKTREE_EXCLUDED = [".git"]
+REMOTE_EXCLUDED = ["tmp"]
 
 
 @dataclass(frozen=True)
@@ -125,13 +126,9 @@ def execute(scenario: Scenario, binary: Binary, work: Path) -> list[tuple[str, s
     sections = [
         ("scenario exit", f"{completed.returncode}\n"),
         ("outcomes", outcomes.read_text()),
-        # Remote behavior has no tree to diff, but every remote operation is an
-        # rclone invocation -- so the argv stream is its equivalent artifact
-        # (rust-rewrite-plan 5.2b). Absent unless a scenario opts into the fake.
-        ("rclone argv", _argv_log(work / "rclone-argv.log", replacements)),
-        ("repo", _manifest(repo, replacements)),
-        ("cache", _manifest(cache, replacements)),
-        ("remote", _manifest(remote, replacements)),
+        ("repo", _manifest(repo, replacements, WORKTREE_EXCLUDED)),
+        ("cache", _manifest(cache, replacements, WORKTREE_EXCLUDED)),
+        ("remote", _manifest(remote, replacements, REMOTE_EXCLUDED)),
     ]
     assert [label for label, _ in sections] == list(divergences.SECTION_LABELS), (
         "manifest sections drifted from divergences.SECTION_LABELS"
@@ -177,16 +174,12 @@ def _unmet_precondition(work: Path) -> str:
     return sentinel.read_text() if sentinel.is_file() else ""
 
 
-def _argv_log(path: Path, replacements: list[tuple[bytes, bytes]]) -> str:
-    if not path.is_file():
-        return "(not recorded)\n"
-    return snapshot.normalize(path.read_bytes(), replacements).decode()
-
-
-def _manifest(root: Path, replacements: list[tuple[bytes, bytes]]) -> str:
+def _manifest(
+    root: Path, replacements: list[tuple[bytes, bytes]], excludes: list[str]
+) -> str:
     if not root.is_dir():
         return "(absent)\n"
-    return snapshot.render_manifest(snapshot.walk(root, replacements, EXCLUDED))
+    return snapshot.render_manifest(snapshot.walk(root, replacements, excludes))
 
 
 def main() -> None:

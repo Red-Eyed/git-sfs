@@ -3,9 +3,8 @@
 
 rust-rewrite-plan §5.1: "An unenumerated divergence is a regression. An
 enumerated one is a fix. The difference is written down in advance, never
-adjudicated after a red run." The tree diff and the argv diff cannot tell the
-two apart on their own -- both are just differences -- so this is where the
-writing down happens.
+adjudicated after a red run." The state diff cannot tell the two apart on its
+own -- both are just differences -- so this is where the writing down happens.
 
 A suppression list would be the obvious shape and is the wrong one. Ignoring a
 known difference makes the harness silent about whether v2 actually fixed
@@ -28,31 +27,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-
-
-def collapse_repeats(body: str) -> str:
-    """Collapse runs of consecutive identical lines to a single line.
-
-    v1's retryLoop reissues the *same* argv on failure, so a retried call is a
-    run of identical adjacent lines. Collapsing the run compares what was
-    attempted while staying silent about how many times.
-
-    The narrowness matters: this only hides a change in the *count* of adjacent
-    duplicates, and only in the scenario that declares it. A command genuinely
-    issued twice in a row that becomes once would also be hidden, which is the
-    accepted cost.
-    """
-    lines = body.splitlines(keepends=True)
-    kept = [
-        line
-        for index, line in enumerate(lines)
-        if index == 0 or line != lines[index - 1]
-    ]
-    return "".join(kept)
-
-
-def fewer_lines(reference: str, candidate: str) -> bool:
-    return len(candidate.splitlines()) < len(reference.splitlines())
 
 
 # A cache object's manifest line, e.g.
@@ -132,7 +106,6 @@ def _has_writable_object(body: str) -> bool:
 SECTION_LABELS = (
     "scenario exit",
     "outcomes",
-    "rclone argv",
     "repo",
     "cache",
     "remote",
@@ -151,15 +124,6 @@ class Divergence:
 
 
 DIVERGENCES = [
-    Divergence(
-        id="retry-only-transient",
-        spec="§13.4",
-        scenario="05-remote-fault",
-        section="rclone argv",
-        statement="a permanent 403 is issued once, not retried retry_max times",
-        normalize=collapse_repeats,
-        occurred=fewer_lines,
-    ),
     Divergence(
         id="writable-object-is-repaired-not-failed",
         spec="§4.1/§9.1",

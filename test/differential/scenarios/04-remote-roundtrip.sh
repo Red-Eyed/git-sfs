@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Captures the rclone argv stream for a full push/pull round trip. This is the
-# differential artifact for the remote half, which has no tree to diff, and it
-# pins the frozen remote layout (spec 5) exactly.
+# Full remote push/pull round trip. The differential artifact is the final
+# remote/cache state and command outcomes; the concrete mover argv is adapter
+# coverage, not the product contract.
 set -uo pipefail
 
 use_fake_rclone

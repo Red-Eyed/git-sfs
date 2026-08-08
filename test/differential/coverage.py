@@ -41,7 +41,7 @@ UNCOVERED = "UNCOVERED"  # nothing tests it
 V2_ONLY = "V2-ONLY"  # untestable until the Rust binary exists
 DECLARED = "DECLARED"  # enumerated in divergences.py; asserts itself once v2 exists
 OBSERVED = "OBSERVED"  # recorded as a v1 baseline; v2 must diverge, so not yet asserted
-STRUCTURAL = "STRUCTURAL"  # any change shows up as a manifest or argv diff
+STRUCTURAL = "STRUCTURAL"  # any change shows up as a state manifest diff
 ASSERTED = "ASSERTED"  # a named assertion fails if violated
 
 ORDER = [ASSERTED, STRUCTURAL, DECLARED, OBSERVED, V2_ONLY, UNCOVERED]
@@ -254,10 +254,10 @@ CLAUSES = [
     ),
     Clause(
         "5",
-        "the rclone argv stream is stable across implementations",
-        STRUCTURAL,
-        "scenarios/04-rclone-argv.sh",
-        "use_fake_rclone",
+        "remote push/pull round trips through the configured remote",
+        ASSERTED,
+        "scenarios/04-remote-roundtrip.sh",
+        "record pull",
     ),
     Clause(
         "5.1",
@@ -692,9 +692,9 @@ CLAUSES = [
     Clause(
         "13.4",
         "retries must be limited to transient failure classes",
-        DECLARED,
-        "divergences.py",
-        "retry-only-transient",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/ports/remote.rs",
+        "retries_only_rclones_own_temporary_exit_class",
     ),
     Clause(
         "13.4",

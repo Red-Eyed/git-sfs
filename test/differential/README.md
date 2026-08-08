@@ -294,28 +294,25 @@ The distinction is load-bearing; see "Agreement is not correctness" below.
 
 ## The remote half
 
-The remote has no tree to diff, but every remote operation is an rclone
-subprocess, so the **argv stream is the equivalent artifact**. A scenario calling
-`use_fake_rclone` gets `fake-rclone/rclone` ahead of the real one on `PATH`, and
-its invocations become a manifest section that diffs like everything else.
+The release-level remote artifact is backend-agnostic: command outcomes plus the
+final remote tree captured through the harness's local remote directory. A
+scenario calling `use_fake_rclone` gets `fake-rclone/rclone` ahead of the real
+one on `PATH`, but its argv log is adapter/debug evidence, not a manifest
+section. That keeps the conformance gate tied to the `Remote` contract rather
+than to one subprocess spelling.
 
 ### Why a fake rclone at all
 
-Three separate jobs, and only the last is about speed:
+Two jobs, and only the last is about speed:
 
-1. **The remote is not a filesystem we can walk.** git-sfs reaches every remote
-   *exclusively* through rclone, using exactly five subcommands, so its complete
-   observable remote behavior **is** its argv stream. Recording that stream is
-   what gives the remote half an artifact at all — and you cannot record argv
-   without standing between git-sfs and rclone.
-2. **A real rclone pointed at a local directory cannot fail interestingly.** That
+1. **A real rclone pointed at a local directory cannot fail interestingly.** That
    is what the shell suite does today: hermetic, fast, and incapable of producing
    a 403, a rate limit, expired credentials, or truncated `lsjson`. Those are
    exactly the paths contract-spec §13.3's defects live on — remote errors
    collapsing into "not found", and `isRemotePathNotFound` classifying by
    grepping rclone's English for `"directory not found"`. Unreachable without
    injected failures.
-3. **Interruption needs a window to aim at.** Real rclone copying a local file
+2. **Interruption needs a window to aim at.** Real rclone copying a local file
    finishes in microseconds, so a SIGINT test against it is a race that passes
    for the wrong reason. The `stall` fault writes half an object, `fsync`s, then
    pauses — making the partial file exact and the interrupt window deterministic.
@@ -328,10 +325,10 @@ directory — stays exactly where it is.
 
 ### Why not an in-process mock instead
 
-Reasonable question, since a Rust `Remote` mock would be faster, typed, and need
-no subprocess. **v2 should have one** — it is layer 2 of the plan's five, and it
-is the right tool for exec orchestration, retry policy, cancellation, and event
-emission. It does not replace this, for two reasons.
+Reasonable question, since a Rust `Remote` mock is faster, typed, and needs no
+subprocess. v2 has one, and it is the right tool for exec orchestration, retry
+policy, cancellation, and event emission. It does not replace adapter tests for
+one reason.
 
 **It substitutes away the code under test.** An in-process mock implements the
 `Remote` trait, so it stands *above* the argv boundary. Everything below —
@@ -345,14 +342,7 @@ rclone's JSON contract, and it silently disabled the remote half of `verify` and
 `status`. An in-process mock cannot expose that class of error *by construction*
 — it tests our code against our own belief, with the belief never written down
 where it can be compared to the real thing. The subprocess fake at least forces
-the belief into bytes on a pipe, which is diffable against real rclone.
-
-**It cannot instrument the Go binary.** The differential harness captures the
-argv stream from v1 *and* v2 and diffs them (§5.2b) — that is the entire
-comparison artifact for the remote half, since a remote has no tree to walk. One
-of those two binaries is not Rust, so an in-process Rust mock can never produce
-the v1 side of that diff. An external recorder is the only thing both
-implementations can be driven through.
+the belief into bytes on a pipe.
 
 The division that follows: **mock what you own, fake what you shell out to.**
 
@@ -438,7 +428,7 @@ which is where hand-maintained checklists always end up.
 | Status | Meaning |
 |---|---|
 | `ASSERTED` | a named assertion fails if violated |
-| `STRUCTURAL` | any change surfaces as a manifest or argv diff |
+| `STRUCTURAL` | any change surfaces as a state manifest diff |
 | `OBSERVED` | recorded as a v1 baseline; v2 must diverge, so not yet an assertion |
 | `DECLARED` | enumerated in `divergences.py`; asserts itself once v2 exists |
 | `V2-ONLY` | untestable until the Rust binary exists |
@@ -458,8 +448,8 @@ fragments therefore name the failure path, not the subject matter.
 
 Plan §5.1: *"An unenumerated divergence is a regression. An enumerated one is a
 fix. The difference is written down in advance, never adjudicated after a red
-run."* The tree diff and the argv diff cannot tell the two apart — both are just
-differences — so `divergences.py` is where the writing down happens.
+run."* The state diff cannot tell the two apart — both are just differences —
+so `divergences.py` is where the writing down happens.
 
 ```sh
 run.py --binary v1=./git-sfs --binary v2=./target/release/git-sfs --candidate v2
@@ -480,11 +470,9 @@ Each declaration does two jobs:
 
 The second is the half a suppression list can never provide.
 
-Declared today: **§13.4 `retry-only-transient`** — v1 reissues identical argv on
-failure, so scenario 05's manifest records a permanent 403 attempted three times.
-`collapse_repeats` folds runs of adjacent identical lines, so the comparison sees
-*what* was attempted without asserting *how many times*; `fewer_lines` then
-requires the candidate to have actually stopped.
+Declared divergences should be state or outcome differences. Adapter-only
+behavior, such as how many times `RcloneRemote` invokes a subprocess for one
+failure class, belongs in adapter tests instead.
 
 ### Trusting it
 
@@ -493,7 +481,7 @@ that fixed §13.4 (`retryLoop` capped at one attempt):
 
 | Setup | Required | Result |
 |---|---|---|
-| fix, no `--candidate` | reads as a regression | FAIL, argv diff |
+| fix, no `--candidate` | reads as a regression | FAIL, state/outcome diff |
 | fix, `--candidate v2` | passes, divergence confirmed | ok + `confirmed` |
 | **no fix**, `--candidate v2` | fails — v2 kept the defect | FAIL + `MISSING` |
 | fix **plus** an unrelated regression | still caught | FAIL on `mode=0444` → `0644` |
