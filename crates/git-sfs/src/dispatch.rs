@@ -53,7 +53,13 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Push(args) => run_push(cli, args, cancel),
         Command::Pull(args) => run_pull(cli, args, cancel),
         Command::Doctor(args) => run_doctor(cli, args, cancel),
-        Command::SelfCmd(SelfCommand::Update) => crate::self_update::run(cli.global.quiet),
+        Command::SelfCmd(SelfCommand::Update(args)) => {
+            if args.pre {
+                crate::self_update::run_including_prereleases(cli.global.quiet)
+            } else {
+                crate::self_update::run(cli.global.quiet)
+            }
+        }
         Command::LlmsTxt => print_llms_txt(),
     }
 }

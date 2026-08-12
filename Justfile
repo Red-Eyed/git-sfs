@@ -11,7 +11,7 @@ default:
 
 [group('repo')]
 [doc('everything CI runs: format, tests, workflows, full conformance harness')]
-check: rust-check workflows differential lock-contention cancellation mode-preservation downgrade spec-coverage
+check: rust-check workflows differential lock-contention cancellation mode-preservation downgrade spec-coverage release-publisher
     git --no-pager diff --check
 
 [group('repo')]

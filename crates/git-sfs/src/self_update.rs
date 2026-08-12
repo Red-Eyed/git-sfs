@@ -5,6 +5,7 @@
 //! crate. The core rule is the same as object storage: verify bytes first,
 //! publish with a temp-file rename last.
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
@@ -12,6 +13,8 @@ use std::process::Command;
 
 use flate2::read::GzDecoder;
 use git_sfs_core::{Error, Result};
+use semver::Version;
+use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use ureq::ResponseExt as _;
 
@@ -23,6 +26,15 @@ const DEFAULT_RCLONE_BASE_URL: &str = "https://downloads.rclone.org";
 
 /// Run `git-sfs self update`.
 pub fn run(quiet: bool) -> Result<()> {
+    run_for_channel(quiet, ReleaseChannel::Stable)
+}
+
+/// Run `git-sfs self update --pre`.
+pub fn run_including_prereleases(quiet: bool) -> Result<()> {
+    run_for_channel(quiet, ReleaseChannel::IncludePrereleases)
+}
+
+fn run_for_channel(quiet: bool, channel: ReleaseChannel) -> Result<()> {
     let env = SelfUpdateEnv::from_process_env();
     let fetcher = HttpFetcher::new(&env)?;
     let exe = current_executable()?;
@@ -30,15 +42,55 @@ pub fn run(quiet: bool) -> Result<()> {
         .parent()
         .ok_or_else(|| Error::Unavailable(format!("could not find parent of {}", exe.display())))?;
 
-    update_git_sfs(&env, &fetcher, &exe, quiet)?;
+    update_git_sfs(&env, &fetcher, &exe, quiet, channel)?;
     update_rclone(&env, &fetcher, &install_dir.join("rclone"), quiet)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReleaseChannel {
+    Stable,
+    IncludePrereleases,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReleaseTag {
+    raw: String,
+    version: Version,
+}
+
+impl ReleaseTag {
+    fn parse(raw: &str) -> std::result::Result<Self, UpdateError> {
+        let unprefixed = raw.strip_prefix('v').ok_or_else(|| {
+            UpdateError::Invalid(format!(
+                "invalid git-sfs release tag {raw:?}: expected a leading v"
+            ))
+        })?;
+        let version = Version::parse(unprefixed).map_err(|err| {
+            UpdateError::Invalid(format!("invalid git-sfs release tag {raw:?}: {err}"))
+        })?;
+        Ok(Self {
+            raw: raw.to_owned(),
+            version,
+        })
+    }
+
+    fn as_str(&self) -> &str {
+        &self.raw
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PublishedRelease {
+    tag_name: String,
+    draft: bool,
 }
 
 #[derive(Debug, Clone)]
 struct SelfUpdateEnv {
     release_base_url: String,
     release_latest_url: String,
+    release_list_url: String,
     rclone_base_url: String,
     ca_file: Option<PathBuf>,
     insecure_tls: bool,
@@ -52,6 +104,9 @@ impl SelfUpdateEnv {
                 .unwrap_or_else(|| format!("https://github.com/{repo}/releases/download")),
             release_latest_url: non_empty_env("GIT_SFS_RELEASE_LATEST_URL")
                 .unwrap_or_else(|| format!("https://github.com/{repo}/releases/latest")),
+            release_list_url: non_empty_env("GIT_SFS_RELEASE_LIST_URL").unwrap_or_else(|| {
+                format!("https://api.github.com/repos/{repo}/releases?per_page=1")
+            }),
             rclone_base_url: non_empty_env("GIT_SFS_RCLONE_BASE_URL")
                 .unwrap_or_else(|| DEFAULT_RCLONE_BASE_URL.to_owned()),
             ca_file: ca_file_from_env(),
@@ -171,16 +226,28 @@ fn update_git_sfs(
     fetcher: &impl Fetcher,
     exe: &Path,
     quiet: bool,
+    channel: ReleaseChannel,
 ) -> Result<()> {
     let latest = with_spinner(!quiet, "checking git-sfs version", || {
-        latest_git_sfs_version(fetcher, &env.release_latest_url)
+        latest_git_sfs_version(fetcher, env, channel)
     })?;
     let current = version::VERSION;
-    if current == latest {
-        println!("git-sfs {current} already up to date");
-        return Ok(());
+    match compare_installed_version(current, &latest)? {
+        Ordering::Less => {}
+        Ordering::Equal => {
+            println!("git-sfs {current} already up to date");
+            return Ok(());
+        }
+        Ordering::Greater => {
+            println!(
+                "git-sfs {current} is newer than latest eligible release {}",
+                latest.as_str()
+            );
+            return Ok(());
+        }
     }
 
+    let latest = latest.as_str();
     let asset = format!("git-sfs-{latest}-{}-{}.tar.gz", os_name()?, arch_name()?);
     let sums_url = format!("{}/{latest}/SHA256SUMS", env.release_base_url);
     let asset_url = format!("{}/{latest}/{asset}", env.release_base_url);
@@ -262,13 +329,43 @@ fn unavailable_msg(component: &str, err: UpdateError) -> Error {
     Error::Unavailable(format!("{component}: {err}"))
 }
 
-fn latest_git_sfs_version(fetcher: &impl Fetcher, latest_url: &str) -> Result<String> {
+fn latest_git_sfs_version(
+    fetcher: &impl Fetcher,
+    env: &SelfUpdateEnv,
+    channel: ReleaseChannel,
+) -> Result<ReleaseTag> {
+    let raw = match channel {
+        ReleaseChannel::Stable => stable_release_tag(fetcher, &env.release_latest_url)?,
+        ReleaseChannel::IncludePrereleases => {
+            latest_published_release_tag(fetcher, &env.release_list_url)?
+        }
+    };
+    ReleaseTag::parse(&raw).map_err(|err| unavailable_msg("git-sfs", err))
+}
+
+fn stable_release_tag(fetcher: &impl Fetcher, latest_url: &str) -> Result<String> {
     let final_url = fetcher
         .final_url(latest_url)
         .map_err(|err| unavailable("git-sfs", latest_url, err))?;
     version_from_url(&final_url).ok_or_else(|| {
         Error::Unavailable(format!("git-sfs: could not parse version from {final_url}"))
     })
+}
+
+fn latest_published_release_tag(fetcher: &impl Fetcher, releases_url: &str) -> Result<String> {
+    let data = fetcher
+        .get_bytes(releases_url)
+        .map_err(|err| unavailable("git-sfs", releases_url, err))?;
+    let releases: Vec<PublishedRelease> = serde_json::from_slice(&data).map_err(|err| {
+        Error::Unavailable(format!(
+            "git-sfs: invalid release list from {releases_url}: {err}"
+        ))
+    })?;
+    releases
+        .into_iter()
+        .find(|release| !release.draft)
+        .map(|release| release.tag_name)
+        .ok_or_else(|| Error::Unavailable("git-sfs: release list is empty".to_owned()))
 }
 
 fn latest_rclone_version(fetcher: &impl Fetcher, base_url: &str) -> Result<String> {
@@ -289,6 +386,14 @@ fn version_from_url(url: &str) -> Option<String> {
         .next()
         .filter(|version| version.starts_with('v') && version.len() > 1)
         .map(str::to_owned)
+}
+
+fn compare_installed_version(current: &str, latest: &ReleaseTag) -> Result<Ordering> {
+    if current == "dev" {
+        return Ok(Ordering::Less);
+    }
+    let current = ReleaseTag::parse(current).map_err(|err| unavailable_msg("git-sfs", err))?;
+    Ok(current.version.cmp(&latest.version))
 }
 
 fn parse_sha256_sums(data: &[u8], filename: &str) -> std::result::Result<String, UpdateError> {
@@ -495,17 +600,81 @@ mod tests {
         }
     }
 
+    fn test_env() -> SelfUpdateEnv {
+        SelfUpdateEnv {
+            release_base_url: "https://example.test/download".to_owned(),
+            release_latest_url: "https://example.test/latest".to_owned(),
+            release_list_url: "https://example.test/releases".to_owned(),
+            rclone_base_url: "https://example.test/rclone".to_owned(),
+            ca_file: None,
+            insecure_tls: false,
+        }
+    }
+
     #[test]
     fn parses_latest_version_from_final_release_url() {
         let mut fetcher = FakeFetcher::default();
         fetcher.final_urls.insert(
             "https://example.test/latest".to_owned(),
-            "https://example.test/releases/tag/vX.Y.Z".to_owned(),
+            "https://example.test/releases/tag/v9.8.7".to_owned(),
         );
 
-        let latest = latest_git_sfs_version(&fetcher, "https://example.test/latest").unwrap();
+        let latest = latest_git_sfs_version(&fetcher, &test_env(), ReleaseChannel::Stable).unwrap();
 
-        assert_eq!(latest, "vX.Y.Z");
+        assert_eq!(latest.as_str(), "v9.8.7");
+    }
+
+    #[test]
+    fn prerelease_channel_reads_the_latest_published_release() {
+        let mut fetcher = FakeFetcher::default();
+        fetcher.bytes.insert(
+            "https://example.test/releases".to_owned(),
+            br#"[
+                {"tag_name":"v9.9.0-rc.1","draft":true},
+                {"tag_name":"v9.9.0-rc.0","draft":false}
+            ]"#
+            .to_vec(),
+        );
+
+        let latest =
+            latest_git_sfs_version(&fetcher, &test_env(), ReleaseChannel::IncludePrereleases)
+                .unwrap();
+
+        assert_eq!(latest.as_str(), "v9.9.0-rc.0");
+    }
+
+    #[test]
+    fn prerelease_channel_rejects_an_invalid_release_tag() {
+        let mut fetcher = FakeFetcher::default();
+        fetcher.bytes.insert(
+            "https://example.test/releases".to_owned(),
+            br#"[{"tag_name":"nightly","draft":false}]"#.to_vec(),
+        );
+
+        let err = latest_git_sfs_version(&fetcher, &test_env(), ReleaseChannel::IncludePrereleases)
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid git-sfs release tag"));
+    }
+
+    #[test]
+    fn update_comparison_never_downgrades_a_newer_prerelease() {
+        let stable = ReleaseTag::parse("v2.0.0").unwrap();
+
+        assert_eq!(
+            compare_installed_version("v2.1.0-rc.1", &stable).unwrap(),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn update_comparison_accepts_a_newer_prerelease_candidate() {
+        let prerelease = ReleaseTag::parse("v2.1.0-rc.1").unwrap();
+
+        assert_eq!(
+            compare_installed_version("v2.0.0", &prerelease).unwrap(),
+            Ordering::Less
+        );
     }
 
     #[test]

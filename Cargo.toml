@@ -28,8 +28,9 @@ path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 proptest = "1.11"
 serde = { version = "1.0", features = ["derive"] }
-# rclone's `lsjson` output -- the only JSON git-sfs's Rust side parses today.
+# rclone metadata and GitHub's published-release list.
 serde_json = "1.0"
+semver = "1.0"
 sha2 = "0.11"
 tar = { version = "0.4", default-features = false }
 tempfile = "3.27"

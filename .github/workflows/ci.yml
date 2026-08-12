@@ -58,6 +58,9 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace
 
+      - name: Release publisher tests
+        run: python3 test/release/test_publish_release.py
+
       - name: Build release binary
         run: cargo build --workspace --release
 

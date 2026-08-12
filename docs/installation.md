@@ -17,7 +17,7 @@ curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/latest/download/install.
 Or download a specific version:
 
 ```sh
-curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/download/vX.Y.Z/install.sh | sh
+curl -LsSf https://github.com/Red-Eyed/git-sfs/releases/download/vX.Y.Z/install.sh | sh -s -- --version vX.Y.Z
 ```
 
 ## Build from source
@@ -52,6 +52,16 @@ Install a specific version:
 curl -LsSf .../install.sh | sh -s -- --version vX.Y.Z
 ```
 
+Include prerelease versions when resolving the latest git-sfs release:
+
+```sh
+curl -LsSf .../install.sh | sh -s -- --pre
+```
+
+`--pre` expands the eligible versions; it does not force a prerelease when a
+newer stable version exists. An explicit `--version` takes precedence. rclone
+is still installed from its stable channel.
+
 Corporate CA bundle:
 
 ```sh
@@ -70,9 +80,15 @@ Once installed, update both `git-sfs` and `rclone` with:
 
 ```sh
 git-sfs self update
+git-sfs self update --pre
 ```
 
-This downloads the latest release of each binary and replaces it atomically in the same directory as the running `git-sfs` executable. Honors the same env vars as the installer — see [Corporate environments](commands.md#corporate-environments) for proxy and custom CA options.
+The default command considers stable releases. `--pre` includes git-sfs
+prereleases while keeping rclone on its stable channel. Both forms replace
+binaries atomically in the same directory as the running `git-sfs` executable
+and honor the installer environment variables; see
+[Corporate environments](commands.md#corporate-environments) for proxy and
+custom CA options.
 
 ## Supported targets
 

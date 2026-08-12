@@ -52,6 +52,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
 
 - Add `git-sfs self update` to update both `git-sfs` and `rclone` with checksum
   verification and atomic binary replacement.
+- Add `--pre` to the installer and `git-sfs self update` to opt into eligible
+  prerelease versions while keeping stable releases as the default.
 - Add `git-sfs llms-txt` for an offline, bundled reference document.
 - Add `git-sfs doctor` checks for repository, config, cache, version, rclone,
   and remote preconditions.
@@ -87,6 +89,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
 
 ### Bug Fixes
 
+- Let prerelease binaries satisfy older `min_git_sfs_version` floors while
+  correctly remaining below the matching final release.
 - Refuse to convert files that are already tracked by Git when running
   `git-sfs add`.
 - Let a freshly initialized repository run local verification without requiring
@@ -119,6 +123,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
 
 - Add the Rust workspace, release archive builder, installer path, and CI checks
   for the maintained implementation.
+- Publish semantic-version prerelease tags as non-latest GitHub prereleases and
+  pin release-page install commands to the exact tag.
 - Add the conformance harness for workflow parity, cancellation safety, cache
   mode behavior, lock contention, downgrade/round-trip behavior, and stable
   behavior coverage.

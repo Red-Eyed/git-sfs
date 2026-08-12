@@ -123,7 +123,15 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum SelfCommand {
     /// update git-sfs and rclone to the latest release
-    Update,
+    Update(SelfUpdateArgs),
+}
+
+/// Arguments to `git-sfs self update`.
+#[derive(Debug, Args)]
+pub struct SelfUpdateArgs {
+    /// include prerelease versions of git-sfs
+    #[arg(long)]
+    pub pre: bool,
 }
 
 /// Arguments to `git-sfs init`.
@@ -433,7 +441,19 @@ mod tests {
     fn self_update_is_reachable_as_two_words() {
         assert!(matches!(
             parse(&["git-sfs", "self", "update"]).command,
-            Some(Command::SelfCmd(SelfCommand::Update))
+            Some(Command::SelfCmd(SelfCommand::Update(SelfUpdateArgs {
+                pre: false
+            })))
+        ));
+    }
+
+    #[test]
+    fn self_update_prereleases_are_opt_in() {
+        assert!(matches!(
+            parse(&["git-sfs", "self", "update", "--pre"]).command,
+            Some(Command::SelfCmd(SelfCommand::Update(SelfUpdateArgs {
+                pre: true
+            })))
         ));
     }
 

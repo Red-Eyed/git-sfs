@@ -34,6 +34,9 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: Test release publisher
+        run: python3 test/release/test_publish_release.py
+
       - name: Build archives
         run: sh scripts/build-rust-release.sh "$GITHUB_REF_NAME" dist
 

@@ -62,6 +62,7 @@ main() {
   note "testing git-sfs $VERSION ($SOURCE_BIN)"
   build_release_fixture "$SOURCE_BIN"
   install_from_fixture
+  install_prerelease_from_fixture
   scenario_filesystem_workflows
   scenario_import_workflows
   scenario_rclone_workflow

@@ -46,6 +46,7 @@ build_release_fixture() {
   local bin="$1"
   local release_dir="$FIXTURE_ROOT/releases/download/$VERSION"
   local latest_dir="$FIXTURE_ROOT/releases/latest"
+  local release_list="$FIXTURE_ROOT/releases/list.json"
   local asset="git-sfs-$VERSION-$HOST_OS-$HOST_ARCH.tar.gz"
   local staging="$WORK/release"
 
@@ -57,6 +58,19 @@ build_release_fixture() {
   tar -C "$staging" -czf "$release_dir/$asset" git-sfs
   (cd "$release_dir" && _sha256 "$asset" > SHA256SUMS)
   : > "$latest_dir/$VERSION"
+  printf '[{"tag_name":"%s","draft":false,"prerelease":true}]\n' "$VERSION" > "$release_list"
+}
+
+install_prerelease_from_fixture() {
+  note "install prerelease from local fixture"
+  sh "$ROOT/scripts/install.sh" \
+    --pre \
+    --install-dir "$INSTALL_DIR" \
+    --release-base-url "file://$FIXTURE_ROOT/releases/download" \
+    --release-list-url "file://$FIXTURE_ROOT/releases/list.json" \
+    --no-install-rclone \
+    >/dev/null
+  assert_eq "$(git_sfs --version | tr -d '\n')" "$VERSION" "installed prerelease version"
 }
 
 install_from_fixture() {

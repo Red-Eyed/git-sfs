@@ -1,14 +1,14 @@
 //! `min_git_sfs_version` / `min_rclone_version` comparison.
 //!
-//! These floor values are intentionally not parsed as semver. They accept an
-//! optional leading `v` and leading zeros, and reject prerelease/build metadata.
-//! Using `semver::Version::parse` would change which committed configs load
-//! and would reject git-sfs release strings such as `vX.Y.Z`.
+//! Configured floor values are intentionally not parsed as semver. They accept
+//! an optional leading `v` and leading zeros, and reject prerelease/build
+//! metadata. The running git-sfs release is parsed as semver so a prerelease can
+//! be compared correctly without widening the committed config grammar.
 //!
-//! `semver` remains the right crate wherever this project wants genuine
-//! semver compliance; this module exists because that is not one of those
-//! places.
+//! `VersionTriple` remains separate from semver because widening the accepted
+//! floor syntax would change which committed configs load.
 
+use semver::Version;
 use thiserror::Error;
 
 /// A version compared as three lexicographically ordered integers.
@@ -33,6 +33,14 @@ pub enum VersionParseError {
         input: String,
         /// The specific component that failed to parse.
         component: String,
+    },
+    /// A running git-sfs release tag was not valid semantic versioning.
+    #[error("invalid release version {input:?}: {reason}")]
+    InvalidRelease {
+        /// The rejected release string.
+        input: String,
+        /// The semantic-version parser's diagnostic.
+        reason: String,
     },
 }
 
@@ -107,7 +115,20 @@ pub fn check_git_sfs_version(current: &str, minimum: &str) -> Result<(), Version
     if current == "dev" {
         return Ok(());
     }
-    check(current, minimum)
+    let got = parse_release_version(current).map_err(VersionCheckError::Current)?;
+    let min = VersionTriple::parse(minimum).map_err(VersionCheckError::Minimum)?;
+    let min = Version::new(
+        u64::from(min.0[0]),
+        u64::from(min.0[1]),
+        u64::from(min.0[2]),
+    );
+    if got >= min {
+        return Ok(());
+    }
+    Err(VersionCheckError::BelowMinimum {
+        current: current.to_owned(),
+        minimum: minimum.to_owned(),
+    })
 }
 
 /// Checks a detected rclone version against `min_rclone_version`. Unlike
@@ -130,6 +151,15 @@ fn check(current: &str, minimum: &str) -> Result<(), VersionCheckError> {
     Err(VersionCheckError::BelowMinimum {
         current: current.to_owned(),
         minimum: minimum.to_owned(),
+    })
+}
+
+fn parse_release_version(input: &str) -> Result<Version, VersionParseError> {
+    Version::parse(input.strip_prefix('v').unwrap_or(input)).map_err(|err| {
+        VersionParseError::InvalidRelease {
+            input: input.to_owned(),
+            reason: err.to_string(),
+        }
     })
 }
 
@@ -195,6 +225,23 @@ mod tests {
     #[test]
     fn a_release_binaries_own_v_prefixed_version_satisfies_its_own_floor() {
         assert!(check_git_sfs_version("v9.0.0", "1.6.0").is_ok());
+    }
+
+    #[test]
+    fn a_prerelease_satisfies_an_older_floor() {
+        assert!(check_git_sfs_version("v2.0.0-rc.1", "1.6.0").is_ok());
+    }
+
+    #[test]
+    fn a_prerelease_does_not_satisfy_its_final_release_floor() {
+        let err = check_git_sfs_version("v2.0.0-rc.1", "2.0.0").unwrap_err();
+        assert!(matches!(err, VersionCheckError::BelowMinimum { .. }));
+    }
+
+    #[test]
+    fn malformed_running_release_is_rejected() {
+        let err = check_git_sfs_version("v2.0.0-not semver", "1.6.0").unwrap_err();
+        assert!(matches!(err, VersionCheckError::Current(_)));
     }
 
     #[test]

@@ -68,6 +68,11 @@ downgrade: build
 spec-coverage:
     python3 test/differential/coverage.py
 
+[group('conformance')]
+[doc('release publisher unit tests')]
+release-publisher:
+    python3 test/release/test_publish_release.py
+
 # Deliberately NOT part of `check`: minutes rather than seconds. Pass a second
 # --binary to compare implementations side by side; absolute times are
 # machine-specific.

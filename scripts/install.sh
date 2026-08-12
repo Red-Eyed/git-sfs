@@ -2,12 +2,14 @@ set -eu
 
 repo="Red-Eyed/git-sfs"
 version="latest"
+include_prereleases="0"
 install_dir="$HOME/.local/bin"
 install_rclone="1"
 insecure_tls="0"
 ca_bundle=""
 release_base_url=""
 release_latest_url=""
+release_list_url=""
 rclone_base_url="https://downloads.rclone.org"
 curl_flags="-LsSf"
 
@@ -17,10 +19,12 @@ usage: install.sh [options]
 
 Options:
   --version VERSION             git-sfs release tag to install (default: latest)
+  --pre                         include prerelease versions of git-sfs
   --install-dir PATH            install directory (default: $HOME/.local/bin)
   --repo OWNER/REPO             GitHub repository (default: Red-Eyed/git-sfs)
   --release-base-url URL        release download base URL
   --release-latest-url URL      latest-release redirect URL
+  --release-list-url URL        published-releases API URL
   --rclone-base-url URL         rclone download base URL
   --no-install-rclone           install only git-sfs
   --ca-bundle PATH              TLS CA bundle for downloads
@@ -41,6 +45,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --version) need_value "$@"; version="$2"; shift 2 ;;
     --version=*) version="${1#*=}"; shift ;;
+    --pre) include_prereleases="1"; shift ;;
     --install-dir) need_value "$@"; install_dir="$2"; shift 2 ;;
     --install-dir=*) install_dir="${1#*=}"; shift ;;
     --repo) need_value "$@"; repo="$2"; shift 2 ;;
@@ -49,6 +54,8 @@ while [ "$#" -gt 0 ]; do
     --release-base-url=*) release_base_url="${1#*=}"; shift ;;
     --release-latest-url) need_value "$@"; release_latest_url="$2"; shift 2 ;;
     --release-latest-url=*) release_latest_url="${1#*=}"; shift ;;
+    --release-list-url) need_value "$@"; release_list_url="$2"; shift 2 ;;
+    --release-list-url=*) release_list_url="${1#*=}"; shift ;;
     --rclone-base-url) need_value "$@"; rclone_base_url="$2"; shift 2 ;;
     --rclone-base-url=*) rclone_base_url="${1#*=}"; shift ;;
     --no-install-rclone) install_rclone="0"; shift ;;
@@ -65,6 +72,9 @@ if [ -z "$release_base_url" ]; then
 fi
 if [ -z "$release_latest_url" ]; then
   release_latest_url="https://github.com/$repo/releases/latest"
+fi
+if [ -z "$release_list_url" ]; then
+  release_list_url="https://api.github.com/repos/$repo/releases?per_page=1"
 fi
 
 if [ -n "$ca_bundle" ]; then
@@ -104,7 +114,17 @@ case "$arch" in
   *) echo "unsupported arch: $arch" >&2; exit 1 ;;
 esac
 
-if [ "$version" = "latest" ]; then
+if [ "$version" = "latest" ] && [ "$include_prereleases" = "1" ]; then
+  release_list="$(download "$release_list_url")"
+  case "$release_list" in
+    *'"tag_name"'*) ;;
+    *) echo "published release list has no tag_name" >&2; exit 1 ;;
+  esac
+  release_list="${release_list#*\"tag_name\"}"
+  release_list="${release_list#*:}"
+  release_list="${release_list#*\"}"
+  version="${release_list%%\"*}"
+elif [ "$version" = "latest" ]; then
   latest_url="$(download -o /dev/null -w '%{url_effective}' "$release_latest_url")"
   version="${latest_url##*/}"
 fi

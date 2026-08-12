@@ -95,7 +95,7 @@ def build() -> str:
 | `push` | `git-sfs push [-r NAME] [--skip-missing] [path]` | Upload cached files to remote |
 | `pull` | `git-sfs pull [-r NAME] [path]` | Download missing files from remote |
 | `doctor` | `git-sfs doctor [-r NAME]` | Diagnose configuration and remote problems |
-| `self update` | `git-sfs self update` | Update git-sfs and rclone to latest release |
+| `self update` | `git-sfs self update [--pre]` | Update git-sfs and rclone; optionally include git-sfs prereleases |
 | `llms-txt` | `git-sfs llms-txt` | Print this document |"""
 
     sections = [

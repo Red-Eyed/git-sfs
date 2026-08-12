@@ -127,5 +127,8 @@ git-sfs-<tag>-linux-amd64.tar.gz
 git-sfs-<tag>-linux-arm64.tar.gz
 ```
 
+`<tag>` is a semantic release tag with a leading `v`, including prerelease
+forms such as `v2.0.0-rc.1`.
+
 `SHA256SUMS` accompanies every release and is verified before `self update`
 replaces an installed binary.

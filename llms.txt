@@ -57,7 +57,7 @@ Files under `data/` open normally through symlinks.
 | `push` | `git-sfs push [-r NAME] [--skip-missing] [path]` | Upload cached files to remote |
 | `pull` | `git-sfs pull [-r NAME] [path]` | Download missing files from remote |
 | `doctor` | `git-sfs doctor [-r NAME]` | Diagnose configuration and remote problems |
-| `self update` | `git-sfs self update` | Update git-sfs and rclone to latest release |
+| `self update` | `git-sfs self update [--pre]` | Update git-sfs and rclone; optionally include git-sfs prereleases |
 | `llms-txt` | `git-sfs llms-txt` | Print this document |
 
 ## Global flags
@@ -88,6 +88,7 @@ Files under `data/` open normally through symlinks.
 | `GIT_SFS_REPO` | Override GitHub repo (default: `Red-Eyed/git-sfs`) |
 | `GIT_SFS_RELEASE_BASE_URL` | Override release download base URL |
 | `GIT_SFS_RELEASE_LATEST_URL` | Override latest-release redirect URL |
+| `GIT_SFS_RELEASE_LIST_URL` | Override published-release list URL used by `--pre` |
 | `GIT_SFS_RCLONE_BASE_URL` | Override rclone download base URL |
 
 ## Concepts
@@ -539,7 +540,7 @@ commands when a remote backend is involved.
 process many files (`add`, `import`, `setup`, `verify`, `pull`). It overrides
 `[settings].n_jobs` from the config; `0` (the default) means auto.
 
-`--quiet` silences normal output, including the local hashing progress bar and
+`--quiet` silences normal output, including elapsed status spinners and
 rclone's transfer progress during `push`/`pull`.
 
 `--version` prints the `git-sfs` release version from the build tag.
@@ -850,18 +851,25 @@ Update the `git-sfs` binary and `rclone` to their latest releases:
 
 ```sh
 git-sfs self update
+git-sfs self update --pre
 ```
+
+The default command considers stable git-sfs releases only. `--pre` includes
+prereleases in the eligible versions, like package-manager prerelease flags; it
+does not require the selected version to be a prerelease. Neither form
+downgrades a newer installed version. rclone continues to use its stable
+release channel.
 
 Both binaries are updated in the directory where the running `git-sfs` executable lives (resolved through any symlinks). Each binary is replaced atomically — a temp file is written and renamed over the existing binary, so a partial download never leaves a broken installation. On Linux and macOS this is safe even while the binary is running, because the kernel holds the old inode open until the process exits.
 
 Output while running:
 
 ```
-checking git-sfs version... (1s)
-downloading git-sfs vX.Y.Z  [##########----------]  18.3 MiB/36.1 MiB
-git-sfs vA.B.C -> vX.Y.Z
-checking rclone version... (1s)
-rclone v1.68.2 already up to date
+checking git-sfs version...
+downloading git-sfs vX.Y.Z...
+git-sfs dev -> vX.Y.Z
+checking rclone version...
+rclone vA.B.C already up to date
 ```
 
 If a binary is already at the latest version it is left untouched. If the download or install step fails the error is reported explicitly with the URL and reason.
@@ -880,6 +888,7 @@ If a binary is already at the latest version it is left untouched. If the downlo
 | `GIT_SFS_REPO` | Override GitHub repo (default: `Red-Eyed/git-sfs`) |
 | `GIT_SFS_RELEASE_BASE_URL` | Override release download base URL |
 | `GIT_SFS_RELEASE_LATEST_URL` | Override latest-release redirect URL |
+| `GIT_SFS_RELEASE_LIST_URL` | Override published-release list URL used by `--pre` |
 | `GIT_SFS_RCLONE_BASE_URL` | Override rclone download base URL |
 
 ## Safety

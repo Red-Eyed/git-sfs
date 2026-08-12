@@ -327,7 +327,14 @@ Update the `git-sfs` binary and `rclone` to their latest releases:
 
 ```sh
 git-sfs self update
+git-sfs self update --pre
 ```
+
+The default command considers stable git-sfs releases only. `--pre` includes
+prereleases in the eligible versions, like package-manager prerelease flags; it
+does not require the selected version to be a prerelease. Neither form
+downgrades a newer installed version. rclone continues to use its stable
+release channel.
 
 Both binaries are updated in the directory where the running `git-sfs` executable lives (resolved through any symlinks). Each binary is replaced atomically — a temp file is written and renamed over the existing binary, so a partial download never leaves a broken installation. On Linux and macOS this is safe even while the binary is running, because the kernel holds the old inode open until the process exits.
 
@@ -357,4 +364,5 @@ If a binary is already at the latest version it is left untouched. If the downlo
 | `GIT_SFS_REPO` | Override GitHub repo (default: `Red-Eyed/git-sfs`) |
 | `GIT_SFS_RELEASE_BASE_URL` | Override release download base URL |
 | `GIT_SFS_RELEASE_LATEST_URL` | Override latest-release redirect URL |
+| `GIT_SFS_RELEASE_LIST_URL` | Override published-release list URL used by `--pre` |
 | `GIT_SFS_RCLONE_BASE_URL` | Override rclone download base URL |
