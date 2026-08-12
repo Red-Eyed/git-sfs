@@ -69,7 +69,7 @@ build_target() {
 
   if [ "$os" = "linux" ]; then
     case "$(file "$binary")" in
-      *"statically linked"*) ;;
+      *"statically linked"*|*"static-pie linked"*) ;;
       *) echo "$binary is not statically linked" >&2; exit 1 ;;
     esac
   fi

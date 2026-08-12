@@ -125,6 +125,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
   for the maintained implementation.
 - Publish semantic-version prerelease tags as non-latest GitHub prereleases and
   pin release-page install commands to the exact tag.
+- Accept both static ELF and static PIE descriptions when validating portable
+  Linux release binaries.
 - Add the conformance harness for workflow parity, cancellation safety, cache
   mode behavior, lock contention, downgrade/round-trip behavior, and stable
   behavior coverage.
