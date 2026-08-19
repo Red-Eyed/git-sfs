@@ -4,10 +4,10 @@
 //! rclone's own documented exit codes (<https://rclone.org/docs/#exit-code>)
 //! rather than by grepping its message text, which is brittle under wording
 //! changes, localized output, or paths containing error-like words.
-//! Three codes matter here: `3`/`4` ("directory/file not found", confirmed
-//! absence — a normal outcome, not a failure), `5` ("temporary error, more
-//! retries might fix it" — the *only* class this module retries), and
-//! everything else, which is permanent.
+//! Three codes matter here: `3`/`4` ("directory/file not found", classified
+//! separately so the backend diagnostic can distinguish an empty root), `5`
+//! ("temporary error, more retries might fix it" — the *only* class this module
+//! retries), and everything else, which is permanent.
 //!
 //! **`--temp-dir` is mandatory.** [`RcloneRemote::new`] takes `temp_dir` as a
 //! required argument and routes every write through it, for both directions.
@@ -23,7 +23,7 @@
 //! `rclone move --files-from`. This preserves rclone batching while keeping
 //! interrupted uploads out of the final object namespace.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::{self, Write as _};
 use std::time::Duration;
 
@@ -33,10 +33,7 @@ use thiserror::Error;
 
 use crate::cancel::Cancel;
 use crate::domain::hash::{ALGORITHM, Sha256};
-use crate::domain::remote::object_url;
 use crate::error::Error;
-
-use super::hashing;
 
 /// How often a wait loop (for the child to exit, or for a retry backoff)
 /// re-checks `cancel` — the same cadence [`super::lock::Lock`] polls
@@ -83,15 +80,6 @@ pub enum RemoteError {
         #[source]
         source: serde_json::Error,
     },
-    /// The bytes downloaded from the remote for verification do not hash to
-    /// the name they are stored under. Corrupt, not absent.
-    #[error("remote object corrupt: does not hash to its own name (want {want}, got {got})")]
-    HashMismatch {
-        /// The hash the remote object is supposed to have.
-        want: Sha256,
-        /// The hash its downloaded bytes actually produce.
-        got: Sha256,
-    },
     /// A remote object was present but its size did not match the local
     /// object being uploaded. Size is the cheap invariant available on every
     /// rclone backend; full hash verification stays opt-in where it requires
@@ -129,9 +117,7 @@ impl From<RemoteError> for Error {
             RemoteError::Io { .. }
             | RemoteError::Failed { .. }
             | RemoteError::InvalidListing { .. } => Error::Unavailable(err.to_string()),
-            RemoteError::HashMismatch { .. } | RemoteError::SizeMismatch { .. } => {
-                Error::Integrity(err.to_string())
-            }
+            RemoteError::SizeMismatch { .. } => Error::Integrity(err.to_string()),
             RemoteError::Canceled => Error::Canceled,
         }
     }
@@ -180,41 +166,9 @@ pub trait Remote {
     /// `cancel` fires.
     fn check_path(&self, cancel: &Cancel) -> Result<(), RemoteError>;
 
-    /// [`Remote::check_backend`] then [`Remote::check_path`] — the
-    /// before-push/pull preflight. A default method so implementers only
-    /// write the two checks that actually vary, not their composition.
-    ///
-    /// # Errors
-    ///
-    /// Whatever the first failing check returns.
-    fn require_exists(&self, cancel: &Cancel) -> Result<(), RemoteError> {
-        self.check_backend(cancel)?;
-        self.check_path(cancel)
-    }
-
-    /// Whether `hash` is present on the remote.
-    ///
-    /// Three outcomes, not two: `Ok(false)` means rclone confirmed the object
-    /// is absent; `Ok(true)` means present; `Err` means the question could not
-    /// be answered. A caller that cannot reach the remote must never mistake
-    /// that for an empty remote.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RemoteError::Failed`]/[`RemoteError::Io`] if presence could
-    /// not be determined, and [`RemoteError::Canceled`] if `cancel` fires.
-    fn has_file(&self, hash: Sha256, cancel: &Cancel) -> Result<bool, RemoteError>;
-
-    /// `hash`'s size on the remote, or `None` if confirmed absent.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Remote::has_file`].
-    fn file_size(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<u64>, RemoteError>;
-
     /// Sizes of every hash in `hashes` that is present on the remote. The
-    /// concrete remote may batch these queries, but it must not issue one
-    /// subprocess per object or list the entire remote object store to answer
+    /// concrete remote must batch the complete query: it may neither issue one
+    /// subprocess per object nor list the entire remote object store to answer
     /// a scoped question.
     ///
     /// # Errors
@@ -256,25 +210,6 @@ pub trait Remote {
         rel_paths: &[Utf8PathBuf],
         cancel: &Cancel,
     ) -> Result<(), RemoteError>;
-
-    /// Downloads `hash`'s remote object to a scratch location and
-    /// hash-verifies it — the full-content check `verify --check-remote`/
-    /// `--integrity` needs, which [`Remote::file_size`] alone cannot provide
-    /// because a truncated object can still match on size.
-    ///
-    /// Three outcomes mirroring [`super::store::Store::verified`]: `Ok(true)`
-    /// present and byte-verified; `Ok(false)` confirmed absent;
-    /// `Err(RemoteError::HashMismatch)` present but corrupt — missing and
-    /// corrupt are different classes, so this is never collapsed to
-    /// `Ok(false)`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RemoteError::HashMismatch`] if the downloaded bytes do not
-    /// match `hash`, [`RemoteError::Failed`]/[`RemoteError::Io`] if the
-    /// download itself could not be completed, and
-    /// [`RemoteError::Canceled`] if `cancel` fires.
-    fn verify_file(&self, hash: Sha256, cancel: &Cancel) -> Result<bool, RemoteError>;
 }
 
 /// One `lsjson` entry, trimmed to the fields git-sfs reads.
@@ -305,8 +240,9 @@ fn parse_lsjson_entries(json: &str) -> Result<Vec<LsjsonEntry>, RemoteError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExitClass {
     /// `3` (directory not found) or `4` (file not found): the backend was
-    /// reached and confirmed the target is absent. A normal outcome, not a
-    /// failure — callers turn this into `Ok(false)`/`Ok(None)`.
+    /// reached and confirmed the target is absent. The backend diagnostic
+    /// treats this as reachable-but-empty; scoped metadata and transfers still
+    /// surface it as a failed operation.
     NotFound,
     /// `5`: "temporary error (one that more retries might fix)". The only
     /// class [`RcloneRemote::run`] retries.
@@ -588,12 +524,16 @@ impl RcloneRemote {
         format!("{}/files", self.url)
     }
 
-    fn staged_files_url(&self) -> String {
+    fn staged_files_path(&self) -> Utf8PathBuf {
         let user = std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))
             .map(|value| sanitize_stage_component(&value))
             .unwrap_or_else(|_| "unknown".to_owned());
-        format!("{}/tmp/{user}/files", self.url)
+        Utf8PathBuf::from(format!("tmp/{user}/files"))
+    }
+
+    fn staged_files_url(&self, staged_files_path: &Utf8Path) -> String {
+        format!("{}/{}", self.url, staged_files_path)
     }
 
     /// The bare backend prefix, e.g. `"s3:"` from `"s3:bucket/prefix"`.
@@ -688,6 +628,7 @@ impl RcloneRemote {
         cancel: &Cancel,
         pipe_mode: PipeMode,
     ) -> Result<String, RemoteError> {
+        self.validate_config()?;
         let mut args = Vec::with_capacity(subcommand_args.len() + 2);
         if let Some(config) = &self.config {
             args.push("--config".to_owned());
@@ -718,26 +659,6 @@ impl RcloneRemote {
                 exit_code,
                 message: combined_message(&invocation),
             });
-        }
-    }
-
-    /// [`RcloneRemote::run`], but a confirmed "not found" (exit 3/4) becomes
-    /// `Ok(None)` instead of an error — the shape [`Remote::has_file`]/
-    /// [`Remote::file_size`]/[`Remote::file_sizes`] need, factored out once
-    /// so each doesn't hand-roll the same match.
-    fn run_allowing_not_found(
-        &self,
-        subcommand_args: &[String],
-        cancel: &Cancel,
-    ) -> Result<Option<String>, RemoteError> {
-        match self.run(subcommand_args, cancel) {
-            Ok(out) => Ok(Some(out)),
-            Err(RemoteError::Failed { exit_code, .. })
-                if classify_exit(exit_code) == ExitClass::NotFound =>
-            {
-                Ok(None)
-            }
-            Err(err) => Err(err),
         }
     }
 
@@ -809,10 +730,11 @@ impl RcloneRemote {
         })
     }
 
-    /// Stages the `--files-from` list [`Remote::copy_to_remote`]/
-    /// [`Remote::copy_from_remote`] need, one relative path per line, inside
-    /// this remote's own `temp_dir` — **never** the OS temp directory. The
-    /// returned [`tempfile::NamedTempFile`] cleans
+    /// Stages a batched `--files-from` list, one relative path per line, inside
+    /// this remote's own `temp_dir` — **never** the OS temp directory. Metadata
+    /// queries and transfers share this path-list boundary so neither can drift
+    /// back to one subprocess per object. The returned
+    /// [`tempfile::NamedTempFile`] cleans
     /// itself up on drop, so a failed or canceled copy leaves nothing behind
     /// for the caller to remember to remove.
     fn write_transfer_list(
@@ -845,7 +767,7 @@ impl RcloneRemote {
 
     fn file_sizes_at(
         &self,
-        files_root_url: &str,
+        files_root: &Utf8Path,
         hashes: &[Sha256],
         cancel: &Cancel,
     ) -> Result<HashMap<Sha256, u64>, RemoteError> {
@@ -853,25 +775,44 @@ impl RcloneRemote {
             return Ok(HashMap::new());
         }
 
+        let rel_paths = hashes
+            .iter()
+            .map(|hash| {
+                files_root
+                    .join(ALGORITHM)
+                    .join(hash.prefix())
+                    .join(hash.to_hex())
+            })
+            .collect::<Vec<_>>();
+        let list = self.write_transfer_list(&rel_paths)?;
+        let list_path = list
+            .path()
+            .to_str()
+            .expect("rclone metadata list path is UTF-8")
+            .to_owned();
+        let json = self.run(
+            &[
+                "lsjson".to_owned(),
+                "--recursive".to_owned(),
+                "--files-only".to_owned(),
+                "--no-mimetype".to_owned(),
+                "--no-modtime".to_owned(),
+                "--disable".to_owned(),
+                "ListR".to_owned(),
+                "--files-from".to_owned(),
+                list_path,
+                self.url.clone(),
+            ],
+            cancel,
+        )?;
+        let mut wanted = hashes
+            .iter()
+            .map(|hash| (hash.to_hex(), *hash))
+            .collect::<HashMap<_, _>>();
         let mut result = HashMap::with_capacity(hashes.len());
-        for (prefix, prefix_hashes) in hashes_by_prefix(hashes) {
-            let Some(json) = self.run_allowing_not_found(
-                &[
-                    "lsjson".to_owned(),
-                    format!("{files_root_url}/{ALGORITHM}/{prefix}"),
-                ],
-                cancel,
-            )?
-            else {
-                continue;
-            };
-            let entries = parse_lsjson_entries(&json)?;
-            let mut wanted: HashMap<String, Sha256> =
-                prefix_hashes.iter().map(|h| (h.to_hex(), *h)).collect();
-            for entry in entries {
-                if let Some(hash) = wanted.remove(&entry.name) {
-                    result.insert(hash, entry.size);
-                }
+        for entry in parse_lsjson_entries(&json)? {
+            if let Some(hash) = wanted.remove(&entry.name) {
+                result.insert(hash, entry.size);
             }
         }
         Ok(result)
@@ -889,14 +830,6 @@ fn parse_rclone_version(output: &str) -> Option<String> {
 }
 
 impl Remote for RcloneRemote {
-    fn require_exists(&self, cancel: &Cancel) -> Result<(), RemoteError> {
-        // Check a configured rclone config file before any remote probe so the
-        // user gets a direct path error.
-        self.validate_config()?;
-        self.check_backend(cancel)?;
-        self.check_path(cancel)
-    }
-
     fn check_backend(&self, cancel: &Cancel) -> Result<(), RemoteError> {
         match self.run(&["lsd".to_owned(), self.backend_root()], cancel) {
             Ok(_) => Ok(()),
@@ -916,30 +849,12 @@ impl Remote for RcloneRemote {
             .map(|_| ())
     }
 
-    fn has_file(&self, hash: Sha256, cancel: &Cancel) -> Result<bool, RemoteError> {
-        let path = object_url(&self.url, hash);
-        let out = self.run_allowing_not_found(&["lsjson".to_owned(), path], cancel)?;
-        match out {
-            None => Ok(false),
-            Some(json) => Ok(!parse_lsjson_entries(&json)?.is_empty()),
-        }
-    }
-
-    fn file_size(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<u64>, RemoteError> {
-        let path = object_url(&self.url, hash);
-        let Some(json) = self.run_allowing_not_found(&["lsjson".to_owned(), path], cancel)? else {
-            return Ok(None);
-        };
-        let entries = parse_lsjson_entries(&json)?;
-        Ok(entries.first().map(|entry| entry.size))
-    }
-
     fn file_sizes(
         &self,
         hashes: &[Sha256],
         cancel: &Cancel,
     ) -> Result<HashMap<Sha256, u64>, RemoteError> {
-        self.file_sizes_at(&self.files_url(), hashes, cancel)
+        self.file_sizes_at(Utf8Path::new("files"), hashes, cancel)
     }
 
     fn copy_to_remote(
@@ -953,7 +868,7 @@ impl Remote for RcloneRemote {
         }
         let planned = plan_upload(cache_files_dir, rel_paths)?;
         let hashes = planned.iter().map(|object| object.hash).collect::<Vec<_>>();
-        let final_sizes = self.file_sizes_at(&self.files_url(), &hashes, cancel)?;
+        let final_sizes = self.file_sizes_at(Utf8Path::new("files"), &hashes, cancel)?;
 
         let upload = planned
             .into_iter()
@@ -978,7 +893,8 @@ impl Remote for RcloneRemote {
             .map(|object| object.rel_path.clone())
             .collect::<Vec<_>>();
         let upload_hashes = upload.iter().map(|object| object.hash).collect::<Vec<_>>();
-        let staged_url = self.staged_files_url();
+        let staged_files_path = self.staged_files_path();
+        let staged_url = self.staged_files_url(&staged_files_path);
 
         let list = self.write_transfer_list(&upload_rel_paths)?;
         let list_path = list
@@ -1002,7 +918,7 @@ impl Remote for RcloneRemote {
         )?;
         assert_remote_sizes(
             &upload,
-            &self.file_sizes_at(&staged_url, &upload_hashes, cancel)?,
+            &self.file_sizes_at(&staged_files_path, &upload_hashes, cancel)?,
             "remote staged object",
         )?;
 
@@ -1027,7 +943,7 @@ impl Remote for RcloneRemote {
         )?;
         assert_remote_sizes(
             &upload,
-            &self.file_sizes_at(&self.files_url(), &upload_hashes, cancel)?,
+            &self.file_sizes_at(Utf8Path::new("files"), &upload_hashes, cancel)?,
             "remote final object",
         )?;
         Ok(())
@@ -1063,49 +979,6 @@ impl Remote for RcloneRemote {
             cancel,
         )?;
         Ok(())
-    }
-
-    fn verify_file(&self, hash: Sha256, cancel: &Cancel) -> Result<bool, RemoteError> {
-        std::fs::create_dir_all(&self.temp_dir).map_err(|source| RemoteError::Io {
-            command: "create rclone verify staging directory".to_owned(),
-            source,
-        })?;
-        let staging = tempfile::Builder::new()
-            .prefix("git-sfs-rclone-verify-")
-            .tempfile_in(&self.temp_dir)
-            .map_err(|source| RemoteError::Io {
-                command: "create rclone verify staging file".to_owned(),
-                source,
-            })?;
-        let staging_path = staging
-            .path()
-            .to_str()
-            .expect("rclone verify staging path is UTF-8")
-            .to_owned();
-        let remote_path = object_url(&self.url, hash);
-
-        match self.run(&["copyto".to_owned(), remote_path, staging_path], cancel) {
-            Ok(_) => {
-                let staging_utf8 =
-                    Utf8Path::from_path(staging.path()).expect("staging path is UTF-8");
-                let got =
-                    hashing::hash_file(staging_utf8, cancel).map_err(|source| RemoteError::Io {
-                        command: "hash downloaded object".to_owned(),
-                        source,
-                    })?;
-                if got == hash {
-                    Ok(true)
-                } else {
-                    Err(RemoteError::HashMismatch { want: hash, got })
-                }
-            }
-            Err(RemoteError::Failed { exit_code, .. })
-                if classify_exit(exit_code) == ExitClass::NotFound =>
-            {
-                Ok(false)
-            }
-            Err(err) => Err(err),
-        }
     }
 }
 
@@ -1225,14 +1098,6 @@ fn sanitize_stage_component(value: &str) -> String {
     }
 }
 
-fn hashes_by_prefix(hashes: &[Sha256]) -> BTreeMap<String, Vec<Sha256>> {
-    let mut grouped: BTreeMap<String, Vec<Sha256>> = BTreeMap::new();
-    for &hash in hashes {
-        grouped.entry(hash.prefix()).or_default().push(hash);
-    }
-    grouped
-}
-
 /// An in-memory [`Remote`], for tests above this layer that need a remote
 /// without a network or an `rclone` binary.
 ///
@@ -1292,30 +1157,17 @@ impl Remote for FakeRemote {
         self.require_reachable()
     }
 
-    fn has_file(&self, hash: Sha256, _cancel: &Cancel) -> Result<bool, RemoteError> {
-        self.require_reachable()?;
-        let objects = self.objects.lock().expect("fake remote mutex poisoned");
-        Ok(objects.contains_key(&Self::rel_path(hash)))
-    }
-
-    fn file_size(&self, hash: Sha256, _cancel: &Cancel) -> Result<Option<u64>, RemoteError> {
-        self.require_reachable()?;
-        let objects = self.objects.lock().expect("fake remote mutex poisoned");
-        Ok(objects
-            .get(&Self::rel_path(hash))
-            .map(|bytes| bytes.len() as u64))
-    }
-
     fn file_sizes(
         &self,
         hashes: &[Sha256],
-        cancel: &Cancel,
+        _cancel: &Cancel,
     ) -> Result<HashMap<Sha256, u64>, RemoteError> {
         self.require_reachable()?;
+        let objects = self.objects.lock().expect("fake remote mutex poisoned");
         let mut result = HashMap::with_capacity(hashes.len());
         for &hash in hashes {
-            if let Some(size) = self.file_size(hash, cancel)? {
-                result.insert(hash, size);
+            if let Some(bytes) = objects.get(&Self::rel_path(hash)) {
+                result.insert(hash, bytes.len() as u64);
             }
         }
         Ok(result)
@@ -1375,23 +1227,6 @@ impl Remote for FakeRemote {
             })?;
         }
         Ok(())
-    }
-
-    fn verify_file(&self, hash: Sha256, _cancel: &Cancel) -> Result<bool, RemoteError> {
-        self.require_reachable()?;
-        let objects = self.objects.lock().expect("fake remote mutex poisoned");
-        let Some(bytes) = objects.get(&Self::rel_path(hash)) else {
-            return Ok(false);
-        };
-        let got = {
-            use sha2::{Digest, Sha256 as Sha256Hasher};
-            Sha256::from_digest(Sha256Hasher::digest(bytes).into())
-        };
-        if got == hash {
-            Ok(true)
-        } else {
-            Err(RemoteError::HashMismatch { want: hash, got })
-        }
     }
 }
 
@@ -1467,25 +1302,25 @@ describe_file() {
 }
 
 lsjson() {
-  target=""
-  for arg do
-    target="$arg"
+  files_from=""
+  while [ "$#" -gt 1 ]; do
+    case "$1" in
+      --files-from) files_from="$2"; shift 2 ;;
+      --disable) shift 2 ;;
+      *) shift ;;
+    esac
   done
+  target="$1"
   root=$(strip_backend "$target")
-  if [ ! -e "$root" ]; then
+  if [ ! -d "$root" ]; then
     echo "directory not found: $root" >&2
     exit 3
   fi
-  if [ -f "$root" ]; then
-    printf '['
-    describe_file "$root"
-    printf ']\n'
-    exit 0
-  fi
   first=1
   printf '['
-  for path in "$root"/*; do
-    [ -e "$path" ] || continue
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    path="$root/$rel"
     [ -f "$path" ] || continue
     if [ "$first" = 1 ]; then
       first=0
@@ -1493,7 +1328,7 @@ lsjson() {
       printf ','
     fi
     describe_file "$path"
-  done
+  done < "$files_from"
   printf ']\n'
   exit 0
 }
@@ -1538,8 +1373,8 @@ exit 0
     }
 
     /// Writes an executable POSIX-sh script at `dir/rclone` that logs its
-    /// full argv and implements just enough `lsjson` to prove which remote
-    /// directory `file_sizes` listed.
+    /// full argv and selected path list, then implements the exact-path
+    /// `lsjson --files-from` query used by `file_sizes`.
     fn listing_rclone(dir: &std::path::Path) {
         let script = r#"#!/bin/sh
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -1552,28 +1387,29 @@ strip_backend() {
   esac
 }
 
-target=""
-for arg do
-  target="$arg"
+files_from=""
+while [ "$#" -gt 1 ]; do
+  case "$1" in
+    --files-from) files_from="$2"; shift 2 ;;
+    --disable) shift 2 ;;
+    *) shift ;;
+  esac
 done
+target="$1"
 root=$(strip_backend "$target")
 
-if [ ! -e "$root" ]; then
+if [ ! -d "$root" ]; then
   echo "directory not found: $root" >&2
   exit 3
 fi
 
-if [ -f "$root" ]; then
-  name=$(basename "$root")
-  size=$(wc -c < "$root" | tr -d ' ')
-  printf '[{"Name":"%s","Size":%s}]\n' "$name" "$size"
-  exit 0
-fi
+cp "$files_from" "$here/files.log"
 
 first=1
 printf '['
-for path in "$root"/*; do
-  [ -e "$path" ] || continue
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
+  path="$root/$rel"
   [ -f "$path" ] || continue
   name=$(basename "$path")
   size=$(wc -c < "$path" | tr -d ' ')
@@ -1583,7 +1419,7 @@ for path in "$root"/*; do
     printf ','
   fi
   printf '{"Name":"%s","Size":%s}' "$name" "$size"
-done
+done < "$files_from"
 printf ']\n'
 exit 0
 "#;
@@ -1610,40 +1446,49 @@ exit 0
         Sha256::parse("ab3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a").unwrap()
     }
 
-    fn c_hash() -> Sha256 {
-        Sha256::parse("cd3fce1234567890abcdef1234567890abcdef1234567890abcdef123456789a").unwrap()
+    #[test]
+    fn file_sizes_returns_the_requested_object_size() {
+        let fixture = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let hash = a_hash();
+        let stdout = format!(r#"[{{"Name":"{hash}","Size":42}}]"#);
+        fixed_response_rclone(fixture.path(), &stdout, "", 0);
+        let remote = remote_at(fixture.path(), temp_dir.path());
+
+        assert_eq!(
+            remote
+                .file_sizes(&[hash], &Cancel::new())
+                .unwrap()
+                .get(&hash),
+            Some(&42)
+        );
     }
 
     #[test]
-    fn has_file_returns_true_when_rclone_reports_the_object_present() {
+    fn file_sizes_omits_a_requested_object_that_is_not_listed() {
         let fixture = tempfile::tempdir().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
-        fixed_response_rclone(fixture.path(), r#"[{"Name":"x","Size":42}]"#, "", 0);
+        fixed_response_rclone(fixture.path(), "[]", "", 0);
         let remote = remote_at(fixture.path(), temp_dir.path());
 
-        assert!(remote.has_file(a_hash(), &Cancel::new()).unwrap());
-    }
-
-    #[test]
-    fn has_file_returns_false_when_rclone_confirms_not_found() {
-        let fixture = tempfile::tempdir().unwrap();
-        let temp_dir = tempfile::tempdir().unwrap();
-        fixed_response_rclone(fixture.path(), "", "directory not found", 3);
-        let remote = remote_at(fixture.path(), temp_dir.path());
-
-        assert!(!remote.has_file(a_hash(), &Cancel::new()).unwrap());
+        assert!(
+            remote
+                .file_sizes(&[a_hash()], &Cancel::new())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// An unreachable remote must surface as `Err`, never silently collapse to
     /// "the object is absent".
     #[test]
-    fn has_file_returns_an_error_when_the_remote_cannot_be_reached() {
+    fn file_sizes_returns_an_error_when_the_remote_cannot_be_reached() {
         let fixture = tempfile::tempdir().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         fixed_response_rclone(fixture.path(), "", "fatal error: invalid credentials", 7);
         let remote = remote_at(fixture.path(), temp_dir.path());
 
-        let err = remote.has_file(a_hash(), &Cancel::new()).unwrap_err();
+        let err = remote.file_sizes(&[a_hash()], &Cancel::new()).unwrap_err();
         assert!(matches!(
             err,
             RemoteError::Failed {
@@ -1654,38 +1499,22 @@ exit 0
     }
 
     #[test]
-    fn file_size_distinguishes_absent_from_present() {
-        let fixture = tempfile::tempdir().unwrap();
-        let temp_dir = tempfile::tempdir().unwrap();
-        fixed_response_rclone(fixture.path(), r#"[{"Name":"x","Size":123}]"#, "", 0);
-        let remote = remote_at(fixture.path(), temp_dir.path());
-        assert_eq!(
-            remote.file_size(a_hash(), &Cancel::new()).unwrap(),
-            Some(123)
-        );
-    }
-
-    #[test]
-    fn file_sizes_lists_requested_prefixes_instead_of_the_entire_remote() {
+    fn file_sizes_queries_sixty_objects_with_one_scoped_rclone_call() {
         let fixture = tempfile::tempdir().unwrap();
         let remote_root = tempfile::tempdir().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         listing_rclone(fixture.path());
 
-        let ab_hash = a_hash();
-        let cd_hash = c_hash();
-        let ab_path =
-            remote_root
+        let hashes = (0..60)
+            .map(|byte| Sha256::from_digest([byte; 32]))
+            .collect::<Vec<_>>();
+        for (index, hash) in hashes.iter().enumerate() {
+            let path = remote_root
                 .path()
-                .join(format!("files/sha256/{}/{}", ab_hash.prefix(), ab_hash));
-        let cd_path =
-            remote_root
-                .path()
-                .join(format!("files/sha256/{}/{}", cd_hash.prefix(), cd_hash));
-        std::fs::create_dir_all(ab_path.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(cd_path.parent().unwrap()).unwrap();
-        std::fs::write(&ab_path, b"abc").unwrap();
-        std::fs::write(&cd_path, b"longer").unwrap();
+                .join(format!("files/sha256/{}/{}", hash.prefix(), hash));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, vec![index as u8; index + 1]).unwrap();
+        }
 
         let remote = RcloneRemote::new(
             format!("local:{}", remote_root.path().display()),
@@ -1693,27 +1522,31 @@ exit 0
         )
         .with_rclone_bin(fixture.path().join("rclone").to_str().unwrap().to_owned());
 
-        let sizes = remote
-            .file_sizes(&[ab_hash, cd_hash], &Cancel::new())
-            .unwrap();
+        let sizes = remote.file_sizes(&hashes, &Cancel::new()).unwrap();
 
-        assert_eq!(sizes.get(&ab_hash), Some(&3));
-        assert_eq!(sizes.get(&cd_hash), Some(&6));
+        for (index, hash) in hashes.iter().enumerate() {
+            assert_eq!(sizes.get(hash), Some(&((index + 1) as u64)));
+        }
 
         let log = std::fs::read_to_string(fixture.path().join("argv.log")).unwrap();
         let remote_root_url = format!("local:{}", remote_root.path().display());
+        assert_eq!(
+            log.lines().count(),
+            1,
+            "metadata must use one process: {log}"
+        );
         assert!(
-            log.contains(&format!("lsjson {remote_root_url}/files/sha256/ab")),
+            log.contains("lsjson --recursive --files-only --no-mimetype --no-modtime --disable ListR --files-from "),
             "argv: {log}"
         );
-        assert!(
-            log.contains(&format!("lsjson {remote_root_url}/files/sha256/cd")),
-            "argv: {log}"
-        );
-        assert!(
-            !log.contains(&format!("lsjson --recursive {remote_root_url}/files")),
-            "file_sizes must not list the whole remote object tree, argv: {log}"
-        );
+        assert!(log.trim_end().ends_with(&remote_root_url), "argv: {log}");
+        let listed = std::fs::read_to_string(fixture.path().join("files.log")).unwrap();
+        let expected = hashes
+            .iter()
+            .map(|hash| format!("files/sha256/{}/{}", hash.prefix(), hash))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(listed.trim_end(), expected);
     }
 
     #[test]
@@ -1725,7 +1558,12 @@ exit 0
         flaky_rclone(fixture.path(), 2, 5);
         let remote = remote_at(fixture.path(), temp_dir.path());
 
-        assert!(!remote.has_file(a_hash(), &Cancel::new()).unwrap());
+        assert!(
+            remote
+                .file_sizes(&[a_hash()], &Cancel::new())
+                .unwrap()
+                .is_empty()
+        );
         let count: u32 = std::fs::read_to_string(fixture.path().join("count"))
             .unwrap()
             .trim()
@@ -1743,7 +1581,7 @@ exit 0
         flaky_rclone(fixture.path(), 10, 7);
         let remote = remote_at(fixture.path(), temp_dir.path());
 
-        let err = remote.has_file(a_hash(), &Cancel::new()).unwrap_err();
+        let err = remote.file_sizes(&[a_hash()], &Cancel::new()).unwrap_err();
         assert!(matches!(
             err,
             RemoteError::Failed {
@@ -1768,7 +1606,7 @@ exit 0
         let cancel = Cancel::new();
 
         let cancel_for_worker = cancel.clone();
-        let handle = std::thread::spawn(move || remote.has_file(a_hash(), &cancel_for_worker));
+        let handle = std::thread::spawn(move || remote.file_sizes(&[a_hash()], &cancel_for_worker));
 
         std::thread::sleep(Duration::from_millis(150));
         cancel.cancel();
@@ -1845,6 +1683,7 @@ exit 0
         std::fs::create_dir_all(files_dir.join(rel.parent().unwrap())).unwrap();
         std::fs::write(files_dir.join(&rel), b"object bytes").unwrap();
         let remote_root = cache.path().join("remote-root");
+        std::fs::create_dir_all(&remote_root).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let remote = RcloneRemote::new(
@@ -1900,6 +1739,7 @@ exit 0
         std::fs::create_dir_all(files_dir.join(rel.parent().unwrap())).unwrap();
         std::fs::write(files_dir.join(&rel), b"object bytes").unwrap();
         let remote_root = cache.path().join("remote-root");
+        std::fs::create_dir_all(&remote_root).unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let remote = RcloneRemote::new(
@@ -1978,6 +1818,54 @@ exit 0
     }
 
     #[test]
+    fn copy_from_remote_transfers_sixty_objects_with_one_rclone_call() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let remote_root = tempfile::tempdir().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        copying_rclone(fixture.path());
+
+        let rel_paths = (0..60)
+            .map(|byte| {
+                let hash = Sha256::from_digest([byte; 32]);
+                Utf8PathBuf::from(format!("{ALGORITHM}/{}/{}", hash.prefix(), hash))
+            })
+            .collect::<Vec<_>>();
+        for (index, rel_path) in rel_paths.iter().enumerate() {
+            let source = remote_root.path().join("files").join(rel_path);
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(source, vec![index as u8; index + 1]).unwrap();
+        }
+
+        let remote = RcloneRemote::new(
+            format!("local:{}", remote_root.path().display()),
+            Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).unwrap(),
+        )
+        .with_rclone_bin(fixture.path().join("rclone").to_str().unwrap().to_owned());
+        let cache_files_dir = Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap();
+        remote
+            .copy_from_remote(&cache_files_dir, &rel_paths, &Cancel::new())
+            .unwrap();
+
+        for (index, rel_path) in rel_paths.iter().enumerate() {
+            assert_eq!(
+                std::fs::read(cache.path().join(rel_path)).unwrap(),
+                vec![index as u8; index + 1]
+            );
+        }
+        let log = std::fs::read_to_string(fixture.path().join("argv.log")).unwrap();
+        assert_eq!(
+            log.lines().count(),
+            1,
+            "transfer must use one process: {log}"
+        );
+        assert!(
+            log.contains("copy --ignore-existing --temp-dir ") && log.contains(" --files-from "),
+            "argv: {log}"
+        );
+    }
+
+    #[test]
     fn a_missing_transfer_list_is_a_noop() {
         let fixture = tempfile::tempdir().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1992,12 +1880,18 @@ exit 0
         remote
             .copy_from_remote(&cache_dir, &[], &Cancel::new())
             .unwrap();
+        assert!(remote.file_sizes(&[], &Cancel::new()).unwrap().is_empty());
     }
 
     #[test]
-    fn fake_remote_an_absent_object_is_false_not_an_error() {
+    fn fake_remote_omits_an_absent_object_without_an_error() {
         let remote = FakeRemote::new();
-        assert!(!remote.has_file(a_hash(), &Cancel::new()).unwrap());
+        assert!(
+            remote
+                .file_sizes(&[a_hash()], &Cancel::new())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2051,34 +1945,10 @@ exit 0
     }
 
     #[test]
-    fn fake_remote_verify_file_reports_corrupt_not_absent_for_tampered_bytes() {
-        let remote = FakeRemote::new();
-        let cache = tempfile::tempdir().unwrap();
-        let files_dir = Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap();
-        // Must land at the exact rel path `verify_file` looks up for
-        // `a_hash()` -- an arbitrary path would make the object simply
-        // unfindable and the test would pass for the wrong reason (Ok(false)
-        // from "absent", not from a genuine mismatch check).
-        let rel = FakeRemote::rel_path(a_hash());
-        std::fs::create_dir_all(files_dir.join(rel.parent().unwrap())).unwrap();
-        std::fs::write(files_dir.join(&rel), b"tampered on the way in").unwrap();
-        remote
-            .copy_to_remote(&files_dir, std::slice::from_ref(&rel), &Cancel::new())
-            .unwrap();
-
-        // `a_hash()` does not match the uploaded bytes' real hash, so this
-        // must be reported as corrupt, not merely absent.
-        let err = remote
-            .verify_file(a_hash(), &Cancel::new())
-            .expect_err("mismatched content must be an error, not Ok(false)");
-        assert!(matches!(err, RemoteError::HashMismatch { .. }));
-    }
-
-    #[test]
     fn fake_remote_marking_unreachable_makes_every_operation_fail_rather_than_report_empty() {
         let remote = FakeRemote::new();
         remote.set_unreachable();
-        let err = remote.has_file(a_hash(), &Cancel::new()).unwrap_err();
+        let err = remote.file_sizes(&[a_hash()], &Cancel::new()).unwrap_err();
         assert!(matches!(err, RemoteError::Failed { .. }));
     }
 

@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/Red-Eyed/git-sfs"
 # Cargo mirrors the release tag without its leading `v`; release binaries
 # embed and print the exact tag-shaped version through `GIT_SFS_VERSION`.
-version = "2.0.0-rc.3"
+version = "2.0.0-rc.4"
 
 [workspace.dependencies]
 git-sfs-core = { path = "crates/git-sfs-core" }

@@ -669,7 +669,7 @@ CLAUSES = [
         "remote errors must be classified structurally, not by English text",
         ASSERTED,
         "../../crates/git-sfs-core/src/ports/remote.rs",
-        "has_file_returns_an_error_when_the_remote_cannot_be_reached",
+        "file_sizes_returns_an_error_when_the_remote_cannot_be_reached",
     ),
     Clause(
         "13.3",
@@ -701,10 +701,10 @@ CLAUSES = [
     ),
     Clause(
         "13.4",
-        "FileSizes must not be O(entire remote)",
+        "object metadata must use one scoped rclone batch",
         ASSERTED,
         "../../crates/git-sfs-core/src/ports/remote.rs",
-        "file_sizes_lists_requested_prefixes_instead_of_the_entire_remote",
+        "file_sizes_queries_sixty_objects_with_one_scoped_rclone_call",
     ),
     Clause(
         "13.4b",

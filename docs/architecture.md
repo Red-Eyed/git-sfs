@@ -53,9 +53,9 @@ per file
 ```text
 repo.scan(scope)          collect git-sfs symlinks
 plan::push                deduplicate by hash; reject missing cache objects
-remote.file_sizes         batch-list requested remote paths
-remote.copy_to_remote     rclone copy --files-from to remote staging path
-remote.copy_to_remote     verify staged sizes, then rclone move --files-from
+remote.copy_to_remote     batch-list final paths; rclone copy --files-from
+remote.copy_to_remote     batch-verify staging; rclone move --files-from
+remote.copy_to_remote     batch-verify published paths
 ```
 
 Push stages under the configured remote itself, not a system temp directory.
@@ -69,6 +69,7 @@ pass.
 ```text
 repo.scan(scope)          collect git-sfs symlinks
 plan::pull                deduplicate by hash; skip verified local objects
+remote.file_sizes         one exact-path metadata batch via --files-from
 disk-space check          require enough free bytes for missing objects
 remote.copy_from_remote   rclone copy --files-from into cache-local staging
 store.adopt               hash-verify, set readonly mode, atomically publish
@@ -111,10 +112,10 @@ operations such as batch size listing, batch copy, and remote integrity checks;
 rclone-specific argv construction stays inside the adapter.
 
 Push and pull use batched `rclone copy --files-from` / `rclone move
---files-from` calls. Remote metadata checks list only requested prefixes where
-possible. Per-object subprocesses are avoided unless the operation is inherently
-object-specific, such as verifying remote bytes by downloading and hashing one
-object.
+--files-from` calls. Metadata uses one `rclone lsjson --files-from` call for the
+complete exact-path set. Remote integrity verification downloads its complete
+set in one batch and hashes each resulting local file; the remote interface does
+not expose object-at-a-time operations.
 
 ## What Deliberately Does Not Exist
 

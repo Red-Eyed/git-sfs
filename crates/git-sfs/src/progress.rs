@@ -151,10 +151,6 @@ impl<R> ProgressRemote<R> {
 }
 
 impl<R: Remote> Remote for ProgressRemote<R> {
-    fn require_exists(&self, cancel: &Cancel) -> RemoteResult<()> {
-        self.step("checking remote", |inner| inner.require_exists(cancel))
-    }
-
     fn check_backend(&self, cancel: &Cancel) -> RemoteResult<()> {
         self.step("checking remote backend", |inner| {
             inner.check_backend(cancel)
@@ -163,18 +159,6 @@ impl<R: Remote> Remote for ProgressRemote<R> {
 
     fn check_path(&self, cancel: &Cancel) -> RemoteResult<()> {
         self.step("checking remote path", |inner| inner.check_path(cancel))
-    }
-
-    fn has_file(&self, hash: Sha256, cancel: &Cancel) -> RemoteResult<bool> {
-        self.step("checking remote object", |inner| {
-            inner.has_file(hash, cancel)
-        })
-    }
-
-    fn file_size(&self, hash: Sha256, cancel: &Cancel) -> RemoteResult<Option<u64>> {
-        self.step("checking remote object size", |inner| {
-            inner.file_size(hash, cancel)
-        })
     }
 
     fn file_sizes(&self, hashes: &[Sha256], cancel: &Cancel) -> RemoteResult<HashMap<Sha256, u64>> {
@@ -202,12 +186,6 @@ impl<R: Remote> Remote for ProgressRemote<R> {
     ) -> RemoteResult<()> {
         self.inner
             .copy_from_remote(cache_files_dir, rel_paths, cancel)
-    }
-
-    fn verify_file(&self, hash: Sha256, cancel: &Cancel) -> RemoteResult<bool> {
-        self.step("verifying remote object", |inner| {
-            inner.verify_file(hash, cancel)
-        })
     }
 }
 
@@ -268,16 +246,6 @@ mod tests {
             Ok(())
         }
 
-        fn has_file(&self, _hash: Sha256, _cancel: &Cancel) -> RemoteResult<bool> {
-            self.record("has_file");
-            Ok(true)
-        }
-
-        fn file_size(&self, _hash: Sha256, _cancel: &Cancel) -> RemoteResult<Option<u64>> {
-            self.record("file_size");
-            Ok(Some(7))
-        }
-
         fn file_sizes(
             &self,
             hashes: &[Sha256],
@@ -306,11 +274,6 @@ mod tests {
             self.record("copy_from_remote");
             Ok(())
         }
-
-        fn verify_file(&self, _hash: Sha256, _cancel: &Cancel) -> RemoteResult<bool> {
-            self.record("verify_file");
-            Ok(true)
-        }
     }
 
     #[test]
@@ -323,9 +286,8 @@ mod tests {
         let cache_files_dir = Utf8Path::new("/cache/files");
         let rel_paths = vec![Utf8PathBuf::from("sha256/aa/aaaaaaaa")];
 
-        assert!(remote.require_exists(&cancel).is_ok());
-        assert!(remote.has_file(hash, &cancel).unwrap());
-        assert_eq!(remote.file_size(hash, &cancel).unwrap(), Some(7));
+        assert!(remote.check_backend(&cancel).is_ok());
+        assert!(remote.check_path(&cancel).is_ok());
         assert_eq!(
             remote.file_sizes(&[hash], &cancel).unwrap().get(&hash),
             Some(&7)
@@ -340,19 +302,14 @@ mod tests {
                 .copy_from_remote(cache_files_dir, &rel_paths, &cancel)
                 .is_ok()
         );
-        assert!(remote.verify_file(hash, &cancel).unwrap());
-
         assert_eq!(
             remote.inner.calls(),
             [
                 "check_backend",
                 "check_path",
-                "has_file",
-                "file_size",
                 "file_sizes",
                 "copy_to_remote",
-                "copy_from_remote",
-                "verify_file"
+                "copy_from_remote"
             ]
         );
     }

@@ -24,20 +24,10 @@ commit_all "track dataset"
   require push git_sfs push
 )
 
-# Deny only the object listing. The connectivity preflight issues `lsd local:`
-# and a bare `lsjson` on the remote root, neither of which is recursive, so
-# matching on --recursive lets the preflight pass and denies exactly the query
-# that enumerates objects.
-#
-# Targeting "/files/sha256/" instead would match nothing at all: no command
-# git-sfs issues names an individual object via lsjson. An earlier version of
-# this scenario did exactly that, and the fault never fired -- see README,
-# "Agreement is not correctness".
-inject_fault '{"subcommand": "lsjson", "contains": "--recursive", "exit": 1, "stderr": "403 Forbidden: access denied"}'
-
-# The other collapse site: with --with-integrity, verify fetches each object via
-# copyto, which also returns "absent" on any error.
-inject_fault '{"subcommand": "copyto", "exit": 1, "stderr": "403 Forbidden: access denied"}'
+# Deny the one exact-path metadata batch. Matching `--files-from` distinguishes
+# object-set lookup from doctor's connectivity probes without depending on any
+# individual object path.
+inject_fault '{"subcommand": "lsjson", "contains": "--files-from", "exit": 1, "stderr": "403 Forbidden: access denied"}'
 
 (
   cd "$REPO"
@@ -48,11 +38,11 @@ inject_fault '{"subcommand": "copyto", "exit": 1, "stderr": "403 Forbidden: acce
   record verify_integrity_denied git_sfs verify --check-remote --with-integrity data
 )
 
-# Deny everything, including the preflight. This pins the boundary between an
-# object-level lookup failure and a backend-level connectivity failure.
+# Deny doctor's distinct backend probe as well. Object commands never issue
+# this diagnostic call; they rely on their batched metadata/transfer operation.
 inject_fault '{"subcommand": "lsd", "exit": 1, "stderr": "403 Forbidden: access denied"}'
 
 (
   cd "$REPO"
-  record status_backend_denied git_sfs status --remote default
+  record doctor_backend_denied git_sfs doctor
 )

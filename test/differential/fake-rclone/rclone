@@ -39,7 +39,7 @@ TMPFILE_PLACEHOLDER = "{TMPFILE}"
 FILELIST_PLACEHOLDER = "{FILELIST}"
 REMOTE_TMP_PLACEHOLDER = "{REMOTE_TMP}"
 
-FLAGS_WITH_VALUE = {"--config", "--temp-dir", "--files-from"}
+FLAGS_WITH_VALUE = {"--config", "--temp-dir", "--files-from", "--disable"}
 
 
 def map_path(remote: str) -> Path:
@@ -208,6 +208,7 @@ def describe(path: Path, relative: str) -> dict:
 
 def do_lsjson(operands: list[str]) -> int:
     recursive = "--recursive" in operands
+    files_only = "--files-only" in operands
     targets = positional(operands)
     if not targets:
         return fail("lsjson: no target")
@@ -219,12 +220,22 @@ def do_lsjson(operands: list[str]) -> int:
         print(json.dumps([describe(target, target.name)]))
         return 0
 
+    selected = read_file_list(operands)
     entries = []
-    if recursive:
+    if selected:
+        for relative in selected:
+            path = target / relative
+            if path.is_file():
+                entries.append(describe(path, relative))
+    elif recursive:
         for path in sorted(target.rglob("*")):
+            if files_only and not path.is_file():
+                continue
             entries.append(describe(path, str(path.relative_to(target))))
     else:
         for path in sorted(target.iterdir()):
+            if files_only and not path.is_file():
+                continue
             entries.append(describe(path, path.name))
     print(json.dumps(entries))
     return 0

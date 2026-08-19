@@ -251,7 +251,10 @@ mod tests {
 
         assert_eq!(outcome.uploaded, vec![hash]);
         assert!(outcome.skipped.is_empty());
-        assert!(remote.has_file(hash, &cancel).unwrap());
+        assert_eq!(
+            remote.file_sizes(&[hash], &cancel).unwrap().get(&hash),
+            Some(&(bytes.len() as u64))
+        );
     }
 
     #[test]
@@ -316,6 +319,12 @@ mod tests {
             outcome.skipped[0].paths,
             vec![Utf8PathBuf::from("missing.bin")]
         );
-        assert!(remote.has_file(present, &cancel).unwrap());
+        assert_eq!(
+            remote
+                .file_sizes(&[present], &cancel)
+                .unwrap()
+                .get(&present),
+            Some(&(present_bytes.len() as u64))
+        );
     }
 }

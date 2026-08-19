@@ -256,8 +256,6 @@ fn run_push(cli: &Cli, args: &PushArgs, cancel: &Cancel) -> Result<()> {
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
     let remote =
         build_progress_remote(cli, &config, remote_name, config_path.parent(), &cache_root)?;
-    remote.require_exists(cancel)?;
-
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let _lock = with_spinner(!cli.global.quiet, "waiting for push lock", || {
         Lock::acquire(&locks_dir, LockName::Push, cancel)
@@ -300,8 +298,6 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
     let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
     let remote =
         build_progress_remote(cli, &config, remote_name, config_path.parent(), &cache_root)?;
-    remote.require_exists(cancel)?;
-
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
     let _lock = with_spinner(!cli.global.quiet, "waiting for pull lock", || {
         Lock::acquire(&locks_dir, LockName::Pull, cancel)
@@ -690,7 +686,6 @@ fn run_verify(cli: &Cli, args: &VerifyArgs, cancel: &Cancel) -> Result<()> {
         let remote_name = args.remote.as_deref().unwrap_or(DEFAULT_REMOTE_NAME);
         let remote =
             build_progress_remote(cli, &config, remote_name, config_path.parent(), &cache_root)?;
-        remote.require_exists(cancel)?;
         Some(remote)
     } else {
         None

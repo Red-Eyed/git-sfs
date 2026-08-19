@@ -67,6 +67,12 @@ basic verification pass.
 Pull downloads into cache-local staging, verifies SHA-256, and only then adopts
 objects into the cache.
 
+Every operation over a set of objects uses one rclone subprocess per distinct
+transfer or verification phase, regardless of object count. Metadata queries
+and transfers pass the complete set as exact relative paths with `--files-from`;
+they must not spawn per object or per hash prefix, or enumerate the entire
+remote object tree. A transient retry repeats the complete batch.
+
 ## Configuration
 
 `.git-sfs/config.toml` is committed. It may contain remote definitions and shared
