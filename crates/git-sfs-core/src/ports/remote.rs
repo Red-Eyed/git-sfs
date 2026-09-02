@@ -308,6 +308,7 @@ struct PipeMode {
     stderr_mirror: Mirror,
     stdout_capture: Capture,
     stderr_capture: Capture,
+    stderr_terminal: bool,
 }
 
 struct PipeCapture {
@@ -441,6 +442,17 @@ fn mirror_bytes(mirror: Mirror, bytes: &[u8]) {
 
 fn write_best_effort(mut out: impl io::Write, bytes: &[u8]) {
     let _result = out.write_all(bytes).and_then(|()| out.flush());
+}
+
+fn open_progress_terminal() -> Result<nix::pty::OpenptyResult, RemoteError> {
+    nix::pty::openpty(
+        None::<&nix::pty::Winsize>,
+        None::<&nix::sys::termios::Termios>,
+    )
+    .map_err(|source| RemoteError::Io {
+        command: "create rclone progress terminal".to_owned(),
+        source: io::Error::from(source),
+    })
 }
 
 /// The real, `rclone`-subprocess-backed [`Remote`].
@@ -584,6 +596,7 @@ impl RcloneRemote {
                 stderr_mirror: Mirror::None,
                 stdout_capture: Capture::Full,
                 stderr_capture: Capture::Full,
+                stderr_terminal: false,
             },
         )
     }
@@ -618,6 +631,7 @@ impl RcloneRemote {
                 },
                 stdout_capture: capture,
                 stderr_capture: capture,
+                stderr_terminal: self.transfer_progress,
             },
         )
     }
@@ -662,33 +676,47 @@ impl RcloneRemote {
         }
     }
 
-    /// Spawns `rclone`, draining stdout/stderr on their own threads so a
-    /// chatty child (a `copy` over many files) cannot deadlock against the
-    /// cancellation-poll loop below by filling its pipe buffer before this
-    /// process reads it. Polls `cancel` every [`POLL_INTERVAL`] while
-    /// waiting, since — unlike [`super::cancellable_io::Cancellable`], which
-    /// checks per read chunk because *we* own that loop — the byte-moving
-    /// loop here belongs to the child process, not to us; killing it is the
-    /// only way to stop it promptly.
+    /// Spawns `rclone`, draining stdout and either piped stderr or a progress
+    /// terminal on their own threads. The terminal matters because rclone
+    /// only emits its cursor-redrawing progress display when stderr is a TTY;
+    /// reading its master side still lets us retain failure diagnostics.
+    /// Concurrent draining prevents a chatty child from deadlocking against
+    /// the cancellation-poll loop below by filling an output buffer. Polls
+    /// `cancel` every [`POLL_INTERVAL`] while waiting, since — unlike
+    /// [`super::cancellable_io::Cancellable`], which checks per read chunk
+    /// because *we* own that loop — the byte-moving loop here belongs to the
+    /// child process, not to us; killing it is the only way to stop it
+    /// promptly.
     fn spawn_and_wait(
         &self,
         args: &[String],
         cancel: &Cancel,
         pipe_mode: PipeMode,
     ) -> Result<Invocation, RemoteError> {
-        let mut child = std::process::Command::new(&self.rclone_bin)
+        let mut command = std::process::Command::new(&self.rclone_bin);
+        command
             .args(args)
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|source| RemoteError::Io {
-                command: describe(&self.rclone_bin, args),
-                source,
-            })?;
+            .stdout(std::process::Stdio::piped());
+        let stderr_master = if pipe_mode.stderr_terminal {
+            let terminal = open_progress_terminal()?;
+            command.stderr(std::process::Stdio::from(terminal.slave));
+            Some(std::fs::File::from(terminal.master))
+        } else {
+            command.stderr(std::process::Stdio::piped());
+            None
+        };
+        let mut child = command.spawn().map_err(|source| RemoteError::Io {
+            command: describe(&self.rclone_bin, args),
+            source,
+        })?;
+        drop(command);
 
         let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
-        let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+        let mut stderr_pipe: Box<dyn io::Read + Send> = match stderr_master {
+            Some(master) => Box::new(master),
+            None => Box::new(child.stderr.take().expect("stderr was piped")),
+        };
         let stdout_handle = std::thread::spawn(move || {
             read_pipe(
                 &mut stdout_pipe,
@@ -1287,6 +1315,11 @@ exit 0
         let script = r#"#!/bin/sh
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 echo "$@" >> "$here/argv.log"
+if [ -t 2 ]; then
+  echo terminal >> "$here/stderr-mode.log"
+else
+  echo pipe >> "$here/stderr-mode.log"
+fi
 
 strip_backend() {
   case "$1" in
@@ -1725,6 +1758,8 @@ exit 0
             log.contains(temp_dir.path().to_str().unwrap()),
             "--temp-dir must point at this remote's own temp_dir, argv: {log}"
         );
+        let stderr_modes = std::fs::read_to_string(fixture.path().join("stderr-mode.log")).unwrap();
+        assert_eq!(stderr_modes, "pipe\npipe\npipe\npipe\npipe\n");
     }
 
     #[test]
@@ -1833,6 +1868,11 @@ exit 0
         assert!(
             log.contains("\ncopy --progress --ignore-existing "),
             "argv: {log}"
+        );
+        let stderr_modes = std::fs::read_to_string(fixture.path().join("stderr-mode.log")).unwrap();
+        assert_eq!(
+            stderr_modes,
+            "pipe\nterminal\npipe\nterminal\npipe\nterminal\n"
         );
     }
 

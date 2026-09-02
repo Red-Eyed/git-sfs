@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/Red-Eyed/git-sfs"
 # Cargo mirrors the release tag without its leading `v`; release binaries
 # embed and print the exact tag-shaped version through `GIT_SFS_VERSION`.
-version = "2.0.0-rc.4"
+version = "2.0.0-rc.5"
 
 [workspace.dependencies]
 git-sfs-core = { path = "crates/git-sfs-core" }
@@ -21,8 +21,9 @@ hex = "0.4"
 indicatif = "0.18"
 flate2 = "1.1"
 # `signal` is for Lock's PID-liveness check. `fs` is for pull's cache-volume
-# free-space guard before batched rclone downloads.
-nix = { version = "0.31", default-features = false, features = ["signal", "fs"] }
+# free-space guard. `term` gives progress-enabled rclone transfers a PTY so
+# their full cursor-redrawing display remains in place.
+nix = { version = "0.31", default-features = false, features = ["signal", "fs", "term"] }
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 proptest = "1.11"
