@@ -75,8 +75,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
   objects into the cache.
 - Show rclone's own transfer progress for `push` and `pull`, and silence it
   with `--quiet`.
-- Render rclone's full transfer progress in place instead of appending a new
-  terminal block for every refresh.
+- Render rclone's full transfer progress in place by giving its stdout renderer
+  a sized terminal instead of appending a new block for every refresh.
 - Show elapsed status spinners while scanning, hashing, verifying, importing,
   moving, setup, and self-update phases are running.
 - Skip downloading or hashing already-verified cache objects during ordinary

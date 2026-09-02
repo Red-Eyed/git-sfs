@@ -43,6 +43,14 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Rclone's progress stream is mirrored live; failures only need enough tail
 /// output to show the final error without retaining every terminal refresh.
 const TRANSFER_DIAGNOSTIC_LIMIT: usize = 64 * 1024;
+/// Rclone formats its progress display for 80 columns by default. A nonzero
+/// row count is also required for its terminal-size probe to succeed.
+const PROGRESS_TERMINAL_SIZE: nix::pty::Winsize = nix::pty::Winsize {
+    ws_row: 24,
+    ws_col: 80,
+    ws_xpixel: 0,
+    ws_ypixel: 0,
+};
 
 /// Why a [`Remote`] operation failed.
 #[derive(Debug, Error)]
@@ -308,7 +316,7 @@ struct PipeMode {
     stderr_mirror: Mirror,
     stdout_capture: Capture,
     stderr_capture: Capture,
-    stderr_terminal: bool,
+    stdout_terminal: bool,
 }
 
 struct PipeCapture {
@@ -446,7 +454,7 @@ fn write_best_effort(mut out: impl io::Write, bytes: &[u8]) {
 
 fn open_progress_terminal() -> Result<nix::pty::OpenptyResult, RemoteError> {
     nix::pty::openpty(
-        None::<&nix::pty::Winsize>,
+        Some(&PROGRESS_TERMINAL_SIZE),
         None::<&nix::sys::termios::Termios>,
     )
     .map_err(|source| RemoteError::Io {
@@ -596,7 +604,7 @@ impl RcloneRemote {
                 stderr_mirror: Mirror::None,
                 stdout_capture: Capture::Full,
                 stderr_capture: Capture::Full,
-                stderr_terminal: false,
+                stdout_terminal: false,
             },
         )
     }
@@ -631,7 +639,7 @@ impl RcloneRemote {
                 },
                 stdout_capture: capture,
                 stderr_capture: capture,
-                stderr_terminal: self.transfer_progress,
+                stdout_terminal: self.transfer_progress,
             },
         )
     }
@@ -676,10 +684,11 @@ impl RcloneRemote {
         }
     }
 
-    /// Spawns `rclone`, draining stdout and either piped stderr or a progress
-    /// terminal on their own threads. The terminal matters because rclone
-    /// only emits its cursor-redrawing progress display when stderr is a TTY;
-    /// reading its master side still lets us retain failure diagnostics.
+    /// Spawns `rclone`, draining either piped stdout or a progress terminal and
+    /// piped stderr on their own threads. Rclone writes its cursor-redrawing
+    /// progress display to stdout and truncates it to that terminal's reported
+    /// width, so the progress path needs a sized stdout TTY. Reading the
+    /// terminal's master side still lets us retain failure diagnostics.
     /// Concurrent draining prevents a chatty child from deadlocking against
     /// the cancellation-poll loop below by filling an output buffer. Polls
     /// `cancel` every [`POLL_INTERVAL`] while waiting, since — unlike
@@ -694,29 +703,27 @@ impl RcloneRemote {
         pipe_mode: PipeMode,
     ) -> Result<Invocation, RemoteError> {
         let mut command = std::process::Command::new(&self.rclone_bin);
-        command
-            .args(args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped());
-        let stderr_master = if pipe_mode.stderr_terminal {
+        command.args(args).stdin(std::process::Stdio::null());
+        let stdout_master = if pipe_mode.stdout_terminal {
             let terminal = open_progress_terminal()?;
-            command.stderr(std::process::Stdio::from(terminal.slave));
+            command.stdout(std::process::Stdio::from(terminal.slave));
             Some(std::fs::File::from(terminal.master))
         } else {
-            command.stderr(std::process::Stdio::piped());
+            command.stdout(std::process::Stdio::piped());
             None
         };
+        command.stderr(std::process::Stdio::piped());
         let mut child = command.spawn().map_err(|source| RemoteError::Io {
             command: describe(&self.rclone_bin, args),
             source,
         })?;
         drop(command);
 
-        let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
-        let mut stderr_pipe: Box<dyn io::Read + Send> = match stderr_master {
+        let mut stdout_pipe: Box<dyn io::Read + Send> = match stdout_master {
             Some(master) => Box::new(master),
-            None => Box::new(child.stderr.take().expect("stderr was piped")),
+            None => Box::new(child.stdout.take().expect("stdout was piped")),
         };
+        let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
         let stdout_handle = std::thread::spawn(move || {
             read_pipe(
                 &mut stdout_pipe,
@@ -1315,6 +1322,13 @@ exit 0
         let script = r#"#!/bin/sh
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 echo "$@" >> "$here/argv.log"
+if [ -t 1 ]; then
+  stty size <&1 > "$here/stdout-size.log"
+  size=$(cat "$here/stdout-size.log")
+  echo "terminal $size" >> "$here/stdout-mode.log"
+else
+  echo pipe >> "$here/stdout-mode.log"
+fi
 if [ -t 2 ]; then
   echo terminal >> "$here/stderr-mode.log"
 else
@@ -1758,6 +1772,8 @@ exit 0
             log.contains(temp_dir.path().to_str().unwrap()),
             "--temp-dir must point at this remote's own temp_dir, argv: {log}"
         );
+        let stdout_modes = std::fs::read_to_string(fixture.path().join("stdout-mode.log")).unwrap();
+        assert_eq!(stdout_modes, "pipe\npipe\npipe\npipe\npipe\n");
         let stderr_modes = std::fs::read_to_string(fixture.path().join("stderr-mode.log")).unwrap();
         assert_eq!(stderr_modes, "pipe\npipe\npipe\npipe\npipe\n");
     }
@@ -1869,11 +1885,13 @@ exit 0
             log.contains("\ncopy --progress --ignore-existing "),
             "argv: {log}"
         );
-        let stderr_modes = std::fs::read_to_string(fixture.path().join("stderr-mode.log")).unwrap();
+        let stdout_modes = std::fs::read_to_string(fixture.path().join("stdout-mode.log")).unwrap();
         assert_eq!(
-            stderr_modes,
-            "pipe\nterminal\npipe\nterminal\npipe\nterminal\n"
+            stdout_modes,
+            "pipe\nterminal 24 80\npipe\nterminal 24 80\npipe\nterminal 24 80\n"
         );
+        let stderr_modes = std::fs::read_to_string(fixture.path().join("stderr-mode.log")).unwrap();
+        assert_eq!(stderr_modes, "pipe\npipe\npipe\npipe\npipe\npipe\n");
     }
 
     #[test]
