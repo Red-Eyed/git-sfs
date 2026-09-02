@@ -1728,6 +1728,73 @@ exit 0
     }
 
     #[test]
+    fn copy_to_remote_uses_five_rclone_calls_for_sixty_objects() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        copying_rclone(fixture.path());
+
+        let files_dir = cache.path().join("files");
+        let rel_paths = (0..60)
+            .map(|byte| {
+                let hash = Sha256::from_digest([byte; 32]);
+                let rel = Utf8PathBuf::from(format!("{ALGORITHM}/{}/{}", hash.prefix(), hash));
+                let path = files_dir.join(&rel);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, vec![byte; usize::from(byte) + 1]).unwrap();
+                rel
+            })
+            .collect::<Vec<_>>();
+        let remote_root = cache.path().join("remote-root");
+        std::fs::create_dir_all(&remote_root).unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let remote = RcloneRemote::new(
+            format!("local:{}", remote_root.display()),
+            Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).unwrap(),
+        )
+        .with_rclone_bin(fixture.path().join("rclone").to_str().unwrap().to_owned());
+
+        remote
+            .copy_to_remote(
+                &Utf8PathBuf::from_path_buf(files_dir).unwrap(),
+                &rel_paths,
+                &Cancel::new(),
+            )
+            .unwrap();
+
+        let log = std::fs::read_to_string(fixture.path().join("argv.log")).unwrap();
+        let commands = log.lines().collect::<Vec<_>>();
+        assert_eq!(
+            commands.len(),
+            5,
+            "push must have fixed process count: {log}"
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.starts_with("lsjson "))
+                .count(),
+            3,
+            "push must batch each metadata phase: {log}"
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.starts_with("copy "))
+                .count(),
+            1,
+            "push must batch the upload: {log}"
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.starts_with("move "))
+                .count(),
+            1,
+            "push must batch publication: {log}"
+        );
+    }
+
+    #[test]
     fn transfers_pass_rclone_progress_when_enabled() {
         let fixture = tempfile::tempdir().unwrap();
         let cache = tempfile::tempdir().unwrap();
