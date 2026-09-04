@@ -17,15 +17,15 @@ use git_sfs_core::exec::doctor::{self, DoctorReport};
 use git_sfs_core::exec::import::{self, ImportOptions};
 use git_sfs_core::exec::init as init_cmd;
 use git_sfs_core::exec::mv;
-use git_sfs_core::exec::pull;
+use git_sfs_core::exec::pull::{self, PullOptions};
 use git_sfs_core::exec::push;
 use git_sfs_core::exec::remotes;
 use git_sfs_core::exec::setup as setup_cmd;
 use git_sfs_core::exec::status;
 use git_sfs_core::exec::verify::{self, VerifyError};
 use git_sfs_core::ports::{
-    FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote, detect_rclone_version, discover_repo,
-    purge_stale_tmp_files, resolve_cache_root,
+    DownloadVerification, FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote,
+    detect_rclone_version, discover_repo, purge_stale_tmp_files, resolve_cache_root,
 };
 use git_sfs_core::{Cancel, Error, Result};
 
@@ -305,6 +305,15 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
     let store = ProgressStore::new(FsStore::new(cache_root.clone()), !cli.global.quiet);
     let repo_port = ProgressRepo::new(FsRepo::new(repo), !cli.global.quiet);
     let cache_files_dir = cache_root.join("files");
+    let verification = if args.verify {
+        DownloadVerification::VerifySha256
+    } else {
+        DownloadVerification::TrustRemote
+    };
+    let options = PullOptions {
+        jobs: effective_jobs(cli.global.jobs, config.settings.jobs),
+        verification,
+    };
 
     let outcome = pull::pull(
         &repo_port,
@@ -312,10 +321,19 @@ fn run_pull(cli: &Cli, args: &PullArgs, cancel: &Cancel) -> Result<()> {
         &remote,
         &cache_files_dir,
         &args.path,
+        options,
         cancel,
     )?;
     reporting::pull_outcome(&outcome, RenderMode::from_quiet(cli.global.quiet));
     Ok(())
+}
+
+fn effective_jobs(cli_jobs: usize, configured_jobs: u32) -> usize {
+    if cli_jobs > 0 {
+        cli_jobs
+    } else {
+        configured_jobs as usize
+    }
 }
 
 fn purge_pull_tmp(cache_root: &camino::Utf8Path) -> Result<()> {
@@ -764,7 +782,8 @@ fn build_progress_remote(
     cache_root: &camino::Utf8Path,
 ) -> Result<ProgressRemote<RcloneRemote>> {
     let remote = build_rclone_remote(config, name, config_dir, cache_root)?
-        .with_transfer_progress(!cli.global.quiet);
+        .with_transfer_progress(!cli.global.quiet)
+        .with_transfer_jobs(effective_jobs(cli.global.jobs, config.settings.jobs));
     Ok(ProgressRemote::new(remote, !cli.global.quiet))
 }
 
@@ -873,6 +892,13 @@ mod tests {
         assert!(text.starts_with("# git-sfs\n"));
         assert!(text.contains("git-sfs llms-txt"));
         assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn command_line_jobs_override_pull_configuration() {
+        assert_eq!(effective_jobs(3, 7), 3);
+        assert_eq!(effective_jobs(0, 7), 7);
+        assert_eq!(effective_jobs(0, 0), 0);
     }
 
     #[test]

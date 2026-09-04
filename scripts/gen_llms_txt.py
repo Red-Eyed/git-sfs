@@ -93,7 +93,7 @@ def build() -> str:
 | `status` | `git-sfs status [-r NAME] [--json] [path]` | Show sizes and cache/remote presence |
 | `remotes` | `git-sfs remotes [--json]` | List configured remotes |
 | `push` | `git-sfs push [-r NAME] [--skip-missing] [path]` | Upload cached files to remote |
-| `pull` | `git-sfs pull [-r NAME] [path]` | Download missing files from remote |
+| `pull` | `git-sfs pull [-r NAME] [--verify] [path]` | Download missing files from remote |
 | `doctor` | `git-sfs doctor [-r NAME]` | Diagnose configuration and remote problems |
 | `self update` | `git-sfs self update [--pre]` | Update git-sfs and rclone; optionally include git-sfs prereleases |
 | `llms-txt` | `git-sfs llms-txt` | Print this document |"""

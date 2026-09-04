@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use std::io;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use rayon::prelude::*;
 use thiserror::Error;
 
 use crate::cancel::Cancel;
@@ -16,12 +17,24 @@ use crate::error::Error;
 use crate::plan::{
     InsufficientDiskSpace, TrackedLink, check_disk_space, plan_pull, sum_needed_bytes,
 };
-use crate::ports::{Remote, RemoteError, Repo, RepoError, ScannedEntry, Store, StoreError};
+use crate::ports::{
+    DownloadVerification, PullStore, Remote, RemoteError, Repo, RepoError, ScannedEntry, Store,
+    StoreError,
+};
+
+/// Pull execution policy chosen by the command-line edge.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PullOptions {
+    /// Maximum concurrent adoptions; zero lets rayon choose for this machine.
+    pub jobs: usize,
+    /// Whether downloaded bytes are trusted or re-hashed before publication.
+    pub verification: DownloadVerification,
+}
 
 /// What `pull` completed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullOutcome {
-    /// Objects downloaded and verified into the cache.
+    /// Objects downloaded and accepted into the cache.
     pub downloaded: Vec<Sha256>,
 }
 
@@ -31,7 +44,7 @@ pub enum PullError {
     /// The repository scan failed.
     #[error(transparent)]
     Repo(#[from] RepoError),
-    /// Local cache inspection, cleanup, or post-download verification failed.
+    /// Local cache inspection, cleanup, or download adoption failed.
     #[error(transparent)]
     Store(#[from] StoreError),
     /// Remote metadata or download failed.
@@ -46,8 +59,7 @@ pub enum PullError {
     /// The cache volume lacks enough free space for the planned download.
     #[error(transparent)]
     DiskSpace(#[from] InsufficientDiskSpace),
-    /// rclone reported success, but the cache object still was not present
-    /// and verified afterwards.
+    /// rclone reported success without creating a requested staged object.
     #[error("downloaded object missing from cache after pull: {hash}")]
     DownloadedObjectMissing {
         /// Hash that should have arrived.
@@ -62,6 +74,9 @@ pub enum PullError {
         #[source]
         source: io::Error,
     },
+    /// The bounded adoption worker pool could not be created.
+    #[error("could not create pull worker pool: {0}")]
+    Workers(#[source] rayon::ThreadPoolBuildError),
 }
 
 impl From<PullError> for Error {
@@ -77,7 +92,9 @@ impl From<PullError> for Error {
                 Error::Missing(err.to_string())
             }
             PullError::DiskSpace(err) => Error::Unavailable(err.to_string()),
-            PullError::Scratch { .. } => Error::Unavailable(err.to_string()),
+            PullError::Scratch { .. } | PullError::Workers(_) => {
+                Error::Unavailable(err.to_string())
+            }
         }
     }
 }
@@ -91,13 +108,14 @@ impl From<PullError> for Error {
 ///
 /// Returns [`PullError`] if the repository cannot be scanned, local cache state
 /// cannot be determined or repaired, the remote cannot satisfy the batch, or
-/// post-download verification fails.
+/// download adoption fails.
 pub fn pull(
     repo: &dyn Repo,
-    store: &dyn Store,
+    store: &dyn PullStore,
     remote: &dyn Remote,
     cache_files_dir: &Utf8Path,
     scope: &Utf8Path,
+    options: PullOptions,
     cancel: &Cancel,
 ) -> Result<PullOutcome, PullError> {
     let links = tracked_links(repo.scan(scope, cancel)?);
@@ -134,19 +152,61 @@ pub fn pull(
     let staged = staged_download(cache_files_dir)?;
     remote.copy_from_remote(&staged.files_dir, &rel_paths, cancel)?;
 
-    for &hash in &plan.download {
-        let staged_path = staged.files_dir.join(remote_rel_path(hash));
-        if !staged_path.is_file() {
-            return Err(PullError::DownloadedObjectMissing { hash });
-        }
-        store.adopt(&staged_path, hash, cancel)?;
-        if store.verified(hash, cancel)?.is_none() {
-            return Err(PullError::DownloadedObjectMissing { hash });
-        }
-    }
+    let downloads = staged_objects(&staged.files_dir, &plan.download)?;
+    AdoptionExecutor::new(options.jobs)?.run(store, &downloads, options.verification, cancel)?;
     Ok(PullOutcome {
         downloaded: plan.download,
     })
+}
+
+fn staged_objects(
+    files_dir: &Utf8Path,
+    hashes: &[Sha256],
+) -> Result<Vec<(Sha256, Utf8PathBuf)>, PullError> {
+    hashes
+        .iter()
+        .map(|&hash| {
+            let path = files_dir.join(remote_rel_path(hash));
+            if path.is_file() {
+                Ok((hash, path))
+            } else {
+                Err(PullError::DownloadedObjectMissing { hash })
+            }
+        })
+        .collect()
+}
+
+struct AdoptionExecutor {
+    pool: rayon::ThreadPool,
+}
+
+impl AdoptionExecutor {
+    fn new(jobs: usize) -> Result<Self, PullError> {
+        let mut builder = rayon::ThreadPoolBuilder::new();
+        if jobs > 0 {
+            builder = builder.num_threads(jobs);
+        }
+        Ok(Self {
+            pool: builder.build().map_err(PullError::Workers)?,
+        })
+    }
+
+    fn run(
+        &self,
+        store: &dyn PullStore,
+        downloads: &[(Sha256, Utf8PathBuf)],
+        verification: DownloadVerification,
+        cancel: &Cancel,
+    ) -> Result<(), PullError> {
+        self.pool.install(|| {
+            downloads.par_iter().try_for_each(|(hash, path)| {
+                store
+                    .accept_download(path, *hash, verification, cancel)
+                    .map(|_| ())
+                    .map_err(PullError::Store)
+            })
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -283,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn downloads_missing_objects_and_verifies_them() {
+    fn downloads_missing_objects_and_accepts_them() {
         let repo = FakeRepo::new("/repo");
         let remote = FakeRemote::new();
         let cache = tempfile::tempdir().unwrap();
@@ -301,12 +361,84 @@ mod tests {
             &remote,
             &cache_files_dir,
             Utf8Path::new("."),
+            PullOptions::default(),
             &Cancel::new(),
         )
         .unwrap();
 
         assert_eq!(outcome.downloaded, vec![hash]);
         assert!(store.verified(hash, &Cancel::new()).unwrap().is_some());
+    }
+
+    #[test]
+    fn trusted_pull_accepts_remote_bytes_without_rehashing() {
+        let repo = FakeRepo::new("/repo");
+        let remote = FakeRemote::new();
+        let cache = tempfile::tempdir().unwrap();
+        let cache_root = Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap();
+        let cache_files_dir = cache_root.join("files");
+        let store = FsStore::new(cache_root);
+        let hash = hash_bytes(b"expected bytes");
+        seed_link(&repo, "data.bin", hash);
+        seed_remote(&remote, &cache_files_dir, hash, b"remote bytes are trusted");
+
+        let outcome = pull(
+            &repo,
+            &store,
+            &remote,
+            &cache_files_dir,
+            Utf8Path::new("."),
+            PullOptions::default(),
+            &Cancel::new(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.downloaded, vec![hash]);
+        assert_eq!(
+            std::fs::read(store.object_path(hash)).unwrap(),
+            b"remote bytes are trusted"
+        );
+    }
+
+    #[test]
+    fn verified_pull_rejects_remote_hash_mismatch() {
+        let repo = FakeRepo::new("/repo");
+        let remote = FakeRemote::new();
+        let cache = tempfile::tempdir().unwrap();
+        let cache_root = Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap();
+        let cache_files_dir = cache_root.join("files");
+        let store = FsStore::new(cache_root);
+        let hash = hash_bytes(b"expected bytes");
+        seed_link(&repo, "data.bin", hash);
+        seed_remote(&remote, &cache_files_dir, hash, b"corrupt remote bytes");
+        let options = PullOptions {
+            jobs: 2,
+            verification: DownloadVerification::VerifySha256,
+        };
+
+        let error = pull(
+            &repo,
+            &store,
+            &remote,
+            &cache_files_dir,
+            Utf8Path::new("."),
+            options,
+            &Cancel::new(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PullError::Store(StoreError::HashMismatch { want, .. }) if want == hash
+        ));
+        assert!(!store.object_path(hash).exists());
+    }
+
+    #[test]
+    fn configured_adoption_pool_is_bounded() {
+        let executor = AdoptionExecutor::new(3).unwrap();
+
+        assert_eq!(executor.pool.current_num_threads(), 3);
     }
 
     #[test]
@@ -328,6 +460,7 @@ mod tests {
             &remote,
             &cache_files_dir,
             Utf8Path::new("."),
+            PullOptions::default(),
             &Cancel::new(),
         )
         .unwrap();
@@ -360,6 +493,7 @@ mod tests {
             &remote,
             &cache_files_dir,
             Utf8Path::new("."),
+            PullOptions::default(),
             &Cancel::new(),
         )
         .unwrap();
@@ -386,6 +520,7 @@ mod tests {
             &remote,
             &cache_files_dir,
             Utf8Path::new("."),
+            PullOptions::default(),
             &Cancel::new(),
         )
         .unwrap_err();

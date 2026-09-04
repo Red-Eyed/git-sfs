@@ -10,7 +10,10 @@ Every cached file path includes the SHA-256 hash of its bytes:
 files/sha256/ab/<full_hash>
 ```
 
-`git-sfs` verifies bytes before accepting downloaded files or using cached files.
+`git-sfs` verifies bytes during local ingest. Pull trusts rclone's successful
+transfer result by default so large downloads are not read from disk a second
+time. Use `git-sfs pull --verify` to recalculate SHA-256 before accepting each
+download.
 
 ## Local Writes
 
@@ -27,8 +30,8 @@ work promptly instead of running to completion.
 
 Cancellation is safe: in-progress writes go to a temporary file that is only
 renamed into place once complete, so an interrupted `add`, `import`, or `pull`
-never publishes a partial cache file. Rerun the command to resume — already-valid
-files are skipped.
+never publishes a partial cache file. Rerun the command to resume — already
+accepted files are skipped.
 
 An interrupted run reports `canceled` and exits with status `130`.
 
@@ -71,7 +74,7 @@ git-sfs verify --rehash --rehash-sample 500  # spot-check 500 random files
 If the remote still has a valid copy, remove the corrupt cached file and pull:
 
 ```sh
-git-sfs pull <path>
+git-sfs pull --verify <path>
 git-sfs verify
 ```
 

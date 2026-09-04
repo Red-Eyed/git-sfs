@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/Red-Eyed/git-sfs"
 # Cargo mirrors the release tag without its leading `v`; release binaries
 # embed and print the exact tag-shaped version through `GIT_SFS_VERSION`.
-version = "2.0.0-rc.6"
+version = "2.0.0-rc.7"
 
 [workspace.dependencies]
 git-sfs-core = { path = "crates/git-sfs-core" }
@@ -27,6 +27,7 @@ nix = { version = "0.31", default-features = false, features = ["signal", "fs", 
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 proptest = "1.11"
+rayon = "1.11"
 serde = { version = "1.0", features = ["derive"] }
 # rclone metadata and GitHub's published-release list.
 serde_json = "1.0"

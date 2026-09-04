@@ -72,11 +72,13 @@ plan::pull                deduplicate by hash; skip verified local objects
 remote.file_sizes         one exact-path metadata batch via --files-from
 disk-space check          require enough free bytes for missing objects
 remote.copy_from_remote   rclone copy --files-from into cache-local staging
-store.adopt               hash-verify, set readonly mode, atomically publish
+store.accept_download     set readonly mode, atomically publish; hash if requested
 ```
 
-Pull downloads into `<cache>/tmp`, verifies bytes by hash, and only then makes
-objects visible in `<cache>/files/sha256/...`.
+Pull downloads into `<cache>/tmp` and trusts rclone by default, adopting each
+completed file with a cache-local rename. `pull --verify` hashes staged bytes
+before making them visible in `<cache>/files/sha256/...`. Adoption uses a
+bounded worker pool, and `-j` also maps to rclone's `--transfers` setting.
 
 ## Symlink Format
 

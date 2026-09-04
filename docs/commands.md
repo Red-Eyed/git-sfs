@@ -12,9 +12,9 @@ git-sfs --version
 `--verbose` prints command debug output to stderr, including remote subprocess
 commands when a remote backend is involved.
 
-`-j`, `--jobs` sets the maximum number of parallel workers for commands that
-process many files (`add`, `import`, `setup`, `verify`, `pull`). It overrides
-`[settings].n_jobs` from the config; `0` (the default) means auto.
+`-j`, `--jobs` sets the maximum concurrent rclone transfers and pull adoption
+workers. It overrides `[settings].n_jobs` from the config; `0` (the default)
+leaves the automatic/default worker choice in place.
 
 `--quiet` silences normal output, including elapsed status spinners and
 rclone's transfer progress during `push`/`pull`.
@@ -83,9 +83,6 @@ For each regular file, `git-sfs`:
 - stores bytes in the cache
 - replaces the file with a relative symlink
 
-When `.git-sfs/config.toml` sets `[settings].n_jobs`, `git-sfs add` hashes and
-stores files with that worker limit before rewriting the repo paths.
-
 ## git-sfs import
 
 Import an external file into the cache and create a symlink inside the repository:
@@ -107,9 +104,6 @@ git-sfs import /mnt/incoming/dataset data/dataset
 ```sh
 git-sfs import --move /mnt/incoming/dataset data/dataset
 ```
-
-When `.git-sfs/config.toml` sets `[settings].n_jobs`, unique source files are
-prepared with that worker limit before destination symlinks are written.
 
 By default, source symlinks are rejected. To follow source symlinks and import
 the files they resolve to:
@@ -153,8 +147,6 @@ local integrity gate.
 `--check-remote` also checks that tracked hashes are present on the configured
 default remote, so another machine can pull and materialize the same symlinks.
 `-r remote` checks against a named remote and turns on the remote check.
-
-Remote checks use `[settings].n_jobs` when it is set. `0` means auto.
 
 `--with-integrity` additionally recalculates hashes for local cache files, and
 for remote files when remote checking is enabled. This is slower, but it catches
@@ -282,12 +274,18 @@ git-sfs pull
 git-sfs pull data/train-000.tar.zst
 git-sfs pull data/
 git-sfs pull -r backup data/
+git-sfs pull --verify data/
 ```
 
 `-r remote` pulls from a named remote instead of `default`.
 
-Downloaded bytes are hash-verified before being accepted.
-Missing hashes are downloaded with `[settings].n_jobs` worker slots when configured.
+By default, a successful rclone download is trusted and each staged file is
+atomically renamed into the cache without rereading its bytes. `--verify`
+recalculates SHA-256 before accepting each download; use it when the remote or
+transport must not be trusted.
+
+`-j` or `[settings].n_jobs` caps both rclone's concurrent transfers and the
+post-transfer adoption workers.
 
 When a path is provided, only symlinks below that path are considered. This is
 the intended way to partially pull a dataset from the remote.

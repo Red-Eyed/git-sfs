@@ -290,6 +290,10 @@ pub struct PullArgs {
     #[arg(short = 'r', long = "remote", value_name = "NAME")]
     pub remote: Option<String>,
 
+    /// verify each download against its SHA-256 before accepting it
+    #[arg(long)]
+    pub verify: bool,
+
     /// path to pull
     #[arg(value_name = "PATH", default_value = ".")]
     pub path: Utf8PathBuf,
@@ -454,6 +458,21 @@ mod tests {
             Some(Command::SelfCmd(SelfCommand::Update(SelfUpdateArgs {
                 pre: true
             })))
+        ));
+    }
+
+    #[test]
+    fn pull_verification_is_opt_in() {
+        let parsed = parse(&["git-sfs", "pull", "--verify"]);
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Pull(PullArgs { verify: true, .. }))
+        ));
+
+        let parsed = parse(&["git-sfs", "pull"]);
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Pull(PullArgs { verify: false, .. }))
         ));
     }
 

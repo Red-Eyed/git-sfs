@@ -13,7 +13,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use git_sfs_core::Cancel;
 use git_sfs_core::domain::Sha256;
 use git_sfs_core::ports::{
-    CacheEntry, FoundEntry, Remote, RemoteError, Repo, RepoError, ScannedEntry, Store, StoreError,
+    CacheEntry, DownloadVerification, FoundEntry, PullStore, Remote, RemoteError, Repo, RepoError,
+    ScannedEntry, Store, StoreError,
 };
 
 const TICK: Duration = Duration::from_millis(120);
@@ -128,6 +129,25 @@ impl<S: Store> Store for ProgressStore<S> {
             format!("removing cache object {}", hash.short()),
             || self.inner.remove_object(hash),
         )
+    }
+}
+
+impl<S: PullStore> PullStore for ProgressStore<S> {
+    fn accept_download(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        verification: DownloadVerification,
+        cancel: &Cancel,
+    ) -> StoreResult<CacheEntry> {
+        let action = match verification {
+            DownloadVerification::TrustRemote => "adopting",
+            DownloadVerification::VerifySha256 => "verifying",
+        };
+        with_spinner(self.enabled, format!("{action} {source}"), || {
+            self.inner
+                .accept_download(source, hash, verification, cancel)
+        })
     }
 }
 

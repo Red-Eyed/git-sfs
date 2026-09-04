@@ -24,16 +24,15 @@ use crate::error::Error;
 use super::cancellable_io::{Cancellable, is_canceled};
 use super::hashing;
 
-/// Proof that a hash's bytes are, at time of construction, verified present in
-/// the cache.
+/// Proof that a hash's bytes are, at time of construction, accepted in the
+/// cache.
 ///
 /// No public constructor and no public fields: the only way to obtain one is
-/// [`Store::verified`] or [`Store::store`], both of which either trust an
-/// already-protected read-only object or freshly hash-verify one before
-/// returning it. A function that needs trustworthy bytes takes `&CacheEntry`,
-/// never a bare [`Sha256`].
+/// through a store operation. Protected objects downloaded without explicit
+/// verification are trusted on rclone's successful transfer result; callers
+/// that require byte-level proof must request a rehash.
 ///
-/// This proves "verified at construction", not "verified now": another
+/// This proves "accepted at construction", not "unchanged now": another
 /// process can still chmod or truncate the file after this value is created.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacheEntry {
@@ -41,6 +40,17 @@ pub struct CacheEntry {
     // `path` is derived solely from `hash` and the store root, so it is not
     // stored -- keeping the type to exactly the fields that can vary would
     // otherwise invite two copies of the same information to drift apart.
+}
+
+/// Whether a downloaded object is accepted from the remote as-is or checked
+/// against the SHA-256 encoded in its destination path.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DownloadVerification {
+    /// Trust rclone's successful transfer and publish without reading the bytes.
+    #[default]
+    TrustRemote,
+    /// Re-read the complete download and reject a SHA-256 mismatch.
+    VerifySha256,
 }
 
 /// Removes stale top-level files from `<cache_root>/tmp`, returning how many
@@ -130,7 +140,7 @@ fn set_dir_mode(path: &Utf8Path, mode: u32) -> Result<(), StoreError> {
 }
 
 impl CacheEntry {
-    /// The hash this entry proves is present and verified.
+    /// The hash this entry proves is accepted in the cache.
     #[must_use]
     pub fn hash(&self) -> Sha256 {
         self.hash
@@ -183,19 +193,20 @@ pub trait Store {
     /// Where `hash`'s object lives, whether or not it currently exists.
     fn object_path(&self, hash: Sha256) -> Utf8PathBuf;
 
-    /// Whether `hash` is present and trustworthy.
+    /// Whether `hash` is present and accepted by the configured trust policy.
     ///
     /// Three outcomes, not two: `Ok(None)` means genuinely absent;
-    /// `Ok(Some(_))` means present and verified. Read-only objects are trusted
-    /// without re-hashing; writable objects are hash-verified and protected in
-    /// place. `Err` means the question could not be answered. A caller that
-    /// cannot reach the cache must never mistake that for an empty cache.
+    /// `Ok(Some(_))` means present and accepted. Read-only objects are trusted
+    /// without re-hashing, including pull downloads accepted from rclone;
+    /// writable objects are hash-verified and protected in place. `Err` means
+    /// the question could not be answered. A caller that cannot reach the cache
+    /// must never mistake that for an empty cache.
     ///
     /// # Errors
     ///
     /// Returns [`StoreError::Io`] if presence could not be determined, and
     /// [`StoreError::HashMismatch`] if an object exists at the path but its
-    /// content does not match `hash` — corrupt, not absent.
+    /// writable content does not match `hash` — corrupt, not absent.
     fn verified(&self, hash: Sha256, cancel: &Cancel) -> Result<Option<CacheEntry>, StoreError>;
 
     /// Force-hash `hash`'s local bytes, returning `None` only when the object
@@ -307,6 +318,28 @@ pub trait Store {
     fn remove_object(&self, hash: Sha256) -> Result<(), StoreError>;
 }
 
+/// Cache operations used specifically to publish completed pull downloads.
+///
+/// Pull can either trust rclone or request the same full verification used by
+/// [`Store::adopt`]. Implementations must publish atomically so an incomplete
+/// object is never visible at its final cache path.
+pub trait PullStore: Store + Sync {
+    /// Moves one completed download into the cache according to `verification`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::HashMismatch`] when verification is requested and
+    /// the bytes do not match `hash`, [`StoreError::Io`] when publication
+    /// fails, or [`StoreError::Canceled`] when cancellation is observed.
+    fn accept_download(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        verification: DownloadVerification,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError>;
+}
+
 /// The real, filesystem-backed [`Store`].
 pub struct FsStore {
     root: Utf8PathBuf,
@@ -318,6 +351,53 @@ impl FsStore {
     #[must_use]
     pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
         Self { root: root.into() }
+    }
+
+    fn accept_trusted_download(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        if let Some(entry) = self.verified(hash, cancel)? {
+            if !same_file(source, &self.object_path(hash))? {
+                std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
+                    path: source.to_owned(),
+                    source: source_err,
+                })?;
+            }
+            return Ok(entry);
+        }
+        if cancel.is_canceled() {
+            return Err(StoreError::Canceled);
+        }
+
+        let dst = self.object_path(hash);
+        let parent = dst
+            .parent()
+            .expect("cache object paths always have a parent directory");
+        std::fs::create_dir_all(parent).map_err(|source_err| StoreError::Io {
+            path: parent.to_owned(),
+            source: source_err,
+        })?;
+
+        let mut permissions = std::fs::metadata(source)
+            .map_err(|source_err| StoreError::Io {
+                path: source.to_owned(),
+                source: source_err,
+            })?
+            .permissions();
+        permissions.set_mode(permissions.mode() & !0o222);
+        std::fs::set_permissions(source, permissions).map_err(|source_err| StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        })?;
+
+        std::fs::rename(source, &dst).map_err(|source_err| StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        })?;
+        Ok(CacheEntry { hash })
     }
 }
 
@@ -336,8 +416,9 @@ impl Store for FsStore {
 
         let mode = metadata.permissions().mode();
         if mode & 0o222 == 0 {
-            // Read-only: write-protection was set only after a prior hash
-            // verification, so the bytes cannot have changed since. No re-hash.
+            // Read-only objects were either verified locally or accepted from
+            // rclone under pull's default trust policy. In both cases the
+            // protected mode is the cache fast-path marker.
             return Ok(Some(CacheEntry { hash }));
         }
 
@@ -636,6 +717,21 @@ impl Store for FsStore {
             Ok(()) => Ok(()),
             Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(source) => Err(StoreError::Io { path, source }),
+        }
+    }
+}
+
+impl PullStore for FsStore {
+    fn accept_download(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        verification: DownloadVerification,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        match verification {
+            DownloadVerification::TrustRemote => self.accept_trusted_download(source, hash, cancel),
+            DownloadVerification::VerifySha256 => self.adopt(source, hash, cancel),
         }
     }
 }
@@ -957,6 +1053,37 @@ impl Store for FakeStore {
     }
 }
 
+impl PullStore for FakeStore {
+    fn accept_download(
+        &self,
+        source: &Utf8Path,
+        hash: Sha256,
+        verification: DownloadVerification,
+        cancel: &Cancel,
+    ) -> Result<CacheEntry, StoreError> {
+        if verification == DownloadVerification::VerifySha256 {
+            return self.adopt(source, hash, cancel);
+        }
+        if cancel.is_canceled() {
+            return Err(StoreError::Canceled);
+        }
+
+        let bytes = std::fs::read(source).map_err(|source_err| StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        })?;
+        self.objects
+            .lock()
+            .expect("fake store mutex poisoned")
+            .insert(hash, bytes);
+        std::fs::remove_file(source).map_err(|source_err| StoreError::Io {
+            path: source.to_owned(),
+            source: source_err,
+        })?;
+        Ok(CacheEntry { hash })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -1005,6 +1132,37 @@ mod tests {
 
         // A second store() of the same content is a verified no-op, not an error.
         assert_eq!(store.store(&source, hash, &cancel).unwrap().hash(), hash);
+    }
+
+    #[test]
+    fn trusted_download_is_renamed_without_hashing() {
+        let cache = tempfile::tempdir().unwrap();
+        let cache_root = Utf8PathBuf::from_path_buf(cache.path().to_owned()).unwrap();
+        let source_dir = cache_root.join("pull-staging");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let source = source_dir.join("object");
+        std::fs::write(&source, b"trusted remote bytes").unwrap();
+        let source_inode = std::fs::metadata(&source).unwrap().ino();
+        let claimed_hash = hash_of(b"different bytes");
+        let store = FsStore::new(cache_root);
+
+        store
+            .accept_download(
+                &source,
+                claimed_hash,
+                DownloadVerification::TrustRemote,
+                &Cancel::new(),
+            )
+            .unwrap();
+
+        let object = store.object_path(claimed_hash);
+        assert!(!source.exists());
+        assert_eq!(std::fs::metadata(&object).unwrap().ino(), source_inode);
+        assert_eq!(std::fs::read(&object).unwrap(), b"trusted remote bytes");
+        assert_eq!(
+            std::fs::metadata(&object).unwrap().permissions().mode() & 0o222,
+            0
+        );
     }
 
     #[test]

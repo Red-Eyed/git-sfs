@@ -486,6 +486,7 @@ pub struct RcloneRemote {
     /// `cargo test`'s parallel execution.
     rclone_bin: String,
     transfer_progress: bool,
+    transfer_jobs: usize,
 }
 
 impl RcloneRemote {
@@ -501,6 +502,7 @@ impl RcloneRemote {
             initial_backoff: Duration::from_secs(1),
             rclone_bin: "rclone".to_owned(),
             transfer_progress: false,
+            transfer_jobs: 0,
         }
     }
 
@@ -525,6 +527,14 @@ impl RcloneRemote {
     #[must_use]
     pub fn with_transfer_progress(mut self, enabled: bool) -> Self {
         self.transfer_progress = enabled;
+        self
+    }
+
+    /// Sets rclone's maximum number of concurrent file transfers. Zero leaves
+    /// rclone's own automatic/default choice unchanged.
+    #[must_use]
+    pub fn with_transfer_jobs(mut self, jobs: usize) -> Self {
+        self.transfer_jobs = jobs;
         self
     }
 
@@ -615,6 +625,13 @@ impl RcloneRemote {
         cancel: &Cancel,
     ) -> Result<String, RemoteError> {
         let mut args = subcommand_args.to_vec();
+        if self.transfer_jobs > 0 {
+            let flag_position = args.len().min(1);
+            args.splice(
+                flag_position..flag_position,
+                ["--transfers".to_owned(), self.transfer_jobs.to_string()],
+            );
+        }
         if self.transfer_progress {
             args.insert(args.len().min(1), "--progress".to_owned());
         }
@@ -1865,7 +1882,8 @@ exit 0
             Utf8PathBuf::from_path_buf(temp_dir.path().to_owned()).unwrap(),
         )
         .with_rclone_bin(fixture.path().join("rclone").to_str().unwrap().to_owned())
-        .with_transfer_progress(true);
+        .with_transfer_progress(true)
+        .with_transfer_jobs(7);
 
         let files_dir_utf8 = Utf8PathBuf::from_path_buf(files_dir).unwrap();
         remote
@@ -1876,13 +1894,16 @@ exit 0
             .unwrap();
 
         let log = std::fs::read_to_string(fixture.path().join("argv.log")).unwrap();
-        assert!(log.contains("\ncopy --progress --checksum "), "argv: {log}");
         assert!(
-            log.contains("\nmove --progress --ignore-existing "),
+            log.contains("\ncopy --progress --transfers 7 --checksum "),
             "argv: {log}"
         );
         assert!(
-            log.contains("\ncopy --progress --ignore-existing "),
+            log.contains("\nmove --progress --transfers 7 --ignore-existing "),
+            "argv: {log}"
+        );
+        assert!(
+            log.contains("\ncopy --progress --transfers 7 --ignore-existing "),
             "argv: {log}"
         );
         let stdout_modes = std::fs::read_to_string(fixture.path().join("stdout-mode.log")).unwrap();

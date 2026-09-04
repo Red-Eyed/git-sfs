@@ -48,7 +48,8 @@ pub struct Settings {
     /// away because the schema still names it explicitly and a future minor
     /// version could widen it.
     pub algorithm: String,
-    /// `n_jobs` in the file. `0` means auto.
+    /// `n_jobs` in the file. Caps rclone transfers and pull adoption workers;
+    /// `0` leaves automatic/default choices in place.
     pub jobs: u32,
     /// Retries per rclone call on transient failures.
     pub retry_max: Option<i64>,
@@ -76,7 +77,7 @@ path = "your/remote/path"        # replace with the path within that remote
 [settings]
 # Only sha256 is supported.
 algorithm = "sha256"
-# Optional: cap parallel work for push, pull, verify, add, and import.
+# Optional: cap concurrent rclone transfers and pull adoption workers.
 # 0 means auto.
 n_jobs = 0
 # Optional: retries for each rclone call on transient failures. Default 3.

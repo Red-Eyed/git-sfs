@@ -48,9 +48,10 @@ Cache files are content-addressed, write-once, and stored read-only. A writable
 cache object is unverified: commands must hash-check it before trusting it and
 then restore the read-only mode.
 
-All cache writes stage in the cache tree, never a system temp directory. Bytes
-are verified before publication; publication is a same-directory rename; parent
-directories are synced after rename where durability matters.
+All cache writes stage in the cache tree, never a system temp directory. Local
+ingest and copy operations verify bytes before publication; publication is a
+same-directory rename; parent directories are synced after rename where
+durability matters.
 
 ## Remote Layout
 
@@ -64,8 +65,9 @@ Push stages uploads under a remote temp prefix that is scoped to the repository
 and process. Final remote objects are published only after the batch transfer and
 basic verification pass.
 
-Pull downloads into cache-local staging, verifies SHA-256, and only then adopts
-objects into the cache.
+Pull downloads into cache-local staging and atomically renames completed objects
+into the cache. It trusts rclone by default and does not reread downloaded bytes.
+`pull --verify` recalculates SHA-256 before adoption.
 
 Every operation over a set of objects uses one rclone subprocess per distinct
 transfer or verification phase, regardless of object count. Metadata queries
@@ -120,6 +122,8 @@ shapes are documented by the commands that emit them.
 - A remote error is not the same as an empty remote.
 - A protected cache object may be trusted for fast paths, but `--rehash` and
   remote-integrity checks must read bytes and verify hashes.
+- Pull trusts rclone's successful transfer result by default. `pull --verify`
+  must reject a downloaded object whose bytes do not match its path hash.
 - Commands must fail loudly rather than publish or accept incomplete state.
 
 ## Release Artifacts

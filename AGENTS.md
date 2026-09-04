@@ -14,7 +14,10 @@ for on-disk layout, command behavior, and reliability requirements.
 
 Reliability requirements that follow from this:
 
-- Never silently drop, truncate, or corrupt a cached file. Hash-verify at every boundary: after hashing, after download, after copy.
+- Never silently drop or truncate a cached file. Local ingest and copy boundaries
+  are hash-verified. Pull trusts a successful rclone transfer by default to
+  avoid rereading large downloads; `pull --verify` enables SHA-256 verification
+  before adoption.
 - Never modify a file the user did not explicitly hand to git-sfs (e.g. do not chmod source files during import).
 - Prefer failing loudly with a clear error over proceeding with incomplete state.
 - Atomic writes (temp file + rename) are mandatory wherever a partial file would be worse than no file.
@@ -100,7 +103,8 @@ Release versions are tracked by Git tags and should be embedded into built binar
 - Keep CLI parsing thin; put behavior in the `exec`/command layer, never in the argument grammar itself.
 - Keep Git and filesystem state as the source of truth.
 - Use temp files plus atomic rename for file writes.
-- Hash-verify bytes before accepting cache or remote files.
+- Hash-verify local ingest and copy operations. Pull may trust rclone only when
+  the user has not requested `pull --verify`.
 - Comments are welcome when they explain invariants, safety behavior, or non-obvious control flow.
 - Avoid comments that merely restate a line of code.
 
@@ -131,7 +135,7 @@ When changing storage, symlink, cache, or remote behavior, add or update tests f
 
 - Correct symlink target format
 - Missing cache file detection
-- Corrupt cache or remote file rejection
+- Corrupt cache rejection and corrupt remote rejection with `pull --verify`
 - Pull after cache file removal
 - Push skipping existing remote files
 - Retry-safe temp-file behavior where practical

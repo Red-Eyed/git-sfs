@@ -6,7 +6,7 @@
 
 - Ship the Rust implementation as the stable `git-sfs` release line.
 - Make cache, remote, and installer writes atomic: bytes stage in project-owned
-  temp locations and publish only after verification.
+  temp locations and publish only after the producing operation completes.
 - Batch remote transfers and metadata checks through rclone instead of spawning
   one process per object.
 - Show rclone's live transfer progress, speed, and ETA during `push` and
@@ -48,6 +48,16 @@ Rewrite the value to the path shown by the error before continuing.
 Remote lookup failures are no longer collapsed into `false`. JSON consumers
 must handle a remote state that can be present, absent, or unknown with a cause.
 
+#### Pull Integrity
+
+##### Pull trusts successful rclone transfers by default
+
+Earlier prereleases recalculated SHA-256 for every download after rclone had
+finished, requiring a second complete disk read before adoption. Pull now
+atomically renames completed staged files into the cache without rereading them.
+Users who do not trust the remote or transport must run `git-sfs pull --verify`
+to retain pre-adoption SHA-256 verification.
+
 ### New Features
 
 - Add `git-sfs self update` to update both `git-sfs` and `rclone` with checksum
@@ -71,8 +81,8 @@ must handle a remote state that can be present, absent, or unknown with a cause.
   interrupted writes leave no final partial cache object.
 - Stage `push` uploads under a remote temp prefix and publish final remote
   objects only after the batch transfer and size verification pass.
-- Stage `pull` downloads in cache-owned temp storage, verify SHA-256, then adopt
-  objects into the cache.
+- Stage `pull` downloads in cache-owned temp storage, then atomically adopt
+  completed objects into the cache.
 - Show rclone's own transfer progress for `push` and `pull`, and silence it
   with `--quiet`.
 - Render rclone's full transfer progress in place by giving its stdout renderer
@@ -110,6 +120,9 @@ must handle a remote state that can be present, absent, or unknown with a cause.
 ### Performance
 
 - Use batched `rclone copy --files-from` transfers for push and pull.
+- Make `-j` and `[settings].n_jobs` cap rclone transfer concurrency and pull's
+  bounded adoption workers.
+- Avoid a second complete disk read after pull unless `--verify` is requested.
 - Query remote metadata by requested object prefixes instead of listing the
   entire remote for small scoped operations.
 - Deduplicate work by object hash so identical file contents are stored,

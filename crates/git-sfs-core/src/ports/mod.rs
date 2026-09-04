@@ -28,4 +28,7 @@ pub use local_state::{
 pub use lock::{Lock, LockError, LockName};
 pub use remote::{FakeRemote, RcloneRemote, Remote, RemoteError, detect_rclone_version};
 pub use repo::{FakeRepo, FoundEntry, FsRepo, InvalidReason, Repo, RepoError, ScannedEntry};
-pub use store::{CacheEntry, FakeStore, FsStore, Store, StoreError, purge_stale_tmp_files};
+pub use store::{
+    CacheEntry, DownloadVerification, FakeStore, FsStore, PullStore, Store, StoreError,
+    purge_stale_tmp_files,
+};
