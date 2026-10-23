@@ -84,6 +84,44 @@ Clean generated files:
 just clean
 ```
 
+## Python wheels
+
+The wheel contains two native executables: `git-sfs` and rclone. Build it with
+the packaging script so rclone and its license notices are included:
+
+```sh
+sh scripts/build-python-wheel.sh dist/wheels native
+sh test/release/test_python_wheel.sh dist/wheels/*.whl v2.0.0-rc.10
+```
+
+The script requires Rust, Go 1.26 or newer, uv, curl, tar, and shasum. It downloads
+checksum-pinned rclone source and vendored dependencies, builds without cgo,
+includes upstream notices and corresponding source archives, and invokes
+Maturin. uv supplies Maturin and Zig automatically, and rustup installs the
+target's Rust standard library. Explicit targets are `linux/amd64`,
+`linux/arm64`, `darwin/amd64`, and `darwin/arm64`. Build targets sequentially
+because Maturin reads a shared staging directory.
+
+The version comes from Cargo; Maturin converts prereleases such as
+`2.0.0-rc.10` to Python's `2.0.0rc10`. The executable retains the Git tag form.
+When updating the rclone pin, update both archive hashes and the smoke test's
+expected version, and review the new dependency notices. Complete rclone and
+dependency sources accompany the notices, including LGPLv3 and MPL-covered
+code, with instructions for rebuilding and replacing rclone.
+
+CI builds and installs wheels on all four platforms. Tag releases attach them
+to the GitHub release with SHA-256 checksums. **Only the maintainer publishes
+to PyPI.** Download the four wheels from the same release into a clean directory,
+verify them against its `SHA256SUMS`, and upload the wheels using your PyPI
+credentials:
+
+```sh
+uv publish dist/wheels/*.whl
+```
+
+Publish all four wheels together. Source distributions are not part of this
+release path; users install prebuilt binaries without a compiler.
+
 ## Commit Checklist
 
 ```sh

@@ -1,5 +1,36 @@
 # Installation
 
+## Install with uv
+
+```sh
+uv tool install git-sfs
+git sfs --version
+rclone version
+```
+
+The PyPI wheels include both executables for Linux and macOS on x86_64 and
+ARM64. No Rust or Go compiler is needed. macOS wheels require macOS 12 or newer.
+The bundled rclone supports git-sfs transfers and omits the optional cgo-based
+`cmount` integration. License notices, complete rclone and dependency sources,
+and rebuild instructions are installed under `share/licenses/git-sfs/rclone`
+in the tool environment. These cover rclone's MIT license and its dependencies,
+including LGPLv3 and MPL libraries. git-sfs itself remains MIT licensed.
+
+Upgrade both executables through uv:
+
+```sh
+uv tool upgrade git-sfs
+```
+
+For a prerelease, use `uv tool install --prerelease allow git-sfs` and
+`uv tool upgrade --prerelease allow git-sfs`. An exact version can be installed
+with `uv tool install 'git-sfs==2.0.0rc10'`.
+
+Use uv to upgrade a uv-managed installation. `git sfs self update` replaces
+executables directly and leaves uv's installed package metadata out of sync.
+An existing standalone `rclone` on PATH can conflict with uv exposing its
+bundled executable; resolve that installation before installing the wheel.
+
 ## Standard install
 
 ```sh
@@ -74,7 +105,7 @@ Skip TLS verification entirely (last resort):
 curl -kLsSf .../install.sh | sh -s -- --insecure-tls
 ```
 
-## Updating
+## Updating standalone installations
 
 Once installed, update both `git-sfs` and `rclone` with:
 

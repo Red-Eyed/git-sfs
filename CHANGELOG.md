@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.0.0-rc.10
+
+### New Features
+
+- Add Python wheels for `uv tool install git-sfs`, bundling both `git-sfs`
+  and rclone for Linux and macOS on x86_64 and ARM64. Wheels include rclone's
+  dependency license notices, corresponding sources, and rebuild instructions,
+  and omit its optional cgo-based `cmount` integration.
+  Upgrade both tools with `uv tool upgrade git-sfs`.
+
 ## v2.0.0-rc.9
 
 ### New Features

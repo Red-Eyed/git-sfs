@@ -12,6 +12,9 @@ env:
   __RCLONE_VERSION: v1.68.2
 
 jobs:
+  python-wheels:
+    uses: ./.github/workflows/python-wheels.yml
+
   test:
     name: Rust on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -47,7 +50,7 @@ jobs:
         run: bash scripts/install-rclone.sh
 
       - name: Add rclone to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Format check
         run: cargo fmt --all -- --check

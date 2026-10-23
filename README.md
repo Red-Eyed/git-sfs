@@ -22,6 +22,14 @@ loudly when referenced files are missing.
 
 ## Install
 
+Install both `git-sfs` and `rclone` from PyPI:
+
+```sh
+uv tool install git-sfs
+```
+
+Or use the standalone installer:
+
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Red-Eyed/git-sfs/main/scripts/install.sh | sh
 ```

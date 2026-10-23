@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "git-sfs"
+dynamic = ["version"]
+description = "Large file storage using Git symlinks, with rclone included"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.urls]
+Repository = "https://github.com/Red-Eyed/git-sfs"
+Documentation = "https://github.com/Red-Eyed/git-sfs/tree/main/docs"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "crates/git-sfs/Cargo.toml"
+data = "target/python-wheel-data"
