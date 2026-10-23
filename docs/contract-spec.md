@@ -128,6 +128,11 @@ shapes are documented by the commands that emit them.
 
 ## Cache Eviction
 
+- Both commands delete by default; optional `--dry-run` previews the same object
+  selection without modifying bytes, permissions, or symlinks. It lists each
+  present object once and totals logical bytes from metadata; absent objects
+  are omitted. Quiet mode suppresses the listing and summary.
+
 - `cache rm <path>...` removes the distinct cache objects referenced by the
   selected repository-relative files or directories, preserving symlinks.
 - `cache prune` removes valid hash-named objects with no git-sfs symlink reference

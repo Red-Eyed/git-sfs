@@ -80,6 +80,10 @@ git-sfs verify
 
 ## Cache Eviction
 
+Use `git sfs cache rm --dry-run <path>...` or `git sfs cache prune --dry-run`
+to preview object paths and total logical bytes without changing cache bytes,
+permissions, or symlinks. Both commands delete when `--dry-run` is omitted.
+
 `git sfs cache rm <path>...` intentionally removes local bytes while preserving
 symlinks. `git sfs cache prune` removes objects unreferenced by the current
 working tree, including objects used only by other branches or repositories

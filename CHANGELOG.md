@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.0-rc.9
+
+### New Features
+
+- Add optional `--dry-run` to `git sfs cache rm` and `git sfs cache prune`,
+  listing selected cache objects and total logical bytes without changing
+  files, permissions, or symlinks. Both commands still delete by default.
+
 ## v2.0.0-rc.8
 
 ### New Features

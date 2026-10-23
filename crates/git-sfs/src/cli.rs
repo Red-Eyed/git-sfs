@@ -129,15 +129,27 @@ pub enum CacheCommand {
     /// remove cached objects referenced by files or directories
     Rm(CacheRmArgs),
     /// remove objects unreferenced by this repository's working tree
-    Prune,
+    Prune(CachePruneArgs),
 }
 
 /// Arguments to `git-sfs cache rm`.
 #[derive(Debug, Args)]
 pub struct CacheRmArgs {
+    /// preview objects and total bytes without deleting anything
+    #[arg(long)]
+    pub dry_run: bool,
+
     /// repository-relative files or directories (symlinks are preserved)
     #[arg(value_name = "PATH", required = true, num_args = 1..)]
     pub paths: Vec<Utf8PathBuf>,
+}
+
+/// Arguments to `git-sfs cache prune`.
+#[derive(Debug, Args)]
+pub struct CachePruneArgs {
+    /// preview objects and total bytes without deleting anything
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// Subcommands of `git-sfs self`.
@@ -438,6 +450,29 @@ mod tests {
             panic!("expected cache rm");
         };
         assert_eq!(args.paths, ["a", "b"]);
+    }
+
+    #[test]
+    fn cache_dry_runs_are_optional_for_both_commands() {
+        for dry_run in [false, true] {
+            let mut args = vec!["git-sfs", "cache", "rm", "file"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            let Some(Command::Cache(CacheCommand::Rm(parsed))) = parse(&args).command else {
+                panic!("expected cache rm");
+            };
+            assert_eq!(parsed.dry_run, dry_run);
+
+            let mut args = vec!["git-sfs", "cache", "prune"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            let Some(Command::Cache(CacheCommand::Prune(parsed))) = parse(&args).command else {
+                panic!("expected cache prune");
+            };
+            assert_eq!(parsed.dry_run, dry_run);
+        }
     }
 
     #[test]

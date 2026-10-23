@@ -129,12 +129,30 @@ fn run_cache(cli: &Cli, command: &CacheCommand, cancel: &Cancel) -> Result<()> {
     let repo = discover_repo(&current_dir_utf8()?)?;
     let store = FsStore::new(resolve_cache_root(&repo)?);
     let repo_port = FsRepo::new(repo.clone());
+    let dry_run = match command {
+        CacheCommand::Rm(args) => args.dry_run,
+        CacheCommand::Prune(args) => args.dry_run,
+    };
+    if dry_run {
+        let preview = with_spinner(
+            !cli.global.quiet,
+            "previewing cache eviction",
+            || match command {
+                CacheCommand::Rm(args) => {
+                    cache::preview_rm(&repo_port, &store, &repo, &args.paths, cancel)
+                }
+                CacheCommand::Prune(_) => cache::preview_prune(&repo_port, &store, cancel),
+            },
+        )?;
+        reporting::cache_preview(&preview, RenderMode::from_quiet(cli.global.quiet));
+        return Ok(());
+    }
     let count = with_spinner(
         !cli.global.quiet,
         "evicting cached objects",
         || match command {
             CacheCommand::Rm(args) => cache::rm(&repo_port, &store, &repo, &args.paths, cancel),
-            CacheCommand::Prune => cache::prune(&repo_port, &store, cancel),
+            CacheCommand::Prune(_) => cache::prune(&repo_port, &store, cancel),
         },
     )?;
     reporting::cache_evicted(count, RenderMode::from_quiet(cli.global.quiet));

@@ -7,6 +7,7 @@
 use serde::Serialize;
 
 use git_sfs_core::exec::add::AddOutcome;
+use git_sfs_core::exec::cache::CachePreview;
 use git_sfs_core::exec::doctor::{DoctorReport, DoctorStatus};
 use git_sfs_core::exec::import::ImportOutcome;
 use git_sfs_core::exec::init::InitOutcome;
@@ -44,6 +45,20 @@ pub(crate) fn add_outcome(outcome: &AddOutcome, mode: RenderMode) {
     for line in unrepresentable_warnings(&outcome.unrepresentable) {
         eprintln!("{line}");
     }
+}
+
+pub(crate) fn cache_preview(preview: &CachePreview, mode: RenderMode) {
+    if !mode.show_success() {
+        return;
+    }
+    for object in &preview.objects {
+        println!("would remove {} ({} bytes)", object.path, object.size);
+    }
+    println!(
+        "dry run: would evict {} object(s), {} bytes; no files removed",
+        preview.objects.len(),
+        preview.total_bytes()
+    );
 }
 
 pub(crate) fn cache_evicted(count: usize, mode: RenderMode) {

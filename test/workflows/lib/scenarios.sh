@@ -433,6 +433,14 @@ scenario_cache_eviction() {
     git commit -qm 'track eviction fixture'
     local revision
     revision="$(git rev-parse HEAD)"
+    local preview shared_size orphan_size
+    shared_size="$(wc -c < data/first.bin | tr -d ' ')"
+    preview="$("$INSTALL_DIR/git-sfs" cache rm --dry-run data copy.bin)"
+    assert_contains "$preview" "$shared_hash" "rm preview names selected object"
+    assert_contains "$preview" "1 object(s), $shared_size bytes; no files removed" "rm preview counts shared bytes once"
+    assert_eq "$(cat copy.bin)" 'shared bytes' "rm dry run preserves bytes"
+    assert_eq "$(readlink data/first.bin)" "$target" "rm dry run preserves symlink"
+    assert_eq "$(git_sfs cache rm --dry-run data copy.bin)" '' "quiet rm preview"
     git_sfs cache rm data copy.bin
     assert_symlink data/first.bin
     assert_symlink copy.bin
@@ -445,11 +453,18 @@ scenario_cache_eviction() {
     rm orphan.bin
     printf 'unstaged bytes\n' > unstaged.bin
     git_sfs add unstaged.bin
+    orphan_size="$(wc -c < "$(cache_file_for "$cache" "$orphan_hash")" | tr -d ' ')"
+    preview="$("$INSTALL_DIR/git-sfs" cache prune --dry-run)"
+    assert_contains "$preview" "$orphan_hash" "prune preview names orphan"
+    assert_contains "$preview" "1 object(s), $orphan_size bytes; no files removed" "prune preview reports orphan size"
+    [ -f "$(cache_file_for "$cache" "$orphan_hash")" ] || fail "prune dry run removed orphan"
     git_sfs cache prune
     [ ! -e "$(cache_file_for "$cache" "$orphan_hash")" ] || fail "prune retained orphan"
     assert_eq "$(cat data/first.bin)" 'shared bytes' "prune protects references"
     assert_eq "$(cat unstaged.bin)" 'unstaged bytes' "prune protects unstaged links"
     git_sfs cache prune
+    preview="$("$INSTALL_DIR/git-sfs" cache prune --dry-run)"
+    assert_contains "$preview" "0 object(s), 0 bytes; no files removed" "empty prune preview"
     git checkout "$revision" -- orphan.bin
     git_sfs pull --verify orphan.bin
     assert_eq "$(cat orphan.bin)" 'orphan bytes' "pull restores pruned history"

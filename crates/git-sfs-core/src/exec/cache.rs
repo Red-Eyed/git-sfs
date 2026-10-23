@@ -10,6 +10,62 @@ use crate::ports::repo::resolve_scope;
 use crate::ports::{Repo, ScannedEntry, Store};
 use crate::{Cancel, Error, Result};
 
+/// One present cache object selected for eviction. Sizes come from metadata;
+/// previewing never reads, verifies, or changes the object's bytes.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PreviewObject {
+    /// Cache object path, rather than a symlink in the working tree.
+    pub path: Utf8PathBuf,
+    /// Logical file size in bytes; shared objects are counted once.
+    pub size: u64,
+}
+
+/// Present objects that an eviction would remove. Missing objects are omitted.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CachePreview {
+    /// Deterministically ordered by object hash.
+    pub objects: Vec<PreviewObject>,
+}
+
+impl CachePreview {
+    /// Total logical bytes selected, without filesystem allocation estimates.
+    #[must_use]
+    pub fn total_bytes(&self) -> u128 {
+        self.objects
+            .iter()
+            .map(|object| u128::from(object.size))
+            .sum()
+    }
+}
+
+/// Preview `rm` using its exact selection rules, without modifying the cache.
+///
+/// # Errors
+/// Returns the same selection errors as [`rm`], plus cache metadata failures
+/// and cancellation. Missing objects are not an error.
+pub fn preview_rm(
+    repo: &impl Repo,
+    store: &impl Store,
+    root: &Utf8Path,
+    paths: &[Utf8PathBuf],
+    cancel: &Cancel,
+) -> Result<CachePreview> {
+    preview_selected(store, select_rm(repo, root, paths, cancel)?, cancel)
+}
+
+/// Preview `prune` using its exact selection rules, without modifying the cache.
+///
+/// # Errors
+/// Returns the same selection errors as [`prune`], plus cache metadata failures
+/// and cancellation.
+pub fn preview_prune(
+    repo: &impl Repo,
+    store: &impl Store,
+    cancel: &Cancel,
+) -> Result<CachePreview> {
+    preview_selected(store, select_prune(repo, store, cancel)?, cancel)
+}
+
 /// Evict objects referenced by files or directories, leaving every symlink intact.
 /// Paths are repository-relative, matching the other dataset commands.
 ///
@@ -25,6 +81,15 @@ pub fn rm(
     paths: &[Utf8PathBuf],
     cancel: &Cancel,
 ) -> Result<usize> {
+    remove_selected(store, select_rm(repo, root, paths, cancel)?, cancel)
+}
+
+fn select_rm(
+    repo: &impl Repo,
+    root: &Utf8Path,
+    paths: &[Utf8PathBuf],
+    cancel: &Cancel,
+) -> Result<BTreeSet<Sha256>> {
     if paths.is_empty() {
         return Err(Error::Usage("cache rm requires at least one path".into()));
     }
@@ -46,7 +111,7 @@ pub fn rm(
         }
         selected.extend(hashes);
     }
-    remove_selected(store, selected, cancel)
+    Ok(selected)
 }
 
 /// Evict objects unreferenced by the current repository's working tree.
@@ -57,6 +122,10 @@ pub fn rm(
 /// symlink cannot be validated. Deletion failures and cancellation can leave
 /// a partially completed batch, with every remaining object's bytes intact.
 pub fn prune(repo: &impl Repo, store: &impl Store, cancel: &Cancel) -> Result<usize> {
+    remove_selected(store, select_prune(repo, store, cancel)?, cancel)
+}
+
+fn select_prune(repo: &impl Repo, store: &impl Store, cancel: &Cancel) -> Result<BTreeSet<Sha256>> {
     cancel.check()?;
     let referenced = references(repo, Utf8Path::new("."), cancel)?;
     let mut selected = BTreeSet::new();
@@ -66,7 +135,7 @@ pub fn prune(repo: &impl Repo, store: &impl Store, cancel: &Cancel) -> Result<us
             selected.insert(hash);
         }
     }
-    remove_selected(store, selected, cancel)
+    Ok(selected)
 }
 
 fn references(repo: &impl Repo, scope: &Utf8Path, cancel: &Cancel) -> Result<BTreeSet<Sha256>> {
@@ -90,6 +159,24 @@ fn references(repo: &impl Repo, scope: &Utf8Path, cancel: &Cancel) -> Result<BTr
         }
     }
     Ok(hashes)
+}
+
+fn preview_selected(
+    store: &impl Store,
+    selected: BTreeSet<Sha256>,
+    cancel: &Cancel,
+) -> Result<CachePreview> {
+    let mut objects = Vec::new();
+    for hash in selected {
+        cancel.check()?;
+        if let Some(size) = store.object_size(hash)? {
+            objects.push(PreviewObject {
+                path: store.object_path(hash),
+                size,
+            });
+        }
+    }
+    Ok(CachePreview { objects })
 }
 
 fn remove_selected(
@@ -167,6 +254,124 @@ mod tests {
                 &Cancel::new(),
             )
         }
+    }
+
+    #[test]
+    fn rm_preview_deduplicates_present_objects_without_changing_bytes_or_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let fixture = Fixture::new();
+        let hash = fixture.object(10);
+        let object = fixture.store.object_path(hash);
+        std::fs::set_permissions(&object, std::fs::Permissions::from_mode(0o644)).unwrap();
+        fixture.link("data/first", hash);
+        fixture.link("copy", hash);
+        fixture.link("data/missing", Sha256::from_digest([11; 32]));
+        let unrelated = fixture.object(12);
+        let target = std::fs::read_link(fixture.root.join("copy")).unwrap();
+
+        let preview = preview_rm(
+            &fixture.repo,
+            &fixture.store,
+            &fixture.root,
+            &["data".into(), "copy".into()],
+            &Cancel::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            preview.objects,
+            vec![PreviewObject {
+                path: object.clone(),
+                size: 128
+            }]
+        );
+        assert_eq!(preview.total_bytes(), 128);
+        assert_eq!(std::fs::read(&object).unwrap(), [10; 128]);
+        assert_eq!(
+            std::fs::metadata(&object).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            std::fs::read_link(fixture.root.join("copy")).unwrap(),
+            target
+        );
+        assert!(fixture.store.object_path(unrelated).exists());
+        fixture.rm(&["data", "copy"]).unwrap();
+        assert!(!object.exists());
+        assert!(fixture.store.object_path(unrelated).exists());
+    }
+
+    #[test]
+    fn prune_preview_reports_only_orphans_and_leaves_them_present() {
+        let fixture = Fixture::new();
+        let keep = fixture.object(13);
+        let orphan = fixture.object(14);
+        fixture.link("unstaged", keep);
+        let preview = preview_prune(&fixture.repo, &fixture.store, &Cancel::new()).unwrap();
+
+        assert_eq!(
+            preview.objects,
+            vec![PreviewObject {
+                path: fixture.store.object_path(orphan),
+                size: 128,
+            }]
+        );
+        assert_eq!(preview.total_bytes(), 128);
+        assert_eq!(
+            std::fs::read(fixture.store.object_path(orphan)).unwrap(),
+            [14; 128]
+        );
+        assert!(fixture.store.object_path(keep).exists());
+        assert_eq!(
+            prune(&fixture.repo, &fixture.store, &Cancel::new()).unwrap(),
+            preview.objects.len()
+        );
+        assert_eq!(
+            preview_prune(&fixture.repo, &fixture.store, &Cancel::new())
+                .unwrap()
+                .total_bytes(),
+            0
+        );
+    }
+
+    #[test]
+    fn previews_preserve_selection_errors_and_cancellation() {
+        let fixture = Fixture::new();
+        let hash = fixture.object(15);
+        fixture.link("good", hash);
+        std::os::unix::fs::symlink("unrelated", fixture.root.join("bad")).unwrap();
+        assert!(
+            preview_rm(
+                &fixture.repo,
+                &fixture.store,
+                &fixture.root,
+                &["good".into(), "bad".into()],
+                &Cancel::new()
+            )
+            .is_err()
+        );
+        assert!(preview_prune(&fixture.repo, &fixture.store, &Cancel::new()).is_err());
+        let cancel = Cancel::new();
+        cancel.cancel();
+        assert!(matches!(
+            preview_rm(
+                &fixture.repo,
+                &fixture.store,
+                &fixture.root,
+                &["good".into()],
+                &cancel
+            ),
+            Err(Error::Canceled)
+        ));
+        assert!(matches!(
+            preview_prune(&fixture.repo, &fixture.store, &cancel),
+            Err(Error::Canceled)
+        ));
+        assert_eq!(
+            std::fs::read(fixture.store.object_path(hash)).unwrap(),
+            [15; 128]
+        );
     }
 
     #[test]

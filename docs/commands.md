@@ -27,6 +27,7 @@ Run `git-sfs <command> --help` for the flags specific to a command.
 
 ```sh
 git sfs cache rm data/shard.bin data/validation/
+git sfs cache rm --dry-run data/shard.bin data/validation/
 ```
 
 Remove local cache objects referenced by the given files or directories, keeping
@@ -43,6 +44,7 @@ Regular files within a selected directory are left untouched.
 
 ```sh
 git sfs cache prune
+git sfs cache prune --dry-run
 ```
 
 Remove valid hash-named cache objects unreferenced by any git-sfs symlink in the
@@ -54,6 +56,14 @@ left untouched.
 The repository scan and cache listing must succeed before deletion begins. An
 invalid or unreadable symlink aborts pruning rather than risking an incomplete
 reference set. This includes unrelated symlinks that fail git-sfs validation.
+
+Both commands delete by default. Add `--dry-run` to list the cache objects that
+would be removed, their individual sizes, and the total logical bytes. Shared
+objects are counted once and already-missing objects are omitted. The preview
+uses the same selection rules as deletion and reads only metadata: it leaves
+bytes, permissions, and symlinks unchanged. Logical sizes can differ from the
+disk space reclaimed on filesystems with compression or shared storage.
+`--quiet` suppresses the preview listing and summary.
 
 Both cache commands work offline and never check or change remotes. They can
 remove the only local copy of data. Run eviction while other operations on the

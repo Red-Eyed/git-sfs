@@ -59,6 +59,20 @@ CLAUSES = [
     # -- cache eviction ------------------------------------------------------
     Clause(
         "cache",
+        "cache rm --dry-run deduplicates object sizes without changing data or permissions",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "rm_preview_deduplicates_present_objects_without_changing_bytes_or_permissions",
+    ),
+    Clause(
+        "cache",
+        "cache prune --dry-run reports orphan sizes and preserves objects",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "prune_preview_reports_only_orphans_and_leaves_them_present",
+    ),
+    Clause(
+        "cache",
         "cache rm preserves symlinks and atomically unlinks complete objects",
         ASSERTED,
         "../../crates/git-sfs-core/src/exec/cache.rs",
