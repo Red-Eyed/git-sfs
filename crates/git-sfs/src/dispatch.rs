@@ -12,7 +12,6 @@ use git_sfs_core::domain::{
     Config, DEFAULT_REMOTE_NAME, RemoteConfig, check_git_sfs_version, check_rclone_version,
     compose_remote_url, tmp_dir,
 };
-use git_sfs_core::exec::add;
 use git_sfs_core::exec::doctor::{self, DoctorReport};
 use git_sfs_core::exec::import::{self, ImportOptions};
 use git_sfs_core::exec::init as init_cmd;
@@ -23,6 +22,7 @@ use git_sfs_core::exec::remotes;
 use git_sfs_core::exec::setup as setup_cmd;
 use git_sfs_core::exec::status;
 use git_sfs_core::exec::verify::{self, VerifyError};
+use git_sfs_core::exec::{add, cache};
 use git_sfs_core::ports::{
     DownloadVerification, FsRepo, FsStore, Lock, LockName, RcloneRemote, Remote,
     detect_rclone_version, discover_repo, purge_stale_tmp_files, resolve_cache_root,
@@ -30,8 +30,8 @@ use git_sfs_core::ports::{
 use git_sfs_core::{Cancel, Error, Result};
 
 use crate::cli::{
-    AddArgs, Cli, Command, DoctorArgs, ImportArgs, InitArgs, MvArgs, PullArgs, PushArgs,
-    RemotesArgs, SelfCommand, SetupArgs, StatusArgs, VerifyArgs,
+    AddArgs, CacheCommand, Cli, Command, DoctorArgs, ImportArgs, InitArgs, MvArgs, PullArgs,
+    PushArgs, RemotesArgs, SelfCommand, SetupArgs, StatusArgs, VerifyArgs,
 };
 use crate::progress::{ProgressRemote, ProgressRepo, ProgressStore, with_spinner};
 use crate::reporting::{self, RenderMode};
@@ -45,6 +45,7 @@ pub fn dispatch(cli: &Cli, command: &Command, cancel: &Cancel) -> Result<()> {
         Command::Init(args) => run_init(cli, args),
         Command::Setup(args) => run_setup(cli, args, cancel),
         Command::Add(args) => run_add(cli, args, cancel),
+        Command::Cache(command) => run_cache(cli, command, cancel),
         Command::Mv(args) => run_mv(cli, args, cancel),
         Command::Import(args) => run_import(cli, args, cancel),
         Command::Verify(args) => run_verify(cli, args, cancel),
@@ -121,6 +122,23 @@ fn run_add(cli: &Cli, args: &AddArgs, cancel: &Cancel) -> Result<()> {
             Err((*failure.error).into())
         }
     }
+}
+
+/// Eviction touches cache objects only; no remote or byte verification is needed.
+fn run_cache(cli: &Cli, command: &CacheCommand, cancel: &Cancel) -> Result<()> {
+    let repo = discover_repo(&current_dir_utf8()?)?;
+    let store = FsStore::new(resolve_cache_root(&repo)?);
+    let repo_port = FsRepo::new(repo.clone());
+    let count = with_spinner(
+        !cli.global.quiet,
+        "evicting cached objects",
+        || match command {
+            CacheCommand::Rm(args) => cache::rm(&repo_port, &store, &repo, &args.paths, cancel),
+            CacheCommand::Prune => cache::prune(&repo_port, &store, cancel),
+        },
+    )?;
+    reporting::cache_evicted(count, RenderMode::from_quiet(cli.global.quiet));
+    Ok(())
 }
 
 /// `git-sfs mv <source> <dest>` — moves a git-sfs symlink (or a directory of

@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.0-rc.8
+
+### New Features
+
+- Add `git sfs cache rm <path>...` to evict local bytes while preserving
+  symlinks, and `git sfs cache prune` to remove objects unreferenced by the
+  current repository working tree. Selection is validated before eviction;
+  each removal is atomic and interrupted batches are safe to retry.
+
 ## v2.0.0
 
 ### Highlights

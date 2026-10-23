@@ -408,3 +408,51 @@ scenario_rclone_workflow() {
   assert_eq "$(cat "$clone/data/one.bin")" "one" "rclone roundtrip file one"
   assert_eq "$(cat "$clone/data/nested/two.bin")" "two" "rclone roundtrip file two"
 }
+
+scenario_cache_eviction() {
+  note "cache eviction and pull restoration"
+  local repo="$FIXTURE_ROOT/cache-eviction"
+  local cache="$WORK/cache-eviction"
+  local remote="$REMOTE_ROOT/cache-eviction"
+  mkdir -p "$remote"
+  init_repo "$repo" "$cache"
+  write_local_remote_config "$repo" "$remote"
+  (
+    cd "$repo"
+    mkdir -p data
+    printf 'shared bytes\n' > data/first.bin
+    cp data/first.bin copy.bin
+    printf 'orphan bytes\n' > orphan.bin
+    git_sfs add data copy.bin orphan.bin
+    git_sfs push
+    local shared_hash orphan_hash target
+    shared_hash="$(hash_from_link "$repo" data/first.bin)"
+    orphan_hash="$(hash_from_link "$repo" orphan.bin)"
+    target="$(readlink data/first.bin)"
+    git add .git-sfs .gitignore data copy.bin orphan.bin
+    git commit -qm 'track eviction fixture'
+    local revision
+    revision="$(git rev-parse HEAD)"
+    git_sfs cache rm data copy.bin
+    assert_symlink data/first.bin
+    assert_symlink copy.bin
+    assert_eq "$(readlink data/first.bin)" "$target" "eviction preserves target"
+    [ ! -e "$(cache_file_for "$cache" "$shared_hash")" ] || fail "rm retained bytes"
+    git_sfs cache rm data
+    git_sfs pull --verify data
+    assert_eq "$(cat copy.bin)" 'shared bytes' "pull restores shared object"
+    [ -z "$(git status --porcelain)" ] || fail "cache rm changed tracked state"
+    rm orphan.bin
+    printf 'unstaged bytes\n' > unstaged.bin
+    git_sfs add unstaged.bin
+    git_sfs cache prune
+    [ ! -e "$(cache_file_for "$cache" "$orphan_hash")" ] || fail "prune retained orphan"
+    assert_eq "$(cat data/first.bin)" 'shared bytes' "prune protects references"
+    assert_eq "$(cat unstaged.bin)" 'unstaged bytes' "prune protects unstaged links"
+    git_sfs cache prune
+    git checkout "$revision" -- orphan.bin
+    git_sfs pull --verify orphan.bin
+    assert_eq "$(cat orphan.bin)" 'orphan bytes' "pull restores pruned history"
+    git_sfs verify
+  )
+}

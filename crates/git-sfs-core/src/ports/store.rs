@@ -305,7 +305,8 @@ pub trait Store {
         cancel: &Cancel,
     ) -> Result<CacheEntry, StoreError>;
 
-    /// Removes `hash`'s object if it exists.
+    /// Atomically unlinks `hash`'s object if it exists, without truncating bytes
+    /// or changing permissions. Already-open readers retain the complete object.
     ///
     /// This is intentionally a blunt cache-object primitive for `pull`'s
     /// pre-download cleanup of known-untrusted bytes. Callers must decide the

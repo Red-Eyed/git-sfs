@@ -78,6 +78,20 @@ git-sfs pull --verify <path>
 git-sfs verify
 ```
 
+## Cache Eviction
+
+`git sfs cache rm <path>...` intentionally removes local bytes while preserving
+symlinks. `git sfs cache prune` removes objects unreferenced by the current
+working tree, including objects used only by other branches or repositories
+sharing the cache. Neither command checks whether another copy exists remotely.
+
+Selection is validated before deletion. Each object is atomically unlinked;
+readers that already have it open retain access to the complete bytes. A batch
+may finish partially on cancellation or error and can safely be retried. Run
+these commands while other cache and working-tree mutations are idle.
+
+Use `git sfs pull <path>` to restore evicted objects from an available remote.
+
 ## Git Safety
 
 Git-tracked symlink targets must be relative and point into `.git-sfs/cache`.

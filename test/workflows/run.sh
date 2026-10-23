@@ -65,6 +65,7 @@ main() {
   install_prerelease_from_fixture
   scenario_filesystem_workflows
   scenario_import_workflows
+  scenario_cache_eviction
   scenario_rclone_workflow
   assert_repo_root_clean
   echo "workflow suite ok"

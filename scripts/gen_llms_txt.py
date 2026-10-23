@@ -87,6 +87,8 @@ def build() -> str:
 | `init` | `git-sfs init [--force]` | Initialize `.git-sfs/config.toml` |
 | `setup` | `git-sfs setup` | Bind local cache and restore symlinks (run after clone) |
 | `add` | `git-sfs add <path>...` | Hash files and replace them with symlinks |
+| `cache rm` | `git-sfs cache rm <path>...` | Evict local bytes, preserving symlinks |
+| `cache prune` | `git-sfs cache prune` | Evict objects unreferenced by the current working tree |
 | `mv` | `git-sfs mv <src> <dst>` | Move a symlink, rewriting its relative target |
 | `import` | `git-sfs import [--move] [-L] <src> <dst>` | Import external files into tracking |
 | `verify` | `git-sfs verify [-r NAME] [path]` | Check integrity; exits non-zero on failure |

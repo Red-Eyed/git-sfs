@@ -56,6 +56,56 @@ class Clause:
 
 
 CLAUSES = [
+    # -- cache eviction ------------------------------------------------------
+    Clause(
+        "cache",
+        "cache rm preserves symlinks and atomically unlinks complete objects",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "rm_unlinks_read_only_object_without_truncating_open_readers_or_links",
+    ),
+    Clause(
+        "cache",
+        "cache eviction validates all scopes before deleting anything",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "rm_validates_every_scope_before_removing_anything",
+    ),
+    Clause(
+        "cache",
+        "cache prune protects unstaged and dangling working-tree references",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "prune_protects_unstaged_and_dangling_working_tree_references",
+    ),
+    Clause(
+        "cache",
+        "cache prune aborts on invalid symlinks before deleting objects",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "prune_aborts_on_invalid_references_before_deleting_orphans",
+    ),
+    Clause(
+        "cache",
+        "cache eviction accepts cancellation without corrupting remaining objects",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "canceled_eviction_preserves_objects",
+    ),
+    Clause(
+        "cache",
+        "failed cache eviction batches are safe to retry",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/cache.rs",
+        "failed_batch_leaves_remaining_objects_intact_and_is_retryable",
+    ),
+    Clause(
+        "cache",
+        "pull restores objects evicted by cache rm and cache prune",
+        ASSERTED,
+        "../../test/workflows/lib/scenarios.sh",
+        '"pull restores pruned history"',
+    ),
     # -- §2 repository layout ------------------------------------------------
     Clause(
         "2",

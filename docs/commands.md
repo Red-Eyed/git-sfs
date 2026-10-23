@@ -23,6 +23,47 @@ rclone's transfer progress during `push`/`pull`.
 
 Run `git-sfs <command> --help` for the flags specific to a command.
 
+## cache rm
+
+```sh
+git sfs cache rm data/shard.bin data/validation/
+```
+
+Remove local cache objects referenced by the given files or directories, keeping
+all symlinks unchanged. Paths are relative to the repository root, as with
+`add`. Multiple paths sharing the same object evict it once; every link to that
+object becomes dangling. Already-missing objects are harmless. Restore bytes
+with `git sfs pull <path>` when a remote copy is available.
+
+All scopes are scanned before deletion. Missing paths, scopes without git-sfs
+links, invalid symlinks, and paths outside the working tree fail before eviction.
+Regular files within a selected directory are left untouched.
+
+## cache prune
+
+```sh
+git sfs cache prune
+```
+
+Remove valid hash-named cache objects unreferenced by any git-sfs symlink in the
+current repository's working tree. Unstaged and dangling symlinks count as
+references. Git history, other branches, and other repositories sharing the
+cache do not protect objects. Unknown cache filenames and temporary files are
+left untouched.
+
+The repository scan and cache listing must succeed before deletion begins. An
+invalid or unreadable symlink aborts pruning rather than risking an incomplete
+reference set. This includes unrelated symlinks that fail git-sfs validation.
+
+Both cache commands work offline and never check or change remotes. They can
+remove the only local copy of data. Run eviction while other operations on the
+working tree and shared cache are idle; selection is not a concurrent snapshot.
+
+Each object is removed by atomic unlink, without truncation or chmod. A batch is
+not an all-or-nothing transaction: cancellation or an I/O error may leave some
+objects evicted and others present. Rerunning is safe. `--quiet` suppresses the
+progress spinner and success summary.
+
 ## git-sfs init
 
 Create initial project files, including a commented `.git-sfs/config.toml` starter file:

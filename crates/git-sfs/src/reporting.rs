@@ -46,6 +46,12 @@ pub(crate) fn add_outcome(outcome: &AddOutcome, mode: RenderMode) {
     }
 }
 
+pub(crate) fn cache_evicted(count: usize, mode: RenderMode) {
+    if mode.show_success() {
+        println!("cache: {count} object(s) evicted or already absent; symlinks preserved");
+    }
+}
+
 pub(crate) fn moved_links(moved: &[MovedLink], mode: RenderMode) {
     if !mode.show_success() {
         return;

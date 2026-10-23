@@ -126,6 +126,22 @@ shapes are documented by the commands that emit them.
   must reject a downloaded object whose bytes do not match its path hash.
 - Commands must fail loudly rather than publish or accept incomplete state.
 
+## Cache Eviction
+
+- `cache rm <path>...` removes the distinct cache objects referenced by the
+  selected repository-relative files or directories, preserving symlinks.
+- `cache prune` removes valid hash-named objects with no git-sfs symlink reference
+  in the current repository's working tree. Unstaged and dangling links protect
+  objects; other branches, history, and repositories do not.
+- Selection completes before deletion. Scan/listing errors and invalid or
+  unrepresentable symlinks abort without deleting objects.
+- Eviction uses atomic unlink per object, never truncation or permission changes.
+  Missing objects are accepted. Multi-object batches may complete partially on
+  cancellation or error and are safe to retry.
+- Remotes, temporary files, and unknown cache entries remain untouched. Eviction
+  does not require remote copies. Callers must keep concurrent cache and
+  working-tree mutations idle; there is no transactional snapshot.
+
 ## Release Artifacts
 
 Release archives are named:

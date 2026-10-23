@@ -83,6 +83,10 @@ pub enum Command {
     /// cache files and replace them with symlinks
     Add(AddArgs),
 
+    /// remove local cached bytes while preserving symlinks
+    #[command(subcommand)]
+    Cache(CacheCommand),
+
     /// move a tracked file and its symlink
     Mv(MvArgs),
 
@@ -117,6 +121,23 @@ pub enum Command {
 
     /// show usage
     Help,
+}
+
+/// Subcommands of `git-sfs cache`.
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// remove cached objects referenced by files or directories
+    Rm(CacheRmArgs),
+    /// remove objects unreferenced by this repository's working tree
+    Prune,
+}
+
+/// Arguments to `git-sfs cache rm`.
+#[derive(Debug, Args)]
+pub struct CacheRmArgs {
+    /// repository-relative files or directories (symlinks are preserved)
+    #[arg(value_name = "PATH", required = true, num_args = 1..)]
+    pub paths: Vec<Utf8PathBuf>,
 }
 
 /// Subcommands of `git-sfs self`.
@@ -409,6 +430,17 @@ mod tests {
     }
 
     #[test]
+    fn cache_rm_requires_paths_and_accepts_multiple() {
+        assert!(Cli::try_parse_from(["git-sfs", "cache", "rm"]).is_err());
+        let Some(Command::Cache(CacheCommand::Rm(args))) =
+            parse(&["git-sfs", "cache", "rm", "a", "b"]).command
+        else {
+            panic!("expected cache rm");
+        };
+        assert_eq!(args.paths, ["a", "b"]);
+    }
+
+    #[test]
     fn cache_binding_belongs_to_init_and_setup_only() {
         let Some(Command::Init(args)) = parse(&["git-sfs", "init", "--cache", "/cache"]).command
         else {
@@ -492,6 +524,8 @@ mod tests {
             &["git-sfs", "init"],
             &["git-sfs", "setup"],
             &["git-sfs", "add", "f"],
+            &["git-sfs", "cache", "rm", "a", "b"],
+            &["git-sfs", "cache", "prune"],
             &["git-sfs", "mv", "a", "b"],
             &["git-sfs", "import", "a", "b"],
             &["git-sfs", "verify"],

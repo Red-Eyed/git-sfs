@@ -5,6 +5,7 @@
 //! …); none of them take a writer, a `quiet` flag, or a progress callback.
 
 pub mod add;
+pub mod cache;
 pub mod doctor;
 pub mod import;
 pub mod init;
