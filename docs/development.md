@@ -26,7 +26,7 @@ default to `./target/release/git-sfs`, the same artifact release builds use. See
 
 ```sh
 just check           # fmt --check, clippy -D warnings, test, release build, conformance
-just build           # ./target/release/git-sfs
+just rust-build      # ./target/release/git-sfs
 ```
 
 Or drive `cargo` directly from the workspace root — `cargo build --workspace`,
@@ -86,12 +86,22 @@ just clean
 
 ## Python wheels
 
-The wheel contains two native executables: `git-sfs` and rclone. Build it with
-the packaging script so rclone and its license notices are included:
+Build all four macOS and manylinux wheels on a macOS host:
+
+```sh
+just build
+```
+
+Each wheel contains `git-sfs`, rclone, and the bundled licenses and sources.
+The four wheels replace `dist/` only after every target builds successfully,
+so a failed build preserves the previous output. Other old build artifacts in
+`dist/` are removed on success. macOS is required for its Apple SDK.
+
+To build and smoke-test only the host wheel:
 
 ```sh
 sh scripts/build-python-wheel.sh dist/wheels native
-sh test/release/test_python_wheel.sh dist/wheels/*.whl v2.0.0-rc.10
+sh test/release/test_python_wheel.sh dist/wheels/*.whl v2.0.0-rc.11
 ```
 
 The script requires Rust, Go 1.26 or newer, uv, curl, tar, and shasum. It downloads
@@ -103,7 +113,7 @@ target's Rust standard library. Explicit targets are `linux/amd64`,
 because Maturin reads a shared staging directory.
 
 The version comes from Cargo; Maturin converts prereleases such as
-`2.0.0-rc.10` to Python's `2.0.0rc10`. The executable retains the Git tag form.
+`2.0.0-rc.11` to Python's `2.0.0rc11`. The executable retains the Git tag form.
 When updating the rclone pin, update both archive hashes and the smoke test's
 expected version, and review the new dependency notices. Complete rclone and
 dependency sources accompany the notices, including LGPLv3 and MPL-covered
@@ -111,12 +121,10 @@ code, with instructions for rebuilding and replacing rclone.
 
 CI builds and installs wheels on all four platforms. Tag releases attach them
 to the GitHub release with SHA-256 checksums. **Only the maintainer publishes
-to PyPI.** Download the four wheels from the same release into a clean directory,
-verify them against its `SHA256SUMS`, and upload the wheels using your PyPI
-credentials:
+to PyPI.** After `just build`, upload the wheels using your PyPI credentials:
 
 ```sh
-uv publish dist/wheels/*.whl
+uv publish dist/*.whl
 ```
 
 Publish all four wheels together. Source distributions are not part of this

@@ -124,6 +124,7 @@ fi
 
 if [ "$goos" = linux ]; then
   export CARGO_ZIGBUILD_CACHE_DIR="$repo/target/zigbuild-cache"
+  export ZIG_GLOBAL_CACHE_DIR="$repo/target/zig-cache"
   case "$(file "$data/scripts/rclone")" in
     *'statically linked'*) ;;
     *) echo 'rclone must be statically linked in Linux wheels' >&2; exit 1 ;;

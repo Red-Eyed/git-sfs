@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.0-rc.11
+
+### Improvements
+
+- Make `just build` produce all four macOS and manylinux wheels directly in
+  `dist/` on a macOS host. Each wheel includes git-sfs and rclone; successful
+  builds replace old distribution artifacts, while failed builds preserve them.
+  Use `just rust-build` to build only the native Rust binary.
+
 ## v2.0.0-rc.10
 
 ### New Features

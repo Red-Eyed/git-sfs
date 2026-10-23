@@ -14,7 +14,7 @@
 
 [group('conformance')]
 [doc('shell workflow suite, through the real install path')]
-workflows: build
+workflows: rust-build
     env GIT_SFS_BIN=./target/release/git-sfs bash test/workflows/run.sh
 
 # Self-check: the same binary compared against itself must always agree, which
@@ -23,7 +23,7 @@ workflows: build
 
 [group('conformance')]
 [doc('state diff between two binaries (self-check by default)')]
-differential: build
+differential: rust-build
     python3 test/differential/run.py --binary a=./target/release/git-sfs --binary b=./target/release/git-sfs
 
 # The lock protocol is cross-process state. Pass a second --binary to exercise
@@ -31,7 +31,7 @@ differential: build
 
 [group('conformance')]
 [doc('lock protocol conformance across processes')]
-lock-contention: build
+lock-contention: rust-build
     python3 test/differential/lock_contention.py --binary current=./target/release/git-sfs
 
 # SIGINT mid-transfer must publish no partial file and must leave the operation
@@ -40,7 +40,7 @@ lock-contention: build
 
 [group('conformance')]
 [doc('cancellation safety: nothing partial, nothing unrecoverable')]
-cancellation: build
+cancellation: rust-build
     python3 test/differential/cancellation.py --binary current=./target/release/git-sfs
 
 # Cache object write bits are a storage invariant. This covers what happens when
@@ -48,7 +48,7 @@ cancellation: build
 
 [group('conformance')]
 [doc('mode/content disagreement on cache objects')]
-mode-preservation: build
+mode-preservation: rust-build
     python3 test/differential/mode_preservation.py --binary current=./target/release/git-sfs
 
 # Older binaries must be able to read stable state. Pass both binaries to
@@ -57,7 +57,7 @@ mode-preservation: build
 
 [group('conformance')]
 [doc('downgrade invariant: state written by one binary, read by the other')]
-downgrade: build
+downgrade: rust-build
     python3 test/differential/downgrade.py --binary current=./target/release/git-sfs
 
 # Fails on a stale claim, not on a known gap. Add --gate when every stable
@@ -79,7 +79,7 @@ release-publisher:
 
 [group('conformance')]
 [doc('performance baselines (nightly tier, not in check)')]
-perf: build
+perf: rust-build
     python3 test/differential/benchmark.py --binary current=./target/release/git-sfs
 
 # One binary under two names must come out at ratio ~1.0. Establishes the
@@ -87,5 +87,5 @@ perf: build
 
 [group('conformance')]
 [doc('perf self-check: establishes the measurement noise floor')]
-perf-selfcheck: build
+perf-selfcheck: rust-build
     python3 test/differential/benchmark.py --binary a=./target/release/git-sfs --binary b=./target/release/git-sfs

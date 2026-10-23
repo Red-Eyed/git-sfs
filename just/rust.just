@@ -11,8 +11,9 @@ fmt: rust-fmt
 test: rust-test
 
 [group('repo')]
-[doc('build ./target/release/git-sfs')]
-build: rust-build
+[doc('build all four Python wheels into dist/ (macOS host)')]
+build:
+    sh scripts/build-python-wheels.sh
 
 [group('repo')]
 [doc('build release archives into dist/')]
