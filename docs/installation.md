@@ -24,7 +24,7 @@ uv tool upgrade git-sfs
 
 For a prerelease, use `uv tool install --prerelease allow git-sfs` and
 `uv tool upgrade --prerelease allow git-sfs`. An exact version can be installed
-with `uv tool install 'git-sfs==2.0.0rc10'`.
+with `uv tool install 'git-sfs==2.0.0'`.
 
 Use uv to upgrade a uv-managed installation. `git sfs self update` replaces
 executables directly and leaves uv's installed package metadata out of sync.

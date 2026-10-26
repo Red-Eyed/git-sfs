@@ -1,58 +1,11 @@
 # Changelog
 
-## v2.0.0-rc.12
-
-### New Features
-
-- Accept multiple `import` sources, including paths expanded by shell wildcards,
-  placing each under its basename in the destination directory. Single files
-  also accept existing directory destinations or a trailing slash to create a
-  directory while keeping the source filename; explicit renaming still works.
-- Add `import --dry-run` to preview copy/move mappings, file counts, and logical
-  sizes without hashing, creating locks, or modifying source, cache, or
-  destination files. The whole batch is validated before ingestion, rejecting
-  duplicate destinations, existing files, blocked parents, and metadata paths.
-
-## v2.0.0-rc.11
-
-### Improvements
-
-- Make `just build` produce all four macOS and manylinux wheels directly in
-  `dist/` on a macOS host. Each wheel includes git-sfs and rclone; successful
-  builds replace old distribution artifacts, while failed builds preserve them.
-  Use `just rust-build` to build only the native Rust binary.
-
-## v2.0.0-rc.10
-
-### New Features
-
-- Add Python wheels for `uv tool install git-sfs`, bundling both `git-sfs`
-  and rclone for Linux and macOS on x86_64 and ARM64. Wheels include rclone's
-  dependency license notices, corresponding sources, and rebuild instructions,
-  and omit its optional cgo-based `cmount` integration.
-  Upgrade both tools with `uv tool upgrade git-sfs`.
-
-## v2.0.0-rc.9
-
-### New Features
-
-- Add optional `--dry-run` to `git sfs cache rm` and `git sfs cache prune`,
-  listing selected cache objects and total logical bytes without changing
-  files, permissions, or symlinks. Both commands still delete by default.
-
-## v2.0.0-rc.8
-
-### New Features
-
-- Add `git sfs cache rm <path>...` to evict local bytes while preserving
-  symlinks, and `git sfs cache prune` to remove objects unreferenced by the
-  current repository working tree. Selection is validated before eviction;
-  each removal is atomic and interrupted batches are safe to retry.
-
 ## v2.0.0
 
 ### Highlights
 
+- Install both git-sfs and rclone from prebuilt Python wheels for macOS and
+  Linux on ARM64 and x86_64, with dependency notices and rebuildable sources.
 - Ship the Rust implementation as the stable `git-sfs` release line.
 - Make cache, remote, and installer writes atomic: bytes stage in project-owned
   temp locations and publish only after the producing operation completes.
@@ -109,6 +62,14 @@ to retain pre-adoption SHA-256 verification.
 
 ### New Features
 
+- Import multiple sources expanded by shell wildcards into a directory, and
+  accept directory destinations for single files while preserving filenames.
+  Preview mappings, copy/move actions, file counts, and sizes with
+  `import --dry-run`; the complete batch is validated before ingestion.
+- Evict cached bytes while preserving tracked symlinks with `cache rm`, or
+  remove objects unreferenced by the working tree with `cache prune`. Both
+  commands support `--dry-run`, validate selection first, and unlink objects
+  atomically.
 - Add `git-sfs self update` to update both `git-sfs` and `rclone` with checksum
   verification and atomic binary replacement.
 - Add `--pre` to the installer and `git-sfs self update` to opt into eligible
@@ -185,6 +146,9 @@ to retain pre-adoption SHA-256 verification.
 
 ### Developers
 
+- Build all four distributable Python wheels into `dist/` with `just build`
+  on macOS; use `just rust-build` for the native Rust binary alone. Successful
+  builds replace old artifacts, while failed builds preserve them.
 - Add the Rust workspace, release archive builder, installer path, and CI checks
   for the maintained implementation.
 - Publish semantic-version prerelease tags as non-latest GitHub prereleases and
@@ -194,3 +158,52 @@ to retain pre-adoption SHA-256 verification.
 - Add the conformance harness for workflow parity, cancellation safety, cache
   mode behavior, lock contention, downgrade/round-trip behavior, and stable
   behavior coverage.
+
+## v2.0.0-rc.12
+
+### New Features
+
+- Accept multiple `import` sources, including paths expanded by shell wildcards,
+  placing each under its basename in the destination directory. Single files
+  also accept existing directory destinations or a trailing slash to create a
+  directory while keeping the source filename; explicit renaming still works.
+- Add `import --dry-run` to preview copy/move mappings, file counts, and logical
+  sizes without hashing, creating locks, or modifying source, cache, or
+  destination files. The whole batch is validated before ingestion, rejecting
+  duplicate destinations, existing files, blocked parents, and metadata paths.
+
+## v2.0.0-rc.11
+
+### Improvements
+
+- Make `just build` produce all four macOS and manylinux wheels directly in
+  `dist/` on a macOS host. Each wheel includes git-sfs and rclone; successful
+  builds replace old distribution artifacts, while failed builds preserve them.
+  Use `just rust-build` to build only the native Rust binary.
+
+## v2.0.0-rc.10
+
+### New Features
+
+- Add Python wheels for `uv tool install git-sfs`, bundling both `git-sfs`
+  and rclone for Linux and macOS on x86_64 and ARM64. Wheels include rclone's
+  dependency license notices, corresponding sources, and rebuild instructions,
+  and omit its optional cgo-based `cmount` integration.
+  Upgrade both tools with `uv tool upgrade git-sfs`.
+
+## v2.0.0-rc.9
+
+### New Features
+
+- Add optional `--dry-run` to `git sfs cache rm` and `git sfs cache prune`,
+  listing selected cache objects and total logical bytes without changing
+  files, permissions, or symlinks. Both commands still delete by default.
+
+## v2.0.0-rc.8
+
+### New Features
+
+- Add `git sfs cache rm <path>...` to evict local bytes while preserving
+  symlinks, and `git sfs cache prune` to remove objects unreferenced by the
+  current repository working tree. Selection is validated before eviction;
+  each removal is atomic and interrupted batches are safe to retry.

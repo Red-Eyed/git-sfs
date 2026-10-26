@@ -101,7 +101,7 @@ To build and smoke-test only the host wheel:
 
 ```sh
 sh scripts/build-python-wheel.sh dist/wheels native
-sh test/release/test_python_wheel.sh dist/wheels/*.whl v2.0.0-rc.11
+sh test/release/test_python_wheel.sh dist/wheels/*.whl v2.0.0
 ```
 
 The script requires Rust, Go 1.26 or newer, uv, curl, tar, and shasum. It downloads
@@ -112,8 +112,9 @@ target's Rust standard library. Explicit targets are `linux/amd64`,
 `linux/arm64`, `darwin/amd64`, and `darwin/arm64`. Build targets sequentially
 because Maturin reads a shared staging directory.
 
-The version comes from Cargo; Maturin converts prereleases such as
-`2.0.0-rc.11` to Python's `2.0.0rc11`. The executable retains the Git tag form.
+The version comes from Cargo: `2.0.0` for this stable release. Maturin converts
+prerelease spellings when needed; the executable retains the Git tag form,
+such as `v2.0.0`.
 When updating the rclone pin, update both archive hashes and the smoke test's
 expected version, and review the new dependency notices. Complete rclone and
 dependency sources accompany the notices, including LGPLv3 and MPL-covered
