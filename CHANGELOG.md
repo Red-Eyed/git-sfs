@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.0.0-rc.12
+
+### New Features
+
+- Accept multiple `import` sources, including paths expanded by shell wildcards,
+  placing each under its basename in the destination directory. Single files
+  also accept existing directory destinations or a trailing slash to create a
+  directory while keeping the source filename; explicit renaming still works.
+- Add `import --dry-run` to preview copy/move mappings, file counts, and logical
+  sizes without hashing, creating locks, or modifying source, cache, or
+  destination files. The whole batch is validated before ingestion, rejecting
+  duplicate destinations, existing files, blocked parents, and metadata paths.
+
 ## v2.0.0-rc.11
 
 ### Improvements

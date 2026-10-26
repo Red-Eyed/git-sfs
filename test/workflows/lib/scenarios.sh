@@ -368,6 +368,36 @@ scenario_import_workflows() {
 
   src_hash="$(hash_from_link "$repo" "data/followed/source-link.bin")"
   [ -f "$remote/files/sha256/${src_hash:0:2}/$src_hash" ] || fail "import push missing remote file"
+  assert_import_batch_preview "$repo" "$outside"
+}
+
+assert_import_batch_preview() {
+  local repo="$1"
+  local outside="$2"
+  mkdir -p "$outside/batch"
+  printf 'one' > "$outside/batch/a.zip"
+  printf 'two!' > "$outside/batch/with spaces.zip"
+  (
+    cd "$repo" || exit
+    local preview
+    preview="$("$INSTALL_DIR/git-sfs" import --dry-run --move "$outside/batch"/*.zip data/batch/)"
+    assert_contains "$preview" "would move $outside/batch/a.zip -> data/batch/a.zip (3 bytes)" "import preview shows first mapping"
+    assert_contains "$preview" "with spaces.zip -> data/batch/with spaces.zip (4 bytes)" "import preview preserves spaces"
+    assert_contains "$preview" '2 file(s), 7 bytes; no files changed' "import preview totals metadata sizes"
+    [ ! -e data/batch ] || fail "import preview created destination directory"
+    [ -f "$outside/batch/a.zip" ] || fail "import preview moved source"
+    [ -f "$outside/batch/with spaces.zip" ] || fail "import preview moved spaced source"
+    assert_eq "$(git_sfs import --quiet --dry-run "$outside/batch"/*.zip data/batch/)" '' "quiet import preview"
+    git_sfs import --move "$outside/batch"/*.zip data/batch/ >/dev/null
+    assert_eq "$(cat data/batch/a.zip)" 'one' "batch import first contents"
+    assert_eq "$(cat 'data/batch/with spaces.zip')" 'two!' "batch import spaced contents"
+    [ ! -e "$outside/batch/a.zip" ] || fail "batch move retained source"
+
+    printf 'single file' > "$outside/single.txt"
+    git_sfs import "$outside/single.txt" data/single/ >/dev/null
+    assert_eq "$(cat data/single/single.txt)" 'single file' "single import into new directory"
+    [ -f "$outside/single.txt" ] || fail "copy import consumed source"
+  )
 }
 
 scenario_rclone_workflow() {

@@ -13,7 +13,7 @@
 //! roughly double the free disk space to move data that already fits once —
 //! exactly the scenario `--move` exists for.
 //!
-//! Destination-collision validation happens across the whole source tree before
+//! Destination-collision validation happens across the whole source batch before
 //! any source file is moved or copied. A rejected import is therefore a no-op.
 //! Like `add`, this command requires an already-bound cache and keeps progress
 //! rendering out of core.
@@ -70,7 +70,13 @@ pub enum ImportError {
         /// The destination argument as given.
         dest: Utf8PathBuf,
     },
-    /// `dst` already exists and is not a directory, but the source is one.
+    /// Git's own metadata is never an import destination.
+    #[error("destination must not be inside .git: {dest}")]
+    DestinationInsideGit {
+        /// The rejected destination.
+        dest: Utf8PathBuf,
+    },
+    /// A destination directory or one of its ancestors is not a real directory.
     #[error("destination exists and is not a directory: {dest}")]
     DestinationNotADirectory {
         /// The destination argument as given.
@@ -82,6 +88,15 @@ pub enum ImportError {
         /// The path that was already occupied.
         dest: Utf8PathBuf,
     },
+    /// Two sources would write the same path or a file and its descendant.
+    #[error("multiple sources conflict at destination: {dest}")]
+    DestinationCollision {
+        /// The conflicting destination.
+        dest: Utf8PathBuf,
+    },
+    /// The caller supplied no source paths.
+    #[error("import requires at least one source")]
+    NoSources,
     /// A symlink was reached as (or within) the source without `-L`.
     /// Refusing by default is the safe choice, since a symlink in an incoming
     /// tree may point anywhere on the machine.
@@ -181,8 +196,11 @@ impl From<ImportError> for Error {
             }
             ImportError::DestinationOutsideRepo { .. }
             | ImportError::DestinationInsideGitSfs { .. }
+            | ImportError::DestinationInsideGit { .. }
             | ImportError::DestinationNotADirectory { .. }
             | ImportError::DestinationAlreadyExists { .. }
+            | ImportError::DestinationCollision { .. }
+            | ImportError::NoSources
             | ImportError::SourceSymlinkRequiresFollow { .. }
             | ImportError::SourceSymlinkTargetNotRegular { .. }
             | ImportError::UnsupportedSourceType { .. }
@@ -218,9 +236,14 @@ impl ImportFailure {
 /// and the key used to detect it is the same underlying file as another
 /// pair (two different source paths — e.g. two `-L`-followed symlinks —
 /// can resolve to one canonical file).
-struct ImportPair {
-    src: Utf8PathBuf,
-    dst: Utf8PathBuf,
+#[derive(Debug)]
+pub struct ImportFile {
+    /// Resolved external source path.
+    pub src: Utf8PathBuf,
+    /// Repository-relative destination path.
+    pub dst: Utf8PathBuf,
+    /// Logical source size at planning time; execution still verifies bytes.
+    pub size: u64,
     key: Utf8PathBuf,
 }
 
@@ -229,8 +252,9 @@ struct ImportPair {
 /// `crate::plan` type despite the name: unlike that module's pure functions,
 /// this performs real filesystem I/O (`lstat`, `canonicalize`, directory
 /// walks) to validate `src`/`dst`, so it lives here in `exec` instead.
-struct ImportPlan {
-    pairs: Vec<ImportPair>,
+#[derive(Debug, Default)]
+struct SourcePlan {
+    pairs: Vec<ImportFile>,
     /// Source directories to remove if left empty by `--move`, deepest-ish
     /// first with `src` itself
     /// last.
@@ -240,6 +264,37 @@ struct ImportPlan {
     /// consumes.
     source_links: Vec<Utf8PathBuf>,
     unrepresentable: Vec<String>,
+}
+
+/// A read-only validated batch bound to its repository and copy/move options.
+/// Execute this exact plan with [`execute_import`], or inspect it for a dry run.
+#[derive(Debug)]
+pub struct ImportPlan {
+    repo: Utf8PathBuf,
+    options: ImportOptions,
+    sources: SourcePlan,
+}
+
+impl ImportPlan {
+    /// Source mappings in deterministic destination order.
+    pub fn files(&self) -> &[ImportFile] {
+        &self.sources.pairs
+    }
+
+    /// Source names skipped because they cannot be represented as UTF-8.
+    pub fn unrepresentable(&self) -> &[String] {
+        &self.sources.unrepresentable
+    }
+
+    /// Whether execution will consume the sources rather than copy them.
+    pub fn moves_sources(&self) -> bool {
+        self.options.move_source
+    }
+
+    /// Total logical bytes across destination files, including shared sources.
+    pub fn total_bytes(&self) -> u128 {
+        self.files().iter().map(|file| u128::from(file.size)).sum()
+    }
 }
 
 /// The two independent flags `import` takes, grouped because they are read
@@ -274,8 +329,24 @@ pub fn import(
     options: ImportOptions,
     cancel: &Cancel,
 ) -> Result<ImportOutcome, ImportFailure> {
-    let plan = plan_import(repo, cwd, src, dst, options.follow_symlinks)
+    let plan = plan_import(repo, cwd, &[src.to_owned()], dst, options, cancel)
         .map_err(|error| ImportFailure::new(ImportOutcome::default(), error))?;
+    execute_import(store, plan, cancel)
+}
+
+/// Ingests a validated plan, reporting completed files if execution fails.
+/// Storage verifies source bytes, and symlink creation refuses occupied paths;
+/// the plan does not snapshot file contents.
+pub fn execute_import(
+    store: &dyn Store,
+    plan: ImportPlan,
+    cancel: &Cancel,
+) -> Result<ImportOutcome, ImportFailure> {
+    let ImportPlan {
+        repo,
+        options,
+        sources: plan,
+    } = plan;
 
     let mut outcome = ImportOutcome {
         unrepresentable: plan.unrepresentable,
@@ -290,7 +361,7 @@ pub fn import(
 
         let hash = match hashes.get(&pair.key) {
             Some(&hash) => hash,
-            None => match import_one(store, repo, &pair.src, options.move_source, cancel) {
+            None => match import_one(store, &repo, &pair.src, options.move_source, cancel) {
                 Ok(hash) => {
                     hashes.insert(pair.key.clone(), hash);
                     hash
@@ -299,12 +370,12 @@ pub fn import(
             },
         };
 
-        if let Err(error) = publish(repo, &pair.dst, hash) {
+        if let Err(error) = publish(&repo, &repo.join(&pair.dst), hash) {
             return Err(ImportFailure::new(outcome, error));
         }
         outcome.imported.push(ImportedFile {
             src: pair.src,
-            dst: repo_relative(repo, &pair.dst),
+            dst: pair.dst,
             hash,
         });
     }
@@ -386,33 +457,103 @@ fn publish(repo: &Utf8Path, dst: &Utf8Path, hash: Sha256) -> Result<(), ImportEr
     })
 }
 
-/// Validates `src`/`dst` and, for a directory source, walks it read-only.
-fn plan_import(
+/// Validates every source and destination without hashing or modifying files.
+/// Multiple sources are placed under `dst` by basename. A single directory
+/// source retains its contents-only merge behavior; a single file uses its
+/// basename when `dst` is an existing directory or ends with `/`.
+pub fn plan_import(
     repo: &Utf8Path,
     cwd: &Utf8Path,
-    src_arg: &Utf8Path,
-    dst_arg: &Utf8Path,
-    follow_symlinks: bool,
+    sources: &[Utf8PathBuf],
+    dst: &Utf8Path,
+    options: ImportOptions,
+    cancel: &Cancel,
 ) -> Result<ImportPlan, ImportError> {
-    let src_abs = absolute(cwd, src_arg);
-    let dst_abs = clean_utf8(&if dst_arg.is_absolute() {
-        dst_arg.to_owned()
-    } else {
-        repo.join(dst_arg)
-    });
-
-    let dst_rel = dst_abs
-        .strip_prefix(repo)
-        .ok()
-        .filter(|rel| !rel.as_str().is_empty())
-        .ok_or_else(|| ImportError::DestinationOutsideRepo {
-            dest: dst_arg.to_owned(),
-        })?;
-    if should_skip(dst_rel) {
-        return Err(ImportError::DestinationInsideGitSfs {
-            dest: dst_arg.to_owned(),
-        });
+    if sources.is_empty() {
+        return Err(ImportError::NoSources);
     }
+    check_canceled(cancel)?;
+    let dst_abs = absolute(repo, dst);
+    validate_destination_parents(repo, &dst_abs)?;
+    let directory_destination = sources.len() > 1
+        || dst.as_str().ends_with('/')
+        || path_metadata(&dst_abs)?.is_some_and(|metadata| metadata.is_dir());
+    if directory_destination {
+        require_directory_if_present(&dst_abs)?;
+    }
+
+    let mut batch = SourcePlan::default();
+    for src in sources {
+        check_canceled(cancel)?;
+        let source_abs = absolute(cwd, src);
+        let destination = if sources.len() > 1 {
+            let name =
+                source_abs
+                    .file_name()
+                    .ok_or_else(|| ImportError::UnsupportedSourceType {
+                        path: source_abs.clone(),
+                    })?;
+            dst_abs.join(name)
+        } else {
+            dst_abs.clone()
+        };
+        let mut source = plan_source(
+            cwd,
+            src,
+            &destination,
+            directory_destination && sources.len() == 1,
+            options.follow_symlinks,
+            cancel,
+        )?;
+        batch.pairs.append(&mut source.pairs);
+        batch.dirs.append(&mut source.dirs);
+        batch.source_links.append(&mut source.source_links);
+        batch.unrepresentable.append(&mut source.unrepresentable);
+    }
+    batch.pairs.sort_by(|a, b| a.dst.cmp(&b.dst));
+    let mut destinations = std::collections::BTreeSet::new();
+    for pair in &mut batch.pairs {
+        check_canceled(cancel)?;
+        validate_destination_parents(repo, &pair.dst)?;
+        if !destinations.insert(pair.dst.clone()) {
+            return Err(ImportError::DestinationCollision {
+                dest: pair.dst.clone(),
+            });
+        }
+        pair.dst = repo_relative(repo, &pair.dst);
+    }
+    for path in &destinations {
+        check_canceled(cancel)?;
+        if path
+            .ancestors()
+            .skip(1)
+            .any(|parent| destinations.contains(parent))
+        {
+            return Err(ImportError::DestinationCollision { dest: path.clone() });
+        }
+    }
+    batch
+        .dirs
+        .sort_by_key(|dir| std::cmp::Reverse(dir.as_str().len()));
+    batch.dirs.dedup();
+    Ok(ImportPlan {
+        repo: repo.to_owned(),
+        options,
+        sources: batch,
+    })
+}
+
+/// Validates one source and walks directory contents without modifying files.
+fn plan_source(
+    cwd: &Utf8Path,
+    src_arg: &Utf8Path,
+    dst_abs: &Utf8Path,
+    append_file_basename: bool,
+    follow_symlinks: bool,
+    cancel: &Cancel,
+) -> Result<SourcePlan, ImportError> {
+    check_canceled(cancel)?;
+    let src_abs = absolute(cwd, src_arg);
 
     let mut source_links = Vec::new();
     let metadata =
@@ -449,16 +590,25 @@ fn plan_import(
     };
 
     if effective_metadata.is_file() {
-        if std::fs::symlink_metadata(dst_abs.as_std_path()).is_ok() {
-            return Err(ImportError::DestinationAlreadyExists {
-                dest: dst_arg.to_owned(),
-            });
+        let destination = if append_file_basename {
+            let name = src_abs
+                .file_name()
+                .ok_or_else(|| ImportError::UnsupportedSourceType {
+                    path: src_abs.clone(),
+                })?;
+            dst_abs.join(name)
+        } else {
+            dst_abs.to_owned()
+        };
+        if path_metadata(&destination)?.is_some() {
+            return Err(ImportError::DestinationAlreadyExists { dest: destination });
         }
         let key = canonical_key(&effective_src);
-        return Ok(ImportPlan {
-            pairs: vec![ImportPair {
+        return Ok(SourcePlan {
+            pairs: vec![ImportFile {
                 src: effective_src,
-                dst: dst_abs,
+                dst: destination,
+                size: effective_metadata.len(),
                 key,
             }],
             dirs: Vec::new(),
@@ -472,18 +622,18 @@ fn plan_import(
             path: effective_src,
         });
     }
-    if let Ok(dst_metadata) = std::fs::symlink_metadata(dst_abs.as_std_path())
-        && !dst_metadata.is_dir()
-    {
-        return Err(ImportError::DestinationNotADirectory {
-            dest: dst_arg.to_owned(),
-        });
-    }
+    require_directory_if_present(dst_abs)?;
 
-    walk_source_dir(&effective_src, &dst_abs, follow_symlinks, source_links)
+    walk_source_dir(
+        &effective_src,
+        dst_abs,
+        follow_symlinks,
+        source_links,
+        cancel,
+    )
 }
 
-/// Walks a directory source, collecting one [`ImportPair`] per regular file
+/// Walks a directory source, collecting one [`ImportFile`] per regular file
 /// (or `-L`-followed symlink resolving to one). Rejects up front, touching
 /// nothing, if any computed destination already exists.
 fn walk_source_dir(
@@ -491,12 +641,14 @@ fn walk_source_dir(
     dst_abs: &Utf8Path,
     follow_symlinks: bool,
     mut source_links: Vec<Utf8PathBuf>,
-) -> Result<ImportPlan, ImportError> {
+    cancel: &Cancel,
+) -> Result<SourcePlan, ImportError> {
     let mut pairs = Vec::new();
     let mut dirs = Vec::new();
     let mut unrepresentable = Vec::new();
 
     for entry in walkdir::WalkDir::new(src_abs.as_std_path()) {
+        check_canceled(cancel)?;
         let entry = entry?;
         if entry.path() == src_abs.as_std_path() {
             continue;
@@ -544,28 +696,94 @@ fn walk_source_dir(
 
         let rel = abs.strip_prefix(src_abs).unwrap_or(&abs);
         let out = dst_abs.join(rel);
-        if std::fs::symlink_metadata(out.as_std_path()).is_ok() {
+        if path_metadata(&out)?.is_some() {
             return Err(ImportError::DestinationAlreadyExists { dest: out });
         }
 
         let key = canonical_key(&file_src);
-        pairs.push(ImportPair {
+        let size = std::fs::metadata(&file_src)
+            .map_err(|source| ImportError::Io {
+                path: file_src.clone(),
+                source,
+            })?
+            .len();
+        pairs.push(ImportFile {
             src: file_src,
             dst: out,
+            size,
             key,
         });
     }
 
-    dirs.sort_by_key(|dir| std::cmp::Reverse(dir.as_str().len()));
     dirs.push(src_abs.to_owned());
-    pairs.sort_by(|a, b| a.dst.cmp(&b.dst));
 
-    Ok(ImportPlan {
+    Ok(SourcePlan {
         pairs,
         dirs,
         source_links,
         unrepresentable,
     })
+}
+
+/// Missing destinations are allowed; other metadata errors must remain visible.
+fn path_metadata(path: &Utf8Path) -> Result<Option<std::fs::Metadata>, ImportError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(ImportError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+/// Existing destination ancestors must be real directories, not symlinks.
+fn require_directory_if_present(path: &Utf8Path) -> Result<(), ImportError> {
+    if path_metadata(path)?.is_some_and(|metadata| !metadata.is_dir()) {
+        return Err(ImportError::DestinationNotADirectory {
+            dest: path.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Rejects repository escapes and blocked parents before any source is consumed.
+fn validate_destination_parents(repo: &Utf8Path, dst: &Utf8Path) -> Result<(), ImportError> {
+    let rel = dst
+        .strip_prefix(repo)
+        .map_err(|_| ImportError::DestinationOutsideRepo {
+            dest: dst.to_owned(),
+        })?;
+    if rel
+        .components()
+        .any(|component| component.as_str() == ".git")
+    {
+        return Err(ImportError::DestinationInsideGit {
+            dest: dst.to_owned(),
+        });
+    }
+    if should_skip(rel) {
+        return Err(ImportError::DestinationInsideGitSfs {
+            dest: dst.to_owned(),
+        });
+    }
+    for parent in dst
+        .ancestors()
+        .skip(1)
+        .take_while(|parent| parent.starts_with(repo))
+    {
+        require_directory_if_present(parent)?;
+    }
+    Ok(())
+}
+
+/// Planning can walk large trees, so it observes the same cancellation as ingest.
+fn check_canceled(cancel: &Cancel) -> Result<(), ImportError> {
+    if cancel.is_canceled() {
+        Err(ImportError::Canceled)
+    } else {
+        Ok(())
+    }
 }
 
 /// `path`, made absolute against `cwd` if it is not already.
@@ -643,6 +861,349 @@ mod tests {
             move_source,
             follow_symlinks,
         }
+    }
+
+    #[test]
+    fn batch_preview_reports_mapping_and_sizes_without_changing_any_files() {
+        let f = fixture();
+        let a = f.external.join("a.zip");
+        let b = f.external.join("b.zip");
+        std::fs::write(&a, b"first").unwrap();
+        std::fs::write(&b, b"second").unwrap();
+        let permissions = std::fs::metadata(&a).unwrap().permissions();
+        let plan = plan_import(
+            &f.repo,
+            &f.external,
+            &[b.clone(), a.clone()],
+            Utf8Path::new("new/"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap();
+
+        let mappings: Vec<_> = plan
+            .files()
+            .iter()
+            .map(|file| (file.src.clone(), file.dst.as_str(), file.size))
+            .collect();
+        assert_eq!(
+            mappings,
+            [(a.clone(), "new/a.zip", 5), (b.clone(), "new/b.zip", 6)]
+        );
+        assert_eq!(plan.total_bytes(), 11);
+        assert!(plan.moves_sources());
+        assert!(!f.repo.join("new").exists());
+        assert!(std::fs::read_dir(&f.cache).unwrap().next().is_none());
+        assert_eq!(std::fs::read(&a).unwrap(), b"first");
+        assert_eq!(std::fs::read(&b).unwrap(), b"second");
+        assert_eq!(std::fs::metadata(&a).unwrap().permissions(), permissions);
+    }
+
+    #[test]
+    fn executes_the_previewed_batch_and_publishes_relative_cache_links() {
+        let f = fixture();
+        let sources: Vec<_> = ["a.zip", "b.zip"]
+            .iter()
+            .map(|name| f.external.join(name))
+            .collect();
+        for src in &sources {
+            std::fs::write(src, src.as_str()).unwrap();
+        }
+        let plan = plan_import(
+            &f.repo,
+            &f.external,
+            &sources,
+            Utf8Path::new("new"),
+            opts(false, false),
+            &Cancel::new(),
+        )
+        .unwrap();
+        let destinations: Vec<_> = plan.files().iter().map(|file| file.dst.clone()).collect();
+        let outcome = execute_import(&FsStore::new(f.cache.clone()), plan, &Cancel::new()).unwrap();
+        assert_eq!(
+            outcome
+                .imported
+                .iter()
+                .map(|file| file.dst.clone())
+                .collect::<Vec<_>>(),
+            destinations
+        );
+        for file in outcome.imported {
+            assert_eq!(
+                std::fs::read(f.repo.join(&file.dst)).unwrap(),
+                std::fs::read(&file.src).unwrap()
+            );
+            let hash = file.hash.to_hex();
+            assert_eq!(
+                std::fs::read_link(f.repo.join(&file.dst)).unwrap(),
+                std::path::PathBuf::from(format!(
+                    "../.git-sfs/cache/files/sha256/{}/{hash}",
+                    file.hash.prefix()
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn single_file_accepts_existing_and_new_directory_destinations() {
+        for existing in [false, true] {
+            let f = fixture();
+            let source = f.external.join("file.txt");
+            std::fs::write(&source, b"content").unwrap();
+            let destination = if existing {
+                std::fs::create_dir(f.repo.join("data")).unwrap();
+                Utf8Path::new("data")
+            } else {
+                Utf8Path::new("data/")
+            };
+            let outcome = import(
+                &FsStore::new(f.cache.clone()),
+                &f.repo,
+                &f.external,
+                &source,
+                destination,
+                opts(false, false),
+                &Cancel::new(),
+            )
+            .unwrap();
+            assert_eq!(outcome.imported[0].dst, "data/file.txt");
+            assert_eq!(
+                std::fs::read(f.repo.join("data/file.txt")).unwrap(),
+                b"content"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_batch_basenames_are_rejected_before_move() {
+        let f = fixture();
+        let sources: Vec<_> = ["one/file.zip", "two/file.zip"]
+            .iter()
+            .map(|name| f.external.join(name))
+            .collect();
+        for src in &sources {
+            std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+            std::fs::write(src, b"untouched").unwrap();
+        }
+        let error = plan_import(
+            &f.repo,
+            &f.external,
+            &sources,
+            Utf8Path::new("new/"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ImportError::DestinationCollision { .. }));
+        for src in &sources {
+            assert_eq!(std::fs::read(src).unwrap(), b"untouched");
+        }
+        assert!(!f.repo.join("new").exists());
+        assert!(std::fs::read_dir(&f.cache).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn a_late_existing_destination_rejects_the_whole_move_batch() {
+        let f = fixture();
+        let sources: Vec<_> = ["a.zip", "z.zip"]
+            .iter()
+            .map(|name| f.external.join(name))
+            .collect();
+        for src in &sources {
+            std::fs::write(src, b"source").unwrap();
+        }
+        std::fs::create_dir(f.repo.join("data")).unwrap();
+        std::fs::write(f.repo.join("data/z.zip"), b"existing").unwrap();
+        let error = plan_import(
+            &f.repo,
+            &f.external,
+            &sources,
+            Utf8Path::new("data"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ImportError::DestinationAlreadyExists { .. }
+        ));
+        for src in &sources {
+            assert_eq!(std::fs::read(src).unwrap(), b"source");
+        }
+        assert!(!f.repo.join("data/a.zip").exists());
+        assert_eq!(
+            std::fs::read(f.repo.join("data/z.zip")).unwrap(),
+            b"existing"
+        );
+        assert!(std::fs::read_dir(&f.cache).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn rejects_a_planned_file_that_would_be_another_destinations_parent() {
+        let f = fixture();
+        std::fs::create_dir_all(f.external.join("directory/tree")).unwrap();
+        std::fs::create_dir(f.external.join("file")).unwrap();
+        let file = f.external.join("file/tree");
+        let directory = f.external.join("directory/tree");
+        std::fs::write(&file, b"file").unwrap();
+        std::fs::write(directory.join("nested"), b"nested").unwrap();
+        let error = plan_import(
+            &f.repo,
+            &f.external,
+            &[file.clone(), directory.clone()],
+            Utf8Path::new("data/"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ImportError::DestinationCollision { .. }));
+        assert!(file.exists());
+        assert!(directory.join("nested").exists());
+        assert!(!f.repo.join("data").exists());
+    }
+
+    #[test]
+    fn refuses_destination_parent_symlinks_without_touching_the_source() {
+        let f = fixture();
+        let source = f.external.join("source.txt");
+        std::fs::write(&source, b"content").unwrap();
+        std::os::unix::fs::symlink(&f.external, f.repo.join("escape")).unwrap();
+        let error = plan_import(
+            &f.repo,
+            &f.external,
+            std::slice::from_ref(&source),
+            Utf8Path::new("escape/renamed.txt"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ImportError::DestinationNotADirectory { .. }
+        ));
+        assert!(source.exists());
+        assert!(!f.external.join("renamed.txt").exists());
+    }
+
+    #[test]
+    fn cancellation_stops_both_planning_and_execution_before_move() {
+        let f = fixture();
+        let source = f.external.join("source.txt");
+        std::fs::write(&source, b"content").unwrap();
+        let cancel = Cancel::new();
+        let plan = plan_import(
+            &f.repo,
+            &f.external,
+            std::slice::from_ref(&source),
+            Utf8Path::new("data/"),
+            opts(true, false),
+            &cancel,
+        )
+        .unwrap();
+        cancel.cancel();
+        let error = plan_import(
+            &f.repo,
+            &f.external,
+            std::slice::from_ref(&source),
+            Utf8Path::new("data/"),
+            opts(true, false),
+            &cancel,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ImportError::Canceled));
+        let failure = execute_import(&FsStore::new(f.cache.clone()), plan, &cancel).unwrap_err();
+        assert!(matches!(*failure.error, ImportError::Canceled));
+        assert!(source.exists());
+        assert!(!f.repo.join("data").exists());
+        assert!(std::fs::read_dir(&f.cache).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn multiple_directories_preserve_their_names_and_nested_layout() {
+        let f = fixture();
+        let sources: Vec<_> = ["one", "two"]
+            .iter()
+            .map(|name| f.external.join(name))
+            .collect();
+        for source in &sources {
+            std::fs::create_dir_all(source.join("nested")).unwrap();
+            std::fs::write(source.join("nested/part.zip"), b"content").unwrap();
+        }
+        let plan = plan_import(
+            &f.repo,
+            &f.external,
+            &sources,
+            Utf8Path::new("data/"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap();
+        let outcome = execute_import(&FsStore::new(f.cache.clone()), plan, &Cancel::new()).unwrap();
+        assert_eq!(
+            outcome
+                .imported
+                .iter()
+                .map(|file| file.dst.as_str())
+                .collect::<Vec<_>>(),
+            ["data/one/nested/part.zip", "data/two/nested/part.zip"]
+        );
+        for file in &outcome.imported {
+            assert_eq!(std::fs::read(f.repo.join(&file.dst)).unwrap(), b"content");
+        }
+        for source in &sources {
+            assert!(!source.exists());
+        }
+    }
+
+    #[test]
+    fn batch_move_deduplicates_followed_sources_before_consuming_them() {
+        let f = fixture();
+        let target = f.external.join("target.zip");
+        std::fs::write(&target, b"shared").unwrap();
+        let sources: Vec<_> = ["first.zip", "second.zip"]
+            .iter()
+            .map(|name| f.external.join(name))
+            .collect();
+        for source in &sources {
+            std::os::unix::fs::symlink(&target, source).unwrap();
+        }
+        let plan = plan_import(
+            &f.repo,
+            &f.external,
+            &sources,
+            Utf8Path::new("data/"),
+            opts(true, true),
+            &Cancel::new(),
+        )
+        .unwrap();
+        let outcome = execute_import(&FsStore::new(f.cache.clone()), plan, &Cancel::new()).unwrap();
+        assert_eq!(outcome.imported.len(), 2);
+        for file in outcome.imported {
+            assert_eq!(std::fs::read(f.repo.join(&file.dst)).unwrap(), b"shared");
+        }
+        assert!(!target.exists());
+        for source in &sources {
+            assert!(std::fs::symlink_metadata(source).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_git_metadata_destinations_before_ingestion() {
+        let f = fixture();
+        let source = f.external.join("source.txt");
+        std::fs::write(&source, b"content").unwrap();
+        let error = plan_import(
+            &f.repo,
+            &f.external,
+            std::slice::from_ref(&source),
+            Utf8Path::new(".git/hooks/new"),
+            opts(true, false),
+            &Cancel::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ImportError::DestinationInsideGit { .. }));
+        assert!(source.exists());
+        assert!(!f.repo.join(".git/hooks").exists());
     }
 
     #[test]

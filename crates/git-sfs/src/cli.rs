@@ -210,6 +210,10 @@ pub struct MvArgs {
 /// Arguments to `git-sfs import`.
 #[derive(Debug, Args)]
 pub struct ImportArgs {
+    /// preview source-to-destination mappings without changing files
+    #[arg(long)]
+    pub dry_run: bool,
+
     /// delete source files after caching (default: copy, leave source intact)
     #[arg(long = "move")]
     pub move_source: bool,
@@ -218,9 +222,9 @@ pub struct ImportArgs {
     #[arg(short = 'L', long)]
     pub follow_symlinks: bool,
 
-    /// source path
-    #[arg(value_name = "SOURCE")]
-    pub source: Utf8PathBuf,
+    /// source files or directories (shell wildcards may expand to multiple paths)
+    #[arg(value_name = "SOURCE", required = true, num_args = 1..)]
+    pub sources: Vec<Utf8PathBuf>,
 
     /// destination path
     #[arg(value_name = "DEST")]
@@ -504,8 +508,34 @@ mod tests {
         };
         assert!(args.move_source);
         assert!(args.follow_symlinks);
-        assert_eq!(args.source, "src");
+        assert_eq!(args.sources, [Utf8PathBuf::from("src")]);
         assert_eq!(args.dest, "dst");
+        assert!(!args.dry_run);
+    }
+
+    #[test]
+    fn import_reserves_the_final_path_for_the_destination() {
+        let Some(Command::Import(args)) = parse(&[
+            "git-sfs",
+            "import",
+            "--dry-run",
+            "--move",
+            "first.zip",
+            "with spaces.zip",
+            "new/",
+        ])
+        .command
+        else {
+            panic!("expected import")
+        };
+        assert_eq!(
+            args.sources,
+            ["first.zip", "with spaces.zip"].map(Utf8PathBuf::from)
+        );
+        assert_eq!(args.dest.as_str(), "new/");
+        assert!(args.dry_run);
+        assert!(args.move_source);
+        assert!(Cli::try_parse_from(["git-sfs", "import", "only-source"]).is_err());
     }
 
     #[test]

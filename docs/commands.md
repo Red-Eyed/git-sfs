@@ -128,6 +128,9 @@ Add a directory recursively:
 git-sfs add data/
 ```
 
+Shell wildcards can select multiple paths, for example `git-sfs add data/*.zip`.
+The shell expands the pattern; git-sfs does not expand quoted wildcard strings.
+
 For each regular file, `git-sfs`:
 
 - hashes bytes with SHA-256
@@ -141,6 +144,47 @@ Import an external file into the cache and create a symlink inside the repositor
 ```sh
 git-sfs import /mnt/incoming/train-000.tar.zst data/train-000.tar.zst
 ```
+
+Use an existing directory or a trailing slash to keep the source filename:
+
+```sh
+git-sfs import /mnt/incoming/file1.txt data/
+# creates data/file1.txt, including data/ if needed
+```
+
+Import multiple sources, including paths expanded by zsh wildcards:
+
+```sh
+git-sfs import /mnt/incoming/**/*.zip data/
+```
+
+The final argument is the destination directory, which may be new. Each source
+file uses its basename; two sources named `part.zip` would conflict even if they
+come from different source directories. Multiple directory sources go under
+their directory names, preserving their nested paths. A single directory source
+still merges its contents directly into the destination, as shown below.
+
+Wildcards must be expanded by the shell, so do not quote the pattern. In zsh,
+a pattern with no matches raises an error before git-sfs runs. Use `--` before
+source arguments if a filename begins with `-`.
+
+Preview source-to-destination mappings, actions, file counts, and logical sizes:
+
+```sh
+git-sfs import --dry-run /mnt/incoming/**/*.zip data/
+git-sfs import --dry-run --move /mnt/incoming/**/*.zip data/
+```
+
+`--dry-run` uses metadata only: it does not hash or read file contents, create
+destination directories or locks, or change source/cache files. `--quiet`
+suppresses the preview. Byte totals count each planned destination, including
+sources shared by followed symlinks. `add` does not support `--dry-run`.
+
+The entire batch is validated before ingest. Existing destination files,
+duplicate destinations, and paths blocked by a file or symlink parent are
+rejected before any source is copied or moved. Destinations must stay inside
+the repository and outside Git and git-sfs metadata. If execution is interrupted,
+completed imports remain valid; remaining sources have not been consumed.
 
 Import an external directory recursively:
 

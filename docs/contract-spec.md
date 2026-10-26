@@ -126,6 +126,27 @@ shapes are documented by the commands that emit them.
   must reject a downloaded object whose bytes do not match its path hash.
 - Commands must fail loudly rather than publish or accept incomplete state.
 
+## Import
+
+- `import [--dry-run] [--move] [-L] SOURCE... DEST` accepts shell-expanded source
+  paths. Multiple sources require a directory destination; it may be new.
+- Each source in a multi-source batch is placed under its basename. Directory
+  sources retain their nested layout. A single directory source still merges
+  its contents directly into the destination.
+- A single file uses its basename when `DEST` is an existing directory or ends
+  in `/`; missing destination directories are created during execution. An
+  explicit destination filename retains rename behavior.
+- The whole batch is validated before ingestion. Duplicate destinations,
+  file/descendant conflicts, existing destination files, blocked parents, and
+  destinations outside the repository or inside `.git`/`.git-sfs` are rejected.
+  Destination ancestors must be real directories, not symlinks.
+- `--dry-run` uses the same validated plan as execution, lists source/destination
+  mappings and copy/move actions, and totals file counts and logical bytes from
+  metadata. It does not hash or read file contents, write cache/working-tree
+  files, or create locks. Quiet mode suppresses preview output.
+- Planning and execution observe cancellation. A rejected plan is a no-op;
+  execution may complete partially, with completed imports reported and valid.
+
 ## Cache Eviction
 
 - Both commands delete by default; optional `--dry-run` previews the same object

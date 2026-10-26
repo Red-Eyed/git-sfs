@@ -190,6 +190,19 @@ fn run_mv(cli: &Cli, args: &MvArgs, cancel: &Cancel) -> Result<()> {
 fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
     let cwd = current_dir_utf8()?;
     let repo = discover_repo(&cwd)?;
+    let mode = RenderMode::from_quiet(cli.global.quiet);
+    let options = ImportOptions {
+        move_source: args.move_source,
+        follow_symlinks: args.follow_symlinks,
+    };
+    if args.dry_run {
+        let plan = with_spinner(!cli.global.quiet, "planning import", || {
+            import::plan_import(&repo, &cwd, &args.sources, &args.dest, options, cancel)
+                .map_err(Error::from)
+        })?;
+        reporting::import_preview(&plan, mode);
+        return Ok(());
+    }
     let cache_root = resolve_cache_root(&repo)?;
 
     let locks_dir = git_sfs_core::domain::locks_dir(&cache_root);
@@ -197,22 +210,12 @@ fn run_import(cli: &Cli, args: &ImportArgs, cancel: &Cancel) -> Result<()> {
     let _lock = with_spinner(!cli.global.quiet, "waiting for import lock", || {
         Lock::acquire(&locks_dir, LockName::Import, cancel)
     })?;
-    let mode = RenderMode::from_quiet(cli.global.quiet);
-
-    let options = ImportOptions {
-        move_source: args.move_source,
-        follow_symlinks: args.follow_symlinks,
-    };
+    let plan = with_spinner(!cli.global.quiet, "planning import", || {
+        import::plan_import(&repo, &cwd, &args.sources, &args.dest, options, cancel)
+            .map_err(Error::from)
+    })?;
     match with_spinner(!cli.global.quiet, "importing files", || {
-        import::import(
-            &store,
-            &repo,
-            &cwd,
-            &args.source,
-            &args.dest,
-            options,
-            cancel,
-        )
+        import::execute_import(&store, plan, cancel)
     }) {
         Ok(outcome) => {
             reporting::import_outcome(&outcome, mode);

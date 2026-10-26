@@ -56,6 +56,70 @@ class Clause:
 
 
 CLAUSES = [
+    # -- import batches and preview ------------------------------------------
+    Clause(
+        "import",
+        "shell-expanded imports accept multiple sources and preserve spaced filenames",
+        ASSERTED,
+        "../workflows/lib/scenarios.sh",
+        '"batch import spaced contents"',
+    ),
+    Clause(
+        "import",
+        "a single file accepts existing and new directory destinations",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "single_file_accepts_existing_and_new_directory_destinations",
+    ),
+    Clause(
+        "import",
+        "dry-run plans metadata sizes and mappings without changing sources or cache",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "batch_preview_reports_mapping_and_sizes_without_changing_any_files",
+    ),
+    Clause(
+        "import",
+        "batch destination collisions reject before any source is moved",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "duplicate_batch_basenames_are_rejected_before_move",
+    ),
+    Clause(
+        "import",
+        "planned files cannot be ancestors of other destination files",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "rejects_a_planned_file_that_would_be_another_destinations_parent",
+    ),
+    Clause(
+        "import",
+        "planning and execution observe cancellation without consuming remaining sources",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "cancellation_stops_both_planning_and_execution_before_move",
+    ),
+    Clause(
+        "import",
+        "multiple directory sources retain names and nested layouts",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "multiple_directories_preserve_their_names_and_nested_layout",
+    ),
+    Clause(
+        "import",
+        "symlinked destination parents are rejected before moving sources",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "refuses_destination_parent_symlinks_without_touching_the_source",
+    ),
+    Clause(
+        "import",
+        "Git metadata destinations are rejected before ingestion",
+        ASSERTED,
+        "../../crates/git-sfs-core/src/exec/import.rs",
+        "rejects_git_metadata_destinations_before_ingestion",
+    ),
     # -- cache eviction ------------------------------------------------------
     Clause(
         "cache",

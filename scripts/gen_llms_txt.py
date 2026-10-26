@@ -10,8 +10,8 @@ Writes to:
 Run via: just gen-llms-txt
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 DOCS_DIR = REPO_ROOT / "docs"
@@ -63,6 +63,7 @@ def bump_headings(text: str, by: int = 1) -> str:
 
 
 def build() -> str:
+    """Assemble the embedded reference from repository documentation."""
     readme = (REPO_ROOT / "README.md").read_text()
     concepts = read_doc("concepts.md")
     commands_doc = read_doc("commands.md")
@@ -90,7 +91,7 @@ def build() -> str:
 | `cache rm` | `git-sfs cache rm [--dry-run] <path>...` | Evict local bytes, preserving symlinks |
 | `cache prune` | `git-sfs cache prune [--dry-run]` | Evict objects unreferenced by the current working tree |
 | `mv` | `git-sfs mv <src> <dst>` | Move a symlink, rewriting its relative target |
-| `import` | `git-sfs import [--move] [-L] <src> <dst>` | Import external files into tracking |
+| `import` | `git-sfs import [--dry-run] [--move] [-L] <src>... <dst>` | Import external files into tracking |
 | `verify` | `git-sfs verify [-r NAME] [path]` | Check integrity; exits non-zero on failure |
 | `status` | `git-sfs status [-r NAME] [--json] [path]` | Show sizes and cache/remote presence |
 | `remotes` | `git-sfs remotes [--json]` | List configured remotes |

@@ -9,7 +9,7 @@ use serde::Serialize;
 use git_sfs_core::exec::add::AddOutcome;
 use git_sfs_core::exec::cache::CachePreview;
 use git_sfs_core::exec::doctor::{DoctorReport, DoctorStatus};
-use git_sfs_core::exec::import::ImportOutcome;
+use git_sfs_core::exec::import::{ImportOutcome, ImportPlan};
 use git_sfs_core::exec::init::InitOutcome;
 use git_sfs_core::exec::mv::MovedLink;
 use git_sfs_core::exec::pull::PullOutcome;
@@ -83,6 +83,26 @@ pub(crate) fn import_outcome(outcome: &ImportOutcome, mode: RenderMode) {
         }
     }
     for line in unrepresentable_warnings(&outcome.unrepresentable) {
+        eprintln!("{line}");
+    }
+}
+
+pub(crate) fn import_preview(plan: &ImportPlan, mode: RenderMode) {
+    if mode.show_success() {
+        let action = if plan.moves_sources() { "move" } else { "copy" };
+        for file in plan.files() {
+            println!(
+                "would {action} {} -> {} ({} bytes)",
+                file.src, file.dst, file.size
+            );
+        }
+        println!(
+            "dry run: would {action} {} file(s), {} bytes; no files changed",
+            plan.files().len(),
+            plan.total_bytes()
+        );
+    }
+    for line in unrepresentable_warnings(plan.unrepresentable()) {
         eprintln!("{line}");
     }
 }
